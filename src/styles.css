@@ -1578,3 +1578,38 @@ button.card.stat.clickable:hover {
   flex-wrap: wrap;
   gap: 0.35rem;
 }
+
+
+/* Apps stats mini bars + active map filter chips */
+.stat-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 88px;
+}
+.stat-bar-row span { min-width: 1.5rem; font-variant-numeric: tabular-nums; }
+.stat-bar {
+  display: inline-block;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #1677FF, #06B6D4);
+  max-width: 100%;
+}
+.map-link-bar .btn.active,
+.map-link-bar .btn.ghost.active {
+  background: rgba(22, 119, 255, 0.14);
+  border-color: #1677FF;
+  color: #0F3D66;
+  font-weight: 600;
+}
+.live-status-card.running {
+  border-color: #86EFAC;
+  background: #F0FDF4;
+}
+.live-status-card.running .live-dot {
+  animation: live-pulse 1.2s ease-in-out infinite;
+}
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.85); }
+}

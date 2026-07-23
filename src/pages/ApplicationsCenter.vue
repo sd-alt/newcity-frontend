@@ -23,6 +23,7 @@ const error = ref<string | null>(null)
 const message = ref<string | null>(null)
 const pending = ref(false)
 const mapFocus = ref<{ kind: string; id: string; name: string } | null>(null)
+const activeMapFilter = ref<'sensors' | 'data' | 'tasks' | 'all' | 'indicators'>('all')
 
 const resourceStats = ref<Record<string, unknown> | null>(null)
 const dataStats = ref<Record<string, unknown> | null>(null)
@@ -50,6 +51,22 @@ const tabs = [
 ]
 
 type CountRow = Record<string, unknown>
+
+
+function statBarPct(count: unknown, max: number) {
+  const n = Number(count || 0)
+  if (!Number.isFinite(n) || n <= 0 || !max) return 0
+  return Math.max(6, Math.round((n / max) * 100))
+}
+
+function maxCount(rows: Array<Record<string, unknown>>) {
+  let m = 0
+  for (const r of rows) {
+    const n = Number(r.count ?? r.total ?? r.value ?? 0)
+    if (Number.isFinite(n) && n > m) m = n
+  }
+  return m || 1
+}
 
 function asRows(value: unknown): CountRow[] {
   return Array.isArray(value) ? (value as CountRow[]) : []
@@ -213,21 +230,25 @@ watch(shellSelected, async (v) => {
   // 地图点选反向联动：切换对应业务图层（不强制 fly，避免打断用户视角）
   try {
     if (v.kind === "sensor") {
+      activeMapFilter.value = "sensors"
       await patchShellFilters(
         { showSensors: true, showData: false, showTasks: false },
         { fit: false, rerender: false },
       )
     } else if (v.kind === "data") {
+      activeMapFilter.value = "data"
       await patchShellFilters(
         { showSensors: false, showData: true, showTasks: false },
         { fit: false, rerender: false },
       )
     } else if (v.kind === "task") {
+      activeMapFilter.value = "tasks"
       await patchShellFilters(
         { showSensors: false, showData: false, showTasks: true },
         { fit: false, rerender: false },
       )
     } else if (v.kind === "indicator") {
+      activeMapFilter.value = "indicators"
       await patchShellFilters(
         { showSensors: false, showData: false, showTasks: false },
         { fit: false, rerender: false },
@@ -363,6 +384,7 @@ function toggleShellLayer(key: 'showSensors' | 'showData' | 'showTasks', ev: Eve
 
 async function filterMapByStat(kind: 'sensors' | 'data' | 'tasks' | 'all' | 'indicators') {
   error.value = null
+  activeMapFilter.value = kind
   if (kind === 'all') await mapShowAll()
   else if (kind === 'sensors') await mapShowSensors()
   else if (kind === 'data') await mapShowData()
@@ -491,10 +513,12 @@ async function filterTasksByStatus(status: unknown) {
 
         <div class="map-link-bar">
           <span class="muted">地图联动：</span>
-          <button type="button" class="btn ghost tiny" data-map-filter="sensors" @click="filterMapByStat('sensors')">仅传感资源</button>
-          <button type="button" class="btn ghost tiny" data-map-filter="data" @click="filterMapByStat('data')">仅监测数据</button>
-          <button type="button" class="btn ghost tiny" data-map-filter="tasks" @click="filterMapByStat('tasks')">仅观测任务</button>
-          <button type="button" class="btn ghost tiny" data-map-filter="all" @click="filterMapByStat('all')">显示全部</button>
+          <button type="button" class="btn ghost tiny" :class="{ active: activeMapFilter === 'sensors' }" data-map-filter="sensors" @click="filterMapByStat('sensors')">仅传感资源</button>
+          <button type="button" class="btn ghost tiny" :class="{ active: activeMapFilter === 'data' }" data-map-filter="data" @click="filterMapByStat('data')">仅监测数据</button>
+          <button type="button" class="btn ghost tiny" :class="{ active: activeMapFilter === 'tasks' }" data-map-filter="tasks" @click="filterMapByStat('tasks')">仅观测任务</button>
+          <button type="button" class="btn ghost tiny" :class="{ active: activeMapFilter === 'indicators' }" data-map-filter="indicators" @click="filterMapByStat('indicators')">仅指标实例</button>
+          <button type="button" class="btn ghost tiny" :class="{ active: activeMapFilter === 'all' }" data-map-filter="all" @click="filterMapByStat('all')">显示全部</button>
+          <span class="muted tiny">当前：{{ activeMapFilter }}</span>
         </div>
 
       <p class="muted">对应任务清单 C4–C6：传感资源统计、监测数据统计、观测任务统计。支持条件筛选与下钻到明细中心。</p>
@@ -526,7 +550,12 @@ async function filterTasksByStatus(status: unknown) {
               <tr v-for="(row, i) in resourceByType" :key="'rt'+i" class="row-click" @click="filterSensorsByType(row.typeCode || row.code)">
                 <td>{{ rowLabel(row, ['typeName', 'name', 'label']) }}</td>
                 <td>{{ rowLabel(row, ['typeCode', 'code']) }}</td>
-                <td>{{ rowCount(row) }}</td>
+                <td>
+                  <div class="stat-bar-row">
+                    <span>{{ rowCount(row) }}</span>
+                    <i class="stat-bar" :style="{ width: statBarPct(rowCount(row), maxCount(resourceByType)) + '%' }"></i>
+                  </div>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -597,7 +626,12 @@ async function filterTasksByStatus(status: unknown) {
               <tr v-if="!dataByQuality.length"><td colspan="3" class="muted">暂无质量统计</td></tr>
               <tr v-for="(row, i) in dataByQuality" :key="'dq'+i" class="row-click" @click="filterDataByQuality(row.qualityStatus || row.label || row.name)">
                 <td>{{ rowLabel(row, ['qualityStatus', 'label', 'name']) }}</td>
-                <td>{{ rowCount(row) }}</td>
+                <td>
+                  <div class="stat-bar-row">
+                    <span>{{ rowCount(row) }}</span>
+                    <i class="stat-bar" :style="{ width: statBarPct(rowCount(row), maxCount(dataByQuality)) + '%' }"></i>
+                  </div>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -630,7 +664,12 @@ async function filterTasksByStatus(status: unknown) {
               <tr v-if="!taskByStatus.length"><td colspan="3" class="muted">暂无任务状态统计</td></tr>
               <tr v-for="(row, i) in taskByStatus" :key="'ts'+i" class="row-click" @click="filterTasksByStatus(row.status || row.label || row.name)">
                 <td>{{ rowLabel(row, ['status', 'label', 'name']) }}</td>
-                <td>{{ rowCount(row) }}</td>
+                <td>
+                  <div class="stat-bar-row">
+                    <span>{{ rowCount(row) }}</span>
+                    <i class="stat-bar" :style="{ width: statBarPct(rowCount(row), maxCount(taskByStatus)) + '%' }"></i>
+                  </div>
+                </td>
               </tr>
             </tbody>
           </table>

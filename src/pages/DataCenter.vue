@@ -77,6 +77,7 @@ const pullForm = ref({
 const sourceAudits = ref<Record<string, unknown>[]>([])
 const selectedAuditSourceId = ref('')
 const liveStatus = ref<Record<string, unknown> | null>(null)
+let lastLivePullCount: number | null = null
 let livePollTimer: number | null = null
 
 function stopLivePolling() {
@@ -118,6 +119,22 @@ function liveStatusLabel(status: unknown) {
     failed: '失败',
   }
   return map[s] || String(status || '-')
+}
+
+
+async function locateLatestLiveOnMap() {
+  const id = (liveStatus.value as any)?.lastObservationDataId
+  if (id == null || id === '' || id === '-') {
+    error.value = '当前没有最近观测数据可定位'
+    return
+  }
+  try {
+    await showDataOnMap()
+    const ok = await selectShellFeature('data', String(id), { openBubble: true, fly: true })
+    message.value = ok ? `已定位最近实时观测 #${id}` : `地图未找到观测 #${id}`
+  } catch (err) {
+    error.value = errMessage(err, '定位实时观测失败')
+  }
 }
 
 function liveStatusClass(status: unknown) {
@@ -638,16 +655,30 @@ async function refreshLiveStatus(sourceId?: string) {
   if (!id) {
     liveStatus.value = null
     stopLivePolling()
+    lastLivePullCount = null
     return
   }
   try {
     const res = await api.getLiveDataSourceStatus(id)
     liveStatus.value = (res.data as any)?.live || (res.data as any) || null
-    const st = String((liveStatus.value as any)?.status || '').toLowerCase()
+    const live = (liveStatus.value || {}) as Record<string, unknown>
+    const st = String(live.status || '').toLowerCase()
+    const pullCount = Number(
+      live.pullCount ?? live.totalPulls ?? live.recordCount ?? live.successCount ?? live.recordsWritten ?? NaN,
+    )
     if (st === 'running' || st === 'active' || st === 'pulling') {
       if (livePollTimer == null) startLivePolling(String(id))
+      // 定时接入有新写入时刷新地图数据层
+      if (Number.isFinite(pullCount) && lastLivePullCount != null && pullCount > lastLivePullCount) {
+        try {
+          await showDataOnMap()
+          message.value = `实时接入有新数据（累计 ${pullCount}），地图数据层已刷新`
+        } catch { /* map optional */ }
+      }
+      if (Number.isFinite(pullCount)) lastLivePullCount = pullCount
     } else if (st === 'stopped' || st === 'idle' || st === 'error' || st === 'failed') {
       stopLivePolling()
+      if (Number.isFinite(pullCount)) lastLivePullCount = pullCount
     }
   } catch {
     liveStatus.value = null
@@ -675,6 +706,7 @@ async function startLivePull() {
     if (pullForm.value.spatialWkt) body.spatialWkt = pullForm.value.spatialWkt
     const res = await api.startLiveDataSource(pullForm.value.sourceId, body)
     liveStatus.value = (res.data as any)?.live || null
+    lastLivePullCount = Number((res.data as any)?.live?.pullCount ?? (res.data as any)?.live?.recordCount ?? 0) || 0
     startLivePolling(pullForm.value.sourceId)
     try { await showDataOnMap() } catch { /* map optional */ }
     message.value = '实时接入已启动，间隔 ' +
@@ -1059,11 +1091,15 @@ onUnmounted(() => {
         单次/定时拉取都会写入观测数据，来源追溯 <code>source:数据源编码</code>。
         定时接入按间隔反复从外部协议端点拉数，属于“活接入”；停用数据源会自动停止定时任务。
       </p>
-      <div v-if="liveStatus" class="live-status-card">
+      <div v-if="liveStatus" class="live-status-card" :class="{ running: String(liveStatus.status || '').toLowerCase() === 'running' || String(liveStatus.status || '').toLowerCase() === 'active' || String(liveStatus.status || '').toLowerCase() === 'pulling' }">
         <div class="live-status-head">
           <span :class="liveStatusClass(liveStatus.status)"></span>
           <strong>{{ liveStatusLabel(liveStatus.status) }}</strong>
           <span class="muted">源 #{{ liveStatus.sourceId || pullForm.sourceId }} · 间隔 {{ liveStatus.intervalSeconds || '-' }}s</span>
+        </div>
+        <div class="ops" style="margin:0.4rem 0 0.2rem">
+          <button class="btn ghost tiny" type="button" @click="locateLatestLiveOnMap">定位最近观测到地图</button>
+          <button class="btn ghost tiny" type="button" :disabled="shellLoading" @click="showDataOnMap">刷新数据图层</button>
         </div>
         <div class="live-status-grid">
           <div><span class="muted">拉取次数</span><strong>{{ liveStatus.pullCount ?? 0 }}</strong></div>
