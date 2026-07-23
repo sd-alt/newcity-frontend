@@ -215,6 +215,37 @@ function onStepClick(step: StepKey) {
   error.value = stepBlockedReason(step) || '步骤未解锁'
 }
 
+const currentAction = computed(() => {
+  const key = currentStep.value
+  const map: Record<StepKey, { action: StepKey; label: string }> = {
+    create: { action: 'create', label: '执行创建任务' },
+    submit: { action: 'submit', label: '执行提交任务' },
+    reverse: { action: 'reverse', label: '执行需求反算' },
+    candidates: { action: 'candidates', label: '执行候选评分' },
+    basic: { action: 'basic', label: '执行基础关联' },
+    optimize: { action: 'optimize', label: '执行优化关联' },
+    supplement: { action: 'supplement', label: '执行增补关联' },
+    evaluate: { action: 'evaluate', label: '执行满足度评估' },
+    output: { action: 'output', label: '执行规划输出' },
+  }
+  return map[key]
+})
+
+async function runCurrentStep() {
+  const a = currentAction.value?.action
+  if (!a) return
+  if (a === 'create') return createTask()
+  if (a === 'submit') return submitTask()
+  if (a === 'reverse') return requirementReverse()
+  if (a === 'candidates') return confirmCandidates()
+  if (a === 'basic') return basicAssociation()
+  if (a === 'optimize') return optimizeAssociation()
+  if (a === 'supplement') return supplementAssociation()
+  if (a === 'evaluate') return requirementEvaluation()
+  if (a === 'output') return planningOutput()
+}
+
+
 function applyStepProgress(next: StepKey, options: { rewindAfter?: boolean } = {}) {
   const idx = STEP_ORDER.indexOf(next)
   const done = new Set<StepKey>(doneSteps.value)
@@ -1195,12 +1226,12 @@ async function clearMapLinks() {
         <p class="muted">严格按任务清单分步：创建/提交 → 需求反算 → 候选与评分 → 基础/优化/增补关联 → 满足度评估 → 规划输出。无一键跑通。</p>
       </div>
       <button class="btn ghost" type="button" @click="resetForm">新建任务</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading" @click="showTasksOnMap">任务+资源</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showCandidatesOnMap">候选资源</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showAssociationOnMap('basic')">基础关联</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showAssociationOnMap('optimized')">优化关联</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showAssociationOnMap('supplement')">增补关联</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading" @click="clearMapLinks">清除关联</button>
+      <button class="btn ghost" type="button" :disabled="shellLoading" @click="showTasksOnMap">任务资源上图</button>
+      <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showCandidatesOnMap">候选资源上图</button>
+      <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showAssociationOnMap('basic')">基础关联上图</button>
+      <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showAssociationOnMap('optimized')">优化关联上图</button>
+      <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showAssociationOnMap('supplement')">增补关联上图</button>
+      <button class="btn ghost" type="button" :disabled="shellLoading" @click="clearMapLinks">清除关联线</button>
       <button class="btn ghost" type="button" :disabled="shellLoading || !evalResult" @click="drawPlanningCoverageFromEval">覆盖评估上图</button>
       <button class="btn ghost" type="button" :disabled="shellLoading" @click="clearPlanningCoverageOnMap">清除覆盖</button>
       <span class="muted">{{ shellStatus }}</span>
@@ -1261,8 +1292,23 @@ async function clearMapLinks() {
         </div>
         <p v-if="taskId" class="muted" style="margin: 0.35rem 0 0.6rem">
           当前步骤：{{ STEPS.find((x) => x.key === currentStep)?.title || currentStep }}；
-          已完成 {{ doneSteps.size }} 步。点击已完成步骤可回看/重跑。
+          已完成 {{ doneSteps.size }} 步。点击已完成步骤可回看/重跑。上方「…上图」只刷新地图；下方「执行…」才真正推进流程。
         </p>
+        <div v-if="taskId && currentAction" class="current-action-bar panel soft">
+          <div>
+            <strong>当前应执行：{{ currentAction.label }}</strong>
+            <p class="muted" style="margin:0.2rem 0 0">{{ stepBlockedReason(currentAction.action) || '点击后推进流程并刷新地图关联结果' }}</p>
+          </div>
+          <button
+            class="btn"
+            type="button"
+            data-action-primary="1"
+            :data-action="currentAction.action"
+            :disabled="canRun(currentAction.action) === false"
+            :title="stepBlockedReason(currentAction.action) || currentAction.label"
+            @click="runCurrentStep"
+          >{{ pending ? '处理中…' : currentAction.label }}</button>
+        </div>
 
         <div class="grid-2">
           <section class="panel">
@@ -1316,16 +1362,16 @@ async function clearMapLinks() {
           <section class="panel">
             <h2>分步业务操作</h2>
             <div class="action-stack">
-              <button class="btn" type="button" :disabled="canRun('create') === false" :title="stepBlockedReason('create') || '创建观测任务'" @click="createTask">创建任务</button>
+              <button class="btn" type="button" :disabled="canRun('create') === false" :title="stepBlockedReason('create') || '创建观测任务'" data-action="create" @click="createTask">执行创建任务</button>
               <button class="btn ghost" type="button" :disabled="taskId == null || pending || (taskStatus !== '' && taskStatus !== 'draft')" @click="bindSelectedIndicator">追加当前指标到任务（仅草稿）</button>
-              <button class="btn" type="button" :disabled="canRun('submit') === false" :title="stepBlockedReason('submit') || '提交任务'" @click="submitTask">提交任务</button>
-              <button class="btn" type="button" :disabled="canRun('reverse') === false" :title="stepBlockedReason('reverse') || '需求反算'" @click="requirementReverse">需求反算</button>
-              <button class="btn" type="button" :disabled="canRun('candidates') === false" :title="stepBlockedReason('candidates') || '确认候选评分'" @click="confirmCandidates">确认候选评分</button>
-              <button class="btn" type="button" :disabled="canRun('basic') === false" :title="stepBlockedReason('basic') || '基础关联'" @click="basicAssociation">基础关联</button>
-              <button class="btn" type="button" :disabled="canRun('optimize') === false" :title="stepBlockedReason('optimize') || '优化关联'" @click="optimizeAssociation">优化关联</button>
-              <button class="btn" type="button" :disabled="canRun('supplement') === false" :title="stepBlockedReason('supplement') || '增补关联'" @click="supplementAssociation">增补关联</button>
-              <button class="btn" type="button" :disabled="canRun('evaluate') === false" :title="stepBlockedReason('evaluate') || '满足度评估'" @click="requirementEvaluation">满足度评估</button>
-              <button class="btn" type="button" :disabled="canRun('output') === false" :title="stepBlockedReason('output') || '规划输出'" @click="planningOutput">规划输出</button>
+              <button class="btn" type="button" :disabled="canRun('submit') === false" :title="stepBlockedReason('submit') || '提交任务'" data-action="submit" @click="submitTask">执行提交任务</button>
+              <button class="btn" type="button" :disabled="canRun('reverse') === false" :title="stepBlockedReason('reverse') || '需求反算'" data-action="reverse" @click="requirementReverse">执行需求反算</button>
+              <button class="btn" type="button" :disabled="canRun('candidates') === false" :title="stepBlockedReason('candidates') || '确认候选评分'" data-action="candidates" @click="confirmCandidates">执行候选评分</button>
+              <button class="btn" type="button" :disabled="canRun('basic') === false" :title="stepBlockedReason('basic') || '基础关联'" data-action="basic" @click="basicAssociation">执行基础关联</button>
+              <button class="btn" type="button" :disabled="canRun('optimize') === false" :title="stepBlockedReason('optimize') || '优化关联'" data-action="optimize" @click="optimizeAssociation">执行优化关联</button>
+              <button class="btn" type="button" :disabled="canRun('supplement') === false" :title="stepBlockedReason('supplement') || '增补关联'" data-action="supplement" @click="supplementAssociation">执行增补关联</button>
+              <button class="btn" type="button" :disabled="canRun('evaluate') === false" :title="stepBlockedReason('evaluate') || '满足度评估'" data-action="evaluate" @click="requirementEvaluation">执行满足度评估</button>
+              <button class="btn" type="button" :disabled="canRun('output') === false" :title="stepBlockedReason('output') || '规划输出'" data-action="output" @click="planningOutput">执行规划输出</button>
               <button class="btn ghost" type="button" :disabled="taskId == null" @click="loadCandidates(true)">查看候选与评分</button>
             </div>
             <p v-if="pending" class="hint">处理中，请勿重复点击…</p>

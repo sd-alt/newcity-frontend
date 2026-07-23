@@ -86,7 +86,7 @@ function buildQuery(params: Record<string, string>) {
   return s ? '?' + s : ''
 }
 
-async function loadStats() {
+async function loadStats(options: { quiet?: boolean } = {}) {
   if (user.value == null) return
   pending.value = true
   error.value = null
@@ -119,7 +119,7 @@ async function loadStats() {
     resourceStats.value = r.data as Record<string, unknown>
     dataStats.value = d.data as Record<string, unknown>
     taskStats.value = t.data as Record<string, unknown>
-    message.value = '统计已刷新'
+    if (!options.quiet) message.value = '统计已刷新'
   } catch (err) {
     error.value = errMessage(err, '统计加载失败')
   } finally {
@@ -161,7 +161,7 @@ async function loadGisPreview() {
 
 onMounted(async () => {
   syncTab()
-  await loadStats()
+  await loadStats({ quiet: true })
   if (tab.value === 'workbench') await loadWorkbench()
   if (tab.value === 'gis') await loadGisPreview()
 })
@@ -171,7 +171,7 @@ watch(tab, async (v) => {
   if (v === 'gis') await loadGisPreview()
 })
 watch(user, () => {
-  void loadStats()
+  void loadStats({ quiet: true })
 })
 
 async function mapShowSensors() {
@@ -267,6 +267,14 @@ async function filterMapByStat(kind: 'sensors' | 'data' | 'tasks' | 'all' | 'ind
   else if (kind === 'data') await mapShowData()
   else if (kind === 'tasks') await mapShowTasks()
   else await mapShowIndicators()
+  const labels: Record<string, string> = {
+    sensors: '传感资源',
+    data: '监测数据',
+    tasks: '观测任务',
+    indicators: '指标实例',
+    all: '全部业务图层',
+  }
+  message.value = '统计联动：仅显示' + (labels[kind] || kind) + '（地图图层已更新）'
 }
 
 async function filterSensorsByType(typeCode: unknown) {
@@ -367,10 +375,19 @@ async function filterTasksByStatus(status: unknown) {
     <p v-if="message" class="ok">{{ message }}</p>
 
     <section v-show="tab === 'stats'" class="panel">
+
+        <div class="map-link-bar">
+          <span class="muted">地图联动：</span>
+          <button type="button" class="btn ghost tiny" data-map-filter="sensors" @click="filterMapByStat('sensors')">仅传感资源</button>
+          <button type="button" class="btn ghost tiny" data-map-filter="data" @click="filterMapByStat('data')">仅监测数据</button>
+          <button type="button" class="btn ghost tiny" data-map-filter="tasks" @click="filterMapByStat('tasks')">仅观测任务</button>
+          <button type="button" class="btn ghost tiny" data-map-filter="all" @click="filterMapByStat('all')">显示全部</button>
+        </div>
+
       <p class="muted">对应任务清单 C4–C6：传感资源统计、监测数据统计、观测任务统计。支持条件筛选与下钻到明细中心。</p>
       <h2>综合统计（文档 3 项）</h2>
       <p class="muted">传感资源 / 监测数据 / 观测任务。先设筛选条件，再刷新；结果按维度分表展示，避免只看原始 JSON。</p>
-      <button class="btn" type="button" :disabled="pending" @click="loadStats">刷新统计</button>
+      <button class="btn" type="button" :disabled="pending" @click="() => loadStats()">刷新统计</button>
 
       <h3>C4 传感资源统计</h3>
       <div class="form-row">
@@ -378,7 +395,7 @@ async function filterTasksByStatus(status: unknown) {
         <label>状态<input v-model="resourceFilter.status" placeholder="active" /></label>
         <label>所属单位<input v-model="resourceFilter.owner" /></label>
         <label>关键字<input v-model="resourceFilter.keyword" /></label>
-        <button class="btn ghost" type="button" :disabled="pending" @click="loadStats">按条件统计</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="() => loadStats()">按条件统计</button>
         <RouterLink class="btn ghost" to="/resources?tab=query">下钻查询</RouterLink>
       </div>
       <div class="cards">
@@ -436,7 +453,7 @@ async function filterTasksByStatus(status: unknown) {
             <option value="false">非隔离</option>
           </select>
         </label>
-        <button class="btn ghost" type="button" :disabled="pending" @click="loadStats">按条件统计</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="() => loadStats()">按条件统计</button>
         <RouterLink class="btn ghost" to="/data?tab=query">下钻查询</RouterLink>
       </div>
       <div class="cards">
@@ -476,7 +493,7 @@ async function filterTasksByStatus(status: unknown) {
         <label>状态<input v-model="taskFilter.status" placeholder="submitted" /></label>
         <label>任务类型<input v-model="taskFilter.taskType" /></label>
         <label>关键字<input v-model="taskFilter.keyword" /></label>
-        <button class="btn ghost" type="button" :disabled="pending" @click="loadStats">按条件统计</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="() => loadStats()">按条件统计</button>
         <RouterLink class="btn ghost" to="/planning?tab=tasks">任务列表</RouterLink>
         <RouterLink class="btn ghost" to="/planning?tab=plans">方案管理</RouterLink>
       </div>

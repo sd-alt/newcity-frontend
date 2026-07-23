@@ -386,6 +386,10 @@ function canRevertDraft(status: unknown) {
   const s = String(status || '').toLowerCase()
   return s === 'published' || s === 'inactive' || s === 'active'
 }
+function canDeleteInstance(status: unknown) {
+  const s = String(status || '').toLowerCase()
+  return s !== 'published'
+}
 
 async function setInstanceStatus(id: unknown, status: string) {
   try {
@@ -413,7 +417,13 @@ async function setInstanceStatus(id: unknown, status: string) {
 }
 
 async function removeInstance(id: unknown) {
-  if (window.confirm('确认删除该实例？') === false) return
+  const row = instances.value.find((i) => String(i.id) === String(id))
+  const st = String(row?.status || '').toLowerCase()
+  if (st === 'published') {
+    error.value = '已发布实例不能直接删除，请先停用或回退草稿'
+    return
+  }
+  if (window.confirm('确认删除该实例？删除前将检查关联任务/数据。') === false) return
   try {
     await api.deleteInstance(String(id))
     message.value = '实例已删除'
@@ -653,7 +663,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
               <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'published')" :disabled="canPublishInstance(i.status) === false">发布</button>
               <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'inactive')" :disabled="canRetireInstance(i.status) === false">停用</button>
               <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'draft')" :disabled="canRevertDraft(i.status) === false">回退草稿</button>
-              <button class="btn ghost" type="button" @click.stop="removeInstance(i.id)">删除</button>
+              <button class="btn ghost" type="button" @click.stop="removeInstance(i.id)" :disabled="canDeleteInstance(i.status) === false">删除</button>
             </td>
           </tr>
         </tbody>
