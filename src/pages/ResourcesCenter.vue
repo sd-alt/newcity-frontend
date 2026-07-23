@@ -321,7 +321,7 @@ async function showOnMap() {
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="message" class="ok-text">{{ message }}</p>
 
-    <section v-show="tab === 'types'" class="panel">
+    <section v-if="tab === 'types'" class="panel">
       <h2>传感器类型维护</h2>
       <p class="muted">管理卫星/无人机/站点等类型的分类编码、属性模板与参数规范，供传感器建模引用。</p>
       <div class="grid-2">
@@ -346,7 +346,7 @@ async function showOnMap() {
       </div>
     </section>
 
-    <section v-show="tab === 'crud'" class="panel">
+    <section v-if="tab === 'crud'" class="panel">
       <h2>平台与传感器增删改查</h2>
       <h3>平台</h3>
       <div class="form-row">
@@ -408,7 +408,7 @@ async function showOnMap() {
       </table>
     </section>
 
-    <section v-show="tab === 'query'" class="panel">
+    <section v-if="tab === 'query'" class="panel">
       <h2>传感器综合查询</h2>
       <p class="muted">按类型、名称/编码、所属单位、运行状态组合筛选；优先走服务端过滤，结果可被规划中心候选筛选使用。</p>
       <div class="form-row">
@@ -453,7 +453,7 @@ async function showOnMap() {
       </table>
     </section>
 
-    <section v-show="tab === 'viz'" class="panel">
+    <section v-if="tab === 'viz'" class="panel">
       <h2>资源可视化</h2>
       <p class="muted">先按类型/状态摘要核对资源空间与能力信息，再进入 GIS 工作台做地图叠加。</p>
       <div class="form-row">

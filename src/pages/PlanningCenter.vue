@@ -734,7 +734,8 @@ async function selectTask(id: unknown) {
       taskPlans.length +
       ' · 下一步 ' +
       inferred
-    tab.value = 'tasks'
+    // 选中后进入关联流程页，展示当前步骤主按钮，避免停在列表找不到执行入口
+    tab.value = 'flow'
     // 选中任务后自动上图：有方案则画关联线，否则尝试候选资源
     try {
       if (taskPlans.some((p) => Array.isArray(p.resourceMatches) && p.resourceMatches.length)) {
@@ -1248,7 +1249,7 @@ async function clearMapLinks() {
       <p v-if="message" class="ok-text">{{ message }}</p>
       <p v-if="hasTask" class="hint">当前任务 #{{ taskId }} · 状态 {{ taskStatus || '—' }} · 当前步骤 {{ currentStep }}</p>
 
-      <section v-show="tab === 'tasks'" class="panel">
+      <section v-if="tab === 'tasks'" class="panel">
         <h2>观测任务列表</h2>
         <table class="table">
           <thead><tr><th>ID</th><th>编码</th><th>名称</th><th>状态</th><th>指标</th><th></th></tr></thead>
@@ -1268,7 +1269,7 @@ async function clearMapLinks() {
         </table>
       </section>
 
-      <section v-show="tab === 'flow'">
+      <section v-if="tab === 'flow'">
         <div class="stepper panel soft">
           <div
             v-for="(s, i) in STEPS"
@@ -1414,7 +1415,7 @@ async function clearMapLinks() {
         </div>
       </section>
 
-      <section v-show="tab === 'candidates'" class="panel">
+      <section v-if="tab === 'candidates'" class="panel">
         <h2>候选传感器筛选 / 评分与解释</h2>
         <p class="muted">对应任务清单：候选筛选 + 评分与解释。流程中须在需求反算后确认本页，再进入基础关联。</p>
         <button class="btn" type="button" :disabled="taskId == null" @click="loadCandidates(false)">刷新候选</button>
@@ -1466,7 +1467,7 @@ async function clearMapLinks() {
         <p v-else class="muted">无排除项或尚未刷新候选。</p>
 </section>
 
-      <section v-show="tab === 'plans'" class="panel">
+      <section v-if="tab === 'plans'" class="panel">
         <h2>规划方案管理</h2>
         <p class="muted">方案由任务关联流程生成；支持查看关联结果、复制草稿、审核、发布、归档与方案对比（文档：方案管理）。</p>
         <table class="table">

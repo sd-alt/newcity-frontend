@@ -575,7 +575,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="message" class="ok-text">{{ message }}</p>
 
-    <section v-show="tab === 'samples'" class="panel">
+    <section v-if="tab === 'samples'" class="panel">
       <h2>指标样例维护</h2>
       <p class="muted">支持新增/删除/修改/查看/复制与按领域-主题分类管理。</p>
       <div class="form-row">
@@ -629,7 +629,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
       </table>
     </section>
 
-    <section v-show="tab === 'instances'" class="panel">
+    <section v-if="tab === 'instances'" class="panel">
       <h2>指标实例生成</h2>
       <div class="form-row">
         <label>样例
@@ -670,7 +670,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
       </table>
     </section>
 
-    <section v-show="tab === 'tree'" class="panel">
+    <section v-if="tab === 'tree'" class="panel">
       <div class="form-row" style="margin-bottom:0.6rem">
         <button class="btn" type="button" :disabled="shellLoading" @click="showIndicatorsOnMap">指标范围上图</button>
         <button class="btn ghost" type="button" @click="loadTree">刷新树</button>
@@ -764,7 +764,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
       </ul>
     </section>
 
-    <section v-show="tab === 'query'" class="panel">
+    <section v-if="tab === 'query'" class="panel">
       <h2>实例查询与导出</h2>
       <p class="muted">查询对象仅为指标实例。支持按样例、尺度、状态、名称关键字服务端筛选，并可导出当前条件结果。</p>
       <div class="form-row">
@@ -803,7 +803,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
       <pre v-if="exportPreview" class="result-pre">{{ exportPreview.slice(0, 3000) }}</pre>
     </section>
 
-    <section v-show="tab === 'versions'" class="panel">
+    <section v-if="tab === 'versions'" class="panel">
       <h2>指标实例版本管理</h2>
       <p class="muted">文档验收：记录实例生成/修改/发布/停用，支持版本对比、历史追溯与回退。定义版本用于追溯样例模板变更。</p>
 

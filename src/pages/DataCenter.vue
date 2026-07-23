@@ -544,6 +544,7 @@ async function startLivePull() {
     const res = await api.startLiveDataSource(pullForm.value.sourceId, body)
     liveStatus.value = (res.data as any)?.live || null
     startLivePolling(pullForm.value.sourceId)
+    try { await showDataOnMap() } catch { /* map optional */ }
     message.value = '实时接入已启动，间隔 ' +
       String((res.data as any)?.live?.intervalSeconds || liveIntervalSeconds.value) +
       ' 秒'
@@ -756,7 +757,7 @@ onUnmounted(() => {
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="message" class="ok-text">{{ message }}</p>
 
-    <section v-show="tab === 'crud'" class="panel">
+    <section v-if="tab === 'crud'" class="panel">
       <h2>监测数据建模与增删改查</h2>
       <h3>1) 数据集</h3>
       <div class="form-row">
@@ -810,7 +811,7 @@ onUnmounted(() => {
       <pre v-if="detail" class="result-pre">{{ JSON.stringify(detail, null, 2).slice(0, 3000) }}</pre>
     </section>
 
-    <section v-show="tab === 'sources'" class="panel">
+    <section v-if="tab === 'sources'" class="panel">
       <h2>多源协议数据接入工作台</h2>
       <p class="muted">
         <strong>多源接入 = 把别人系统的协议数据持续接入本系统</strong>（活通道），不是简单文件导入。
@@ -1020,7 +1021,7 @@ onUnmounted(() => {
       </table>
     </section>
 
-    <section v-show="tab === 'query'" class="panel">
+    <section v-if="tab === 'query'" class="panel">
       <h2>监测数据综合查询与导出</h2>
       <p class="muted">支持按关键字、类型、质量、数据集、平台组合查询；导出使用同一套筛选条件。</p>
       <div class="form-row">
@@ -1077,7 +1078,7 @@ onUnmounted(() => {
       <pre v-if="exportPreview" class="result-pre">{{ exportPreview.slice(0, 3000) }}</pre>
     </section>
 
-    <section v-show="tab === 'viz'" class="panel">
+    <section v-if="tab === 'viz'" class="panel">
       <h2>监测数据可视化</h2>
       <p class="muted">空间分布请打开 GIS 工作台的数据图层；中心内提供类型/质量分布快览，详细统计在综合应用中心。</p>
       <div class="form-row" style="margin:0.5rem 0">

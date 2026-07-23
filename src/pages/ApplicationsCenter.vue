@@ -374,7 +374,7 @@ async function filterTasksByStatus(status: unknown) {
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="message" class="ok">{{ message }}</p>
 
-    <section v-show="tab === 'stats'" class="panel">
+    <section v-if="tab === 'stats'" class="panel">
 
         <div class="map-link-bar">
           <span class="muted">地图联动：</span>
@@ -544,7 +544,7 @@ async function filterTasksByStatus(status: unknown) {
       </table>
     </section>
 
-    <section v-show="tab === 'gis'" class="panel">
+    <section v-if="tab === 'gis'" class="panel">
       <h2>GIS 综合展示</h2>
       <p class="muted">直接控制全屏底图上的业务图层（不再嵌套第二张地图）。{{ shellStatus }}</p>
       <div class="form-row">
@@ -581,7 +581,7 @@ async function filterTasksByStatus(status: unknown) {
       <p class="hint">点击统计卡片/表格行会过滤地图图层；点击底图要素打开气泡与右侧详情。</p>
     </section>
 
-<section v-show="tab === 'workbench'" class="panel">
+<section v-if="tab === 'workbench'" class="panel">
       <h2>工作台与图层</h2>
       <p class="muted">工作台启动数据与 GIS 图层清单，用于核对可展示资源是否齐全。</p>
       <button class="btn ghost" type="button" @click="loadWorkbench">刷新</button>

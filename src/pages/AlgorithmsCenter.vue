@@ -410,9 +410,12 @@ async function runTask(id: unknown) {
   clearAlerts()
   try {
     await api.runProcessingTask(String(id), { asyncMode: true })
-    message.value = '任务已提交后台执行，监控页可查看进度'
+    message.value = '任务已提交后台执行；已尝试在地图显示输入/结果范围'
     await load()
     await inspectTask(id)
+    try {
+      if (selectedTask.value) await locateLinkedOnMap(selectedTask.value)
+    } catch { /* map optional */ }
     startPolling()
     await setTab('monitor')
   } catch (err) {
@@ -613,6 +616,7 @@ function presentAlgoSelection(task: Record<string, unknown>, studyWkt: string, r
   const id = String(task.id ?? '')
   const code = String(task.code || task.name || id)
   const status = String(task.status || '-')
+  shellBubbleOpen.value = true
   shellSelected.value = {
     kind: 'unknown',
     id,
@@ -788,7 +792,7 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
       >{{ t.label }}</button>
     </div>
 
-    <section v-show="tab === 'models'" class="panel">
+    <section v-if="tab === 'models'" class="panel">
       <h2>算法增删改查 + 版本管理</h2>
       <div class="form-row">
         <label>编码<input v-model="modelForm.code" placeholder="ALG-DEMO-01" /></label>
@@ -870,7 +874,7 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
       </table>
     </section>
 
-    <section v-show="tab === 'tasks'" class="panel">
+    <section v-if="tab === 'tasks'" class="panel">
       <h2>处理任务创建</h2>
       <p class="muted">必须选择状态为 active 的算法版本；输入数据与参数为 JSON。</p>
       <div class="form-row">
@@ -901,7 +905,7 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
       </table>
     </section>
 
-    <section v-show="tab === 'run'" class="panel">
+    <section v-if="tab === 'run'" class="panel">
       <h2>任务调度与执行</h2>
       <p class="muted">支持：启动执行、暂停、恢复、终止、重新排队（对应文档：提交/排队/启动/暂停/恢复/终止/重新执行）。</p>
       <table class="table">
@@ -924,7 +928,7 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
       </table>
     </section>
 
-    <section v-show="tab === 'monitor'" class="panel">
+    <section v-if="tab === 'monitor'" class="panel">
       <h2>处理过程监控</h2>
       <p class="muted">展示运行状态、执行进度、处理日志、异常信息。后台执行时自动轮询（2s）。</p>
       <div class="form-row">
@@ -970,7 +974,7 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
       </div>
     </section>
 
-    <section v-show="tab === 'results'" class="panel">
+    <section v-if="tab === 'results'" class="panel">
       <h2>处理结果管理</h2>
       <p class="muted">文档要求：查看、校验、下载、发布、归档，并与监测数据/观测任务/指标实例建立关联。执行路径：成功 → 校验 → 发布 →（可选）归档。</p>
       <table class="table">
