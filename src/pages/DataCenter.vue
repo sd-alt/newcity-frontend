@@ -11,6 +11,10 @@ import {
   shellCounts,
   shellLoading,
   shellSelected,
+  setDataTimeWindow,
+  clearDataTimeWindow,
+  getCachedDataTimeExtent,
+  patchShellFilters,
 } from '../gis/mapShell'
 import { canByStatus, errMessage, isoNow, pickId } from '../utils/errors'
 
@@ -124,6 +128,106 @@ function liveStatusClass(status: unknown) {
 }
 
 const liveIntervalSeconds = ref(60)
+const timeMin = ref(0)
+const timeMax = ref(0)
+const timeCursor = ref(0)
+const timeWindowHours = ref(24)
+const timePlaying = ref(false)
+const timeFilterActive = ref(false)
+let timePlayTimer: number | null = null
+
+function stopTimePlayback() {
+  timePlaying.value = false
+  if (timePlayTimer != null) {
+    window.clearInterval(timePlayTimer)
+    timePlayTimer = null
+  }
+}
+
+function formatTimeLabel(ms: number) {
+  if (!ms) return '-'
+  try {
+    return new Date(ms).toLocaleString()
+  } catch {
+    return String(ms)
+  }
+}
+
+function collectDataTimes(): number[] {
+  const times: number[] = []
+  for (const row of dataList.value) {
+    const raw = row.observedAt || row.timeStart || row.time_start || (row as any).properties?.observedAt
+    if (raw == null || raw === '') continue
+    const t = Date.parse(String(raw))
+    if (Number.isFinite(t)) times.push(t)
+  }
+  const ext = getCachedDataTimeExtent()
+  if (ext) {
+    times.push(ext.min, ext.max)
+  }
+  return times
+}
+
+function refreshTimeExtent() {
+  const times = collectDataTimes()
+  if (!times.length) {
+    timeMin.value = 0
+    timeMax.value = 0
+    timeCursor.value = 0
+    return
+  }
+  timeMin.value = Math.min(...times)
+  timeMax.value = Math.max(...times)
+  if (!timeCursor.value || timeCursor.value < timeMin.value || timeCursor.value > timeMax.value) {
+    timeCursor.value = timeMax.value
+  }
+}
+
+async function applyTimeFilterOnMap() {
+  refreshTimeExtent()
+  if (!timeMin.value || !timeMax.value) {
+    error.value = '暂无带时间戳的监测数据，无法启用时间轴'
+    return
+  }
+  const end = Number(timeCursor.value) || timeMax.value
+  const win = Math.max(1, Number(timeWindowHours.value) || 24) * 3600_000
+  const start = Math.max(timeMin.value, end - win)
+  timeFilterActive.value = true
+  await setDataTimeWindow(start, end, { fit: false })
+  message.value = `时间轴过滤：${formatTimeLabel(start)} ~ ${formatTimeLabel(end)}（窗口 ${timeWindowHours.value} 小时）`
+}
+
+async function clearTimeFilterOnMap() {
+  stopTimePlayback()
+  timeFilterActive.value = false
+  await clearDataTimeWindow({ fit: false })
+  message.value = '已清除时间轴过滤，显示全部数据图层'
+}
+
+function toggleTimePlayback() {
+  if (timePlaying.value) {
+    stopTimePlayback()
+    message.value = '时间轴播放已暂停'
+    return
+  }
+  refreshTimeExtent()
+  if (!timeMax.value) {
+    error.value = '暂无时间范围可播放'
+    return
+  }
+  timePlaying.value = true
+  if (!timeCursor.value) timeCursor.value = timeMin.value || timeMax.value
+  timePlayTimer = window.setInterval(() => {
+    const step = Math.max(60_000, Math.floor((timeMax.value - timeMin.value) / 40) || 3600_000)
+    let next = Number(timeCursor.value) + step
+    if (next > timeMax.value) next = timeMin.value
+    timeCursor.value = next
+    void applyTimeFilterOnMap()
+  }, 1200)
+  message.value = '时间轴播放中（循环）'
+  void applyTimeFilterOnMap()
+}
+
 const importForm = ref({
   datasetId: '',
   platformId: '',
@@ -233,6 +337,7 @@ async function load() {
     ])
     datasets.value = ds.data
     dataList.value = d.data
+    refreshTimeExtent()
     sources.value = s.data
     imports.value = f.data
     platforms.value = p.data
@@ -545,6 +650,7 @@ async function startLivePull() {
     liveStatus.value = (res.data as any)?.live || null
     startLivePolling(pullForm.value.sourceId)
     try { await showDataOnMap() } catch { /* map optional */ }
+    try { await showDataOnMap() } catch { /* map optional */ }
     message.value = '实时接入已启动，间隔 ' +
       String((res.data as any)?.live?.intervalSeconds || liveIntervalSeconds.value) +
       ' 秒'
@@ -723,6 +829,8 @@ async function locateOnMap(id: string | number | unknown) {
 }
 
 async function showDataOnMap() {
+  refreshTimeExtent()
+
   await showShellAndFit('data', '/data')
   message.value = `已在底图显示监测数据图层（${shellCounts.data} 个要素）`
 }
@@ -737,6 +845,8 @@ async function filterDataQualityOnMap(quality: string) {
 
 
 onUnmounted(() => {
+  stopTimePlayback()
+
   stopLivePolling()
 })
 </script>
@@ -749,7 +859,7 @@ onUnmounted(() => {
         <h1>数据建模、多源接入与查询</h1>
         <p class="muted">对应文档：监测数据 CRUD、多源接入、综合查询导出、可视化支撑。</p>
       </div>
-      <RouterLink class="btn ghost" to="/gis?tab=data">GIS 数据图层</RouterLink>
+      <RouterLink class="btn ghost" to="/applications?tab=gis">GIS 数据图层</RouterLink>
     </header>
     <div class="tabs">
       <button v-for="t in tabs" :key="t.key" type="button" class="tab" :class="{ active: tab === t.key }" @click="setTab(t.key)">{{ t.label }}</button>
@@ -791,6 +901,7 @@ onUnmounted(() => {
       <table class="table">
         <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>平台</th><th>质量</th><th>操作</th></tr></thead>
         <tbody>
+          <tr v-if="!dataList.length"><td colspan="8" class="muted">暂无监测数据，可通过建模新增或接入通道拉取</td></tr>
           <tr v-for="d in dataList" :key="String(d.id)" class="row-click" :class="{ selected: shellSelected && shellSelected.kind === 'data' && shellSelected.id === String(d.id) }" @click="locateOnMap(String(d.id))">
             <td>{{ d.id }}</td>
             <td>{{ d.name }}</td>
@@ -872,6 +983,7 @@ onUnmounted(() => {
           </tr>
         </thead>
         <tbody>
+          <tr v-if="!sources.length"><td colspan="8" class="muted">暂无接入通道，请先登记协议数据源</td></tr>
           <tr v-for="s in sources" :key="String(s.id)" :class="{ active: String(s.id) === selectedAuditSourceId }">
             <td>{{ s.id }}</td>
             <td>{{ s.code }}</td>
@@ -949,6 +1061,7 @@ onUnmounted(() => {
       <table class="table" v-if="sourceAudits.length">
         <thead><tr><th>ID</th><th>动作</th><th>结果</th><th>说明</th><th>HTTP</th><th>耗时ms</th><th>时间</th></tr></thead>
         <tbody>
+          <tr v-if="!sourceAudits.length"><td colspan="6" class="muted">暂无接入审计，请选择通道并测试/拉取</td></tr>
           <tr v-for="a in sourceAudits" :key="'a'+a.id">
             <td>{{ a.id }}</td>
             <td>{{ a.action }}</td>
@@ -1004,6 +1117,7 @@ onUnmounted(() => {
       <table class="table" v-else>
         <thead><tr><th>ID</th><th>文件</th><th>状态</th><th>进度</th><th>成功/失败</th><th>操作</th></tr></thead>
         <tbody>
+          <tr v-if="!imports.length"><td colspan="7" class="muted">暂无文件导入任务</td></tr>
           <tr v-for="f in imports" :key="'f'+f.id">
             <td>{{ f.id }}</td>
             <td>{{ f.originalFileName || f.name || f.code || '-' }}</td>
@@ -1065,6 +1179,7 @@ onUnmounted(() => {
       <table class="table">
         <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>质量</th><th>时间</th><th>空间</th></tr></thead>
         <tbody>
+          <tr v-if="!filtered.length"><td colspan="7" class="muted">无查询结果</td></tr>
           <tr v-for="d in filtered" :key="'q'+d.id" class="row-click" :class="{ selected: shellSelected && shellSelected.kind === 'data' && shellSelected.id === String(d.id) }" @click="locateOnMap(String(d.id))">
             <td>{{ d.id }}</td>
             <td>{{ d.name }}</td>
@@ -1088,6 +1203,32 @@ onUnmounted(() => {
         <button class="btn ghost" type="button" :disabled="shellLoading" @click="filterDataQualityOnMap('anomaly')">仅异常</button>
         <button class="btn ghost" type="button" :disabled="shellLoading" @click="filterDataQualityOnMap('')">全部数据</button>
       </div>
+      <div class="timeline-panel">
+        <h3>时间轴过滤（联动底图数据图层）</h3>
+        <p class="muted">拖动时间游标或播放，仅显示窗口内的监测数据；无时间字段的数据仍保留显示。</p>
+        <div class="form-row">
+          <label class="wide">时间游标
+            <input
+              type="range"
+              :min="timeMin || 0"
+              :max="timeMax || 0"
+              :step="Math.max(60000, Math.floor(((timeMax || 1) - (timeMin || 0)) / 100) || 3600000)"
+              v-model.number="timeCursor"
+              :disabled="!timeMax"
+              @change="applyTimeFilterOnMap"
+            />
+          </label>
+          <label>窗口（小时）<input v-model.number="timeWindowHours" type="number" min="1" step="1" /></label>
+          <button class="btn" type="button" :disabled="!timeMax || shellLoading" @click="applyTimeFilterOnMap">应用时间窗</button>
+          <button class="btn ghost" type="button" :disabled="!timeMax || shellLoading" @click="toggleTimePlayback">{{ timePlaying ? '暂停播放' : '播放时间轴' }}</button>
+          <button class="btn ghost" type="button" :disabled="shellLoading" @click="clearTimeFilterOnMap">清除时间过滤</button>
+        </div>
+        <p class="muted">
+          范围：{{ formatTimeLabel(timeMin) }} ~ {{ formatTimeLabel(timeMax) }}
+          · 当前：{{ formatTimeLabel(timeCursor) }}
+          · {{ timeFilterActive ? '过滤已启用' : '未启用过滤' }}
+        </p>
+      </div>
       <div class="cards">
         <div class="card stat"><h3>监测数据</h3><p class="stat-num">{{ dataList.length }}</p></div>
         <div class="card stat"><h3>数据集</h3><p class="stat-num">{{ datasets.length }}</p></div>
@@ -1099,6 +1240,7 @@ onUnmounted(() => {
           <table class="table">
             <thead><tr><th>类型</th><th>数量</th></tr></thead>
             <tbody>
+              <tr v-if="!vizByType.length"><td colspan="2" class="muted">暂无类型分布</td></tr>
               <tr v-for="row in vizByType" :key="'vt'+row.name"><td>{{ row.name }}</td><td>{{ row.count }}</td></tr>
             </tbody>
           </table>
@@ -1108,6 +1250,7 @@ onUnmounted(() => {
           <table class="table">
             <thead><tr><th>质量状态</th><th>数量</th></tr></thead>
             <tbody>
+              <tr v-if="!vizByQuality.length"><td colspan="2" class="muted">暂无质量分布</td></tr>
               <tr v-for="row in vizByQuality" :key="'vq'+row.name" class="row-click" @click="filterDataQualityOnMap(String(row.name))"><td>{{ row.name }}</td><td>{{ row.count }}</td></tr>
             </tbody>
           </table>
@@ -1115,7 +1258,7 @@ onUnmounted(() => {
       </div>
       <div class="form-row" style="margin-top:1rem">
         <button class="btn" type="button" :disabled="shellLoading" @click="showDataOnMap">底图上图</button>
-        <RouterLink class="btn ghost" to="/gis?tab=data">图层控制</RouterLink>
+        <RouterLink class="btn ghost" to="/applications?tab=gis">图层控制</RouterLink>
         <RouterLink class="btn ghost" to="/applications?tab=stats">数据统计</RouterLink>
       </div>
     </section>

@@ -166,7 +166,7 @@ function taskStatusLabel(status: unknown) {
 }
 
 function canRunTask(status: unknown) {
-  return canByStatus(status, ['pending', 'queued'])
+  return canByStatus(status, ['pending', 'queued', 'draft', 'created', 'ready'])
 }
 function canPauseTask(status: unknown) {
   return canByStatus(status, ['running'])
@@ -424,10 +424,15 @@ async function runTask(id: unknown) {
 }
 
 async function cancelTask(id: unknown) {
+  if (window.confirm('确认终止该算法任务？') === false) return
   try {
     await api.cancelProcessingTask(String(id))
     message.value = '已终止'
     await load()
+    try {
+      await inspectTask(id)
+      if (selectedTask.value) await locateLinkedOnMap(selectedTask.value)
+    } catch { /* map optional */ }
   } catch (err) {
     error.value = errMessage(err, '终止失败')
   }
@@ -438,6 +443,10 @@ async function requeueTask(id: unknown) {
     await api.requeueProcessingTask(String(id))
     message.value = '已重新排队'
     await load()
+    try {
+      await inspectTask(id)
+      if (selectedTask.value) await locateLinkedOnMap(selectedTask.value)
+    } catch { /* map optional */ }
   } catch (err) {
     error.value = errMessage(err, '重新排队失败')
   }
@@ -448,7 +457,10 @@ async function pauseTask(id: unknown) {
     await api.pauseProcessingTask(String(id))
     message.value = '已暂停'
     await load()
-    await inspectTask(id)
+    try {
+      await inspectTask(id)
+      if (selectedTask.value) await locateLinkedOnMap(selectedTask.value)
+    } catch { /* map optional */ }
   } catch (err) {
     error.value = errMessage(err, '暂停失败')
   }
@@ -460,6 +472,10 @@ async function resumeTask(id: unknown) {
     await api.resumeProcessingTask(String(id), { autoRun: true })
     message.value = '任务已恢复并继续后台执行'
     await load()
+    try {
+      await inspectTask(id)
+      if (selectedTask.value) await locateLinkedOnMap(selectedTask.value)
+    } catch { /* map optional */ }
     startPolling()
     await setTab('monitor')
   } catch (err) {
@@ -894,6 +910,7 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
       <table class="table">
         <thead><tr><th>ID</th><th>编码</th><th>状态</th><th>版本</th><th>进度</th></tr></thead>
         <tbody>
+          <tr v-if="!tasks.length"><td colspan="8" class="muted">暂无处理任务。请先创建算法任务。</td></tr>
           <tr v-for="t in tasks" :key="String(t.id)" class="row-click" :class="{ selected: selectedTask && String(selectedTask.id) === String(t.id) }" @click="inspectTask(t.id)">
             <td>{{ t.id }}</td>
             <td>{{ t.code || t.name }}</td>
@@ -911,6 +928,7 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
       <table class="table">
         <thead><tr><th>ID</th><th>编码</th><th>状态</th><th>进度</th><th>操作</th></tr></thead>
         <tbody>
+          <tr v-if="!tasks.length"><td colspan="8" class="muted">暂无处理任务。请先创建算法任务。</td></tr>
           <tr v-for="t in tasks" :key="'r'+t.id" class="row-click" :class="{ selected: selectedTask && String(selectedTask.id) === String(t.id) }" @click="inspectTask(t.id)">
             <td>{{ t.id }}</td>
             <td>{{ t.code || t.name }}</td>
@@ -938,6 +956,7 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
       <table class="table">
         <thead><tr><th>ID</th><th>编码</th><th>状态</th><th>进度</th><th>开始</th><th>结束</th><th>异常</th><th>详情</th></tr></thead>
         <tbody>
+          <tr v-if="!tasks.length"><td colspan="8" class="muted">暂无处理任务。请先创建算法任务。</td></tr>
           <tr v-for="t in tasks" :key="'m'+t.id" class="row-click" :class="{ selected: selectedTask && String(selectedTask.id) === String(t.id), active: selectedTask && selectedTask.id === t.id }" @click="inspectTask(t.id)">
             <td>{{ t.id }}</td>
             <td>{{ t.code || t.name }}</td>
@@ -980,6 +999,7 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
       <table class="table">
         <thead><tr><th>ID</th><th>编码</th><th>状态</th><th>结果管理</th><th>输出摘要</th><th>操作</th></tr></thead>
         <tbody>
+          <tr v-if="!tasks.length"><td colspan="8" class="muted">暂无处理任务。请先创建算法任务。</td></tr>
           <tr v-for="t in tasks" :key="'res'+t.id" class="row-click" :class="{ selected: selectedTask && String(selectedTask.id) === String(t.id) }" @click="inspectTask(t.id)">
             <td>{{ t.id }}</td>
             <td>{{ t.code }}</td>

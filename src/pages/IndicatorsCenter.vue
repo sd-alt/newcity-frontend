@@ -342,6 +342,14 @@ async function loadInstanceVersions() {
   }
 }
 
+
+function asVersionObj(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' ? (v as Record<string, unknown>) : {}
+}
+function versionDiffRows() {
+  const raw = asVersionObj(compareResult.value).diffs
+  return Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : []
+}
 async function runCompareVersions() {
   if (versionInstanceId.value === '' || compareFrom.value === '' || compareTo.value === '') {
     error.value = '请选择实例及两个版本号'
@@ -845,7 +853,27 @@ async function locateInstanceOnMap(id: string | number | unknown) {
         </label>
         <button class="btn" type="button" @click="runCompareVersions">对比</button>
       </div>
-      <pre v-if="compareResult" class="result-pre">{{ JSON.stringify(compareResult, null, 2).slice(0, 4000) }}</pre>
+              <div v-if="compareResult" class="compare-panel">
+          <p class="compare-meta">
+            版本对比：v{{ asVersionObj(compareResult).fromVersion }} → v{{ asVersionObj(compareResult).toVersion }}
+            · 变更字段 {{ asVersionObj(compareResult).changedFieldCount ?? versionDiffRows().length }}
+          </p>
+          <table class="table">
+            <thead><tr><th>字段</th><th>原值 (from)</th><th>新值 (to)</th></tr></thead>
+            <tbody>
+              <tr v-if="!versionDiffRows().length"><td colspan="3" class="muted">两版本字段一致，无差异</td></tr>
+              <tr v-for="(d, i) in versionDiffRows()" :key="'vd'+i">
+                <td>{{ d.field }}</td>
+                <td>{{ d.from ?? '—' }}</td>
+                <td>{{ d.to ?? '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <details class="muted" style="margin-top:8px">
+            <summary>查看快照 JSON</summary>
+            <pre class="result-pre">{{ JSON.stringify(compareResult, null, 2).slice(0, 3000) }}</pre>
+          </details>
+        </div>
 
       <h3>3) 样例定义版本（模板追溯）</h3>
       <div class="form-row">

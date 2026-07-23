@@ -1,5 +1,6 @@
 import { reactive, ref, shallowRef } from 'vue'
 import * as Cesium from 'cesium'
+import { mapToolMode } from './mapTools'
 import type { CustomDataSource, Viewer } from 'cesium'
 import * as api from '../api/endpoints'
 import {
@@ -47,6 +48,8 @@ export const shellFilters = reactive({
   sensorType: '',
   sensorStatus: '',
   dataQuality: '',
+  dataTimeStart: '',
+  dataTimeEnd: '',
   taskStatus: '',
   taskId: '',
   showSensors: true,
@@ -126,6 +129,12 @@ export async function ensureShellViewer(container: HTMLElement): Promise<Viewer>
     /* ignore */
   }
   shellViewer.value = viewer
+  try {
+    // 关闭默认双击缩放，避免与测距/绘面双击结束冲突
+    viewer.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK)
+  } catch {
+    /* ignore */
+  }
   bindPick(viewer)
   flyToChina(viewer)
   shellStatus.value = '底图已加载'
@@ -169,7 +178,7 @@ function entityDescription(entity: Cesium.Entity): string {
   }
 }
 
-function parseEntityBizId(entityId: string): { kind: ShellFeatureKind; id: string } {
+export function parseEntityBizId(entityId: string): { kind: ShellFeatureKind; id: string } {
   const raw = String(entityId || '')
   if (raw.startsWith('sensor-cov-')) return { kind: 'sensor', id: raw.slice('sensor-cov-'.length) }
   if (raw.startsWith('sensor-')) return { kind: 'sensor', id: raw.slice('sensor-'.length) }
@@ -446,6 +455,8 @@ function bindPick(viewer: Viewer) {
   pickHandler?.destroy()
   pickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
   pickHandler.setInputAction((movement: { position: Cesium.Cartesian2 }) => {
+    // 测量/绘制/框选激活时，不抢点击，避免工具与点选互相干扰
+    if (mapToolMode.value !== 'none') return
     shellContextMenu.value = null
     const picked = viewer.scene.pick(movement.position)
     const entity = picked?.id as Cesium.Entity | undefined
@@ -593,6 +604,8 @@ export async function selectShellFeature(
       // second tick after render
       setTimeout(() => updateShellBubbleScreen(), 50)
       setTimeout(() => updateShellBubbleScreen(), 200)
+      setTimeout(() => updateShellBubbleScreen(), 500)
+      setTimeout(() => updateShellBubbleScreen(), 900)
     })
   } else {
     updateShellBubbleScreen()
@@ -696,35 +709,72 @@ function filteredTasks() {
   })
 }
 
+function itemObservedMs(item: Record<string, unknown>): number | null {
+  const props = (item.properties || item) as Record<string, unknown>
+  const raw =
+    props.observedAt ||
+    props.timeStart ||
+    props.time_start ||
+    props.observed_at ||
+    item.observedAt ||
+    item.timeStart
+  if (raw == null || raw === '') return null
+  const t = Date.parse(String(raw))
+  return Number.isFinite(t) ? t : null
+}
+
 function filteredData() {
   const q = shellFilters.dataQuality.trim().toLowerCase()
-  if (!q) return cacheData
-  return cacheData.filter((item) => {
-    const props = (item.properties || item) as Record<string, unknown>
-    const quality = String(props.qualityStatus || props.quality || '').toLowerCase()
-    if (q === 'anomaly' || q === 'bad' || q === '异常') {
-      return (
-        quality.includes('bad') ||
-        quality.includes('anomaly') ||
-        quality.includes('fail') ||
-        quality.includes('invalid') ||
-        quality.includes('warning') ||
-        quality.includes('异常') ||
-        quality.includes('告警')
-      )
-    }
-    if (q === 'normal' || q === 'ok' || q === '正常') {
-      return (
-        quality.includes('normal') ||
-        quality.includes('ok') ||
-        quality.includes('good') ||
-        quality.includes('pass') ||
-        quality.includes('正常') ||
-        quality === 'unchecked'
-      )
-    }
-    return quality.includes(q)
-  })
+  let rows = cacheData
+  if (q) {
+    rows = rows.filter((item) => {
+      const props = (item.properties || item) as Record<string, unknown>
+      const quality = String(props.qualityStatus || props.quality || '').toLowerCase()
+      if (q === 'anomaly' || q === 'bad' || q === '异常') {
+        return (
+          quality.includes('bad') ||
+          quality.includes('anomaly') ||
+          quality.includes('fail') ||
+          quality.includes('invalid') ||
+          quality.includes('warning') ||
+          quality.includes('异常') ||
+          quality.includes('告警')
+        )
+      }
+      if (q === 'normal' || q === 'ok' || q === '正常') {
+        return (
+          quality.includes('normal') ||
+          quality.includes('ok') ||
+          quality.includes('good') ||
+          quality.includes('pass') ||
+          quality.includes('正常') ||
+          quality.includes('合格')
+        )
+      }
+      if (q === 'unchecked' || q === '未检') {
+        return (
+          quality === '' ||
+          quality.includes('unchecked') ||
+          quality.includes('unknown') ||
+          quality.includes('pending') ||
+          quality.includes('未')
+        )
+      }
+      return quality.includes(q)
+    })
+  }
+  const ts = shellFilters.dataTimeStart.trim()
+  const te = shellFilters.dataTimeEnd.trim()
+  if (ts || te) {
+    const startMs = ts ? Date.parse(ts) : Number.NEGATIVE_INFINITY
+    const endMs = te ? Date.parse(te) : Number.POSITIVE_INFINITY
+    rows = rows.filter((item) => {
+      const t = itemObservedMs(item)
+      if (t == null) return true
+      return t >= startMs && t <= endMs
+    })
+  }
+  return rows
 }
 
 
@@ -944,6 +994,39 @@ export async function rerenderShellLayers(fitView = true) {
   if (fitView) await flyToDataSources(viewer)
 }
 
+
+export function getCachedDataTimeExtent(): { min: number; max: number; count: number } | null {
+  const times: number[] = []
+  for (const item of cacheData) {
+    const t = itemObservedMs(item as Record<string, unknown>)
+    if (t != null) times.push(t)
+  }
+  if (!times.length) return null
+  return { min: Math.min(...times), max: Math.max(...times), count: times.length }
+}
+
+export async function setDataTimeWindow(startMs: number, endMs: number, options?: { fit?: boolean }) {
+  const start = Number.isFinite(startMs) ? new Date(startMs).toISOString() : ''
+  const end = Number.isFinite(endMs) ? new Date(endMs).toISOString() : ''
+  await patchShellFilters(
+    {
+      showSensors: false,
+      showData: true,
+      showTasks: false,
+      dataTimeStart: start,
+      dataTimeEnd: end,
+    },
+    { fit: options?.fit === true, rerender: true },
+  )
+}
+
+export async function clearDataTimeWindow(options?: { fit?: boolean }) {
+  await patchShellFilters(
+    { dataTimeStart: '', dataTimeEnd: '' },
+    { fit: options?.fit === true, rerender: true },
+  )
+}
+
 export function setShellVisibility(partial: Partial<typeof shellFilters>) {
   Object.assign(shellFilters, partial)
   applyVisibility()
@@ -960,6 +1043,8 @@ export async function patchShellFilters(
     partial.sensorType !== undefined ||
     partial.sensorStatus !== undefined ||
     partial.dataQuality !== undefined ||
+    partial.dataTimeStart !== undefined ||
+    partial.dataTimeEnd !== undefined ||
     partial.taskStatus !== undefined ||
     partial.taskId !== undefined
   if (needRerender) {
@@ -1082,6 +1167,8 @@ export async function clearShellBizFilters() {
   shellFilters.sensorType = ''
   shellFilters.sensorStatus = ''
   shellFilters.dataQuality = ''
+  shellFilters.dataTimeStart = ''
+  shellFilters.dataTimeEnd = ''
   shellFilters.taskStatus = ''
   shellFilters.taskId = ''
   await rerenderShellLayers()
@@ -1093,6 +1180,7 @@ export function shellActiveFilterSummary() {
   if (shellFilters.sensorType) parts.push(`类型:${shellFilters.sensorType}`)
   if (shellFilters.sensorStatus) parts.push(`传感状态:${shellFilters.sensorStatus}`)
   if (shellFilters.dataQuality) parts.push(`质量:${shellFilters.dataQuality}`)
+  if (shellFilters.dataTimeStart || shellFilters.dataTimeEnd) parts.push(`时间窗`)
   if (shellFilters.taskStatus) parts.push(`任务状态:${shellFilters.taskStatus}`)
   if (shellFilters.taskId) parts.push(`任务#${shellFilters.taskId}`)
   return parts.join(' · ')

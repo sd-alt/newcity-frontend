@@ -460,11 +460,14 @@ async function confirmCandidates() {
   pending.value = true
   error.value = null
   try {
-    await loadCandidates(true)
+    // stay on flow tab so primary CTA remains available for the next step
+    await loadCandidates(false, true)
     markDone('candidates')
     if (STEP_ORDER.indexOf(currentStep.value) <= STEP_ORDER.indexOf('candidates')) {
       advanceTo('basic')
     }
+    tab.value = 'flow'
+    await router.replace({ path: '/planning', query: { tab: 'flow' } })
     message.value = '候选筛选与评分已确认，可进行基础关联'
     try { await showCandidatesOnMap() } catch { /* map optional */ }
   } catch (err) {
@@ -482,6 +485,7 @@ async function basicAssociation() {
     await api.basicAssociation(taskId.value)
     markDone('basic')
     advanceTo('optimize')
+    tab.value = 'flow'
     message.value = '基础关联完成'
     await loadLists()
     // 关联后同步最新方案匹配，便于地图连线与方案管理
@@ -509,6 +513,7 @@ async function optimizeAssociation() {
     await api.optimizeAssociation(taskId.value)
     markDone('optimize')
     advanceTo('supplement')
+    tab.value = 'flow'
     message.value = '优化关联完成'
     await loadLists()
     const planRow = plans.value.find((pl) => String(pl.taskId) === String(taskId.value))
@@ -535,6 +540,7 @@ async function supplementAssociation() {
     await api.supplementAssociation(taskId.value)
     markDone('supplement')
     advanceTo('evaluate')
+    tab.value = 'flow'
     message.value = '增补关联完成'
     await loadLists()
     const planRow = plans.value.find((pl) => String(pl.taskId) === String(taskId.value))
@@ -570,6 +576,7 @@ async function requirementEvaluation() {
     } catch { /* map optional */ }
     markDone('evaluate')
     advanceTo('output')
+    tab.value = 'flow'
     message.value = '满足度评估完成（关联后核查）'
   } catch (err) {
     error.value = errMessage(err, '评估失败')
@@ -851,6 +858,7 @@ async function doPublishPlan(planId: unknown, status?: unknown) {
     await api.publishPlan(String(planId))
     message.value = '方案 #' + planId + ' 已发布'
     await loadLists()
+    try { await loadPlanResult(planId) } catch { /* map optional */ }
   } catch (err) {
     error.value = errMessage(err, '方案发布失败')
   } finally {
@@ -906,11 +914,29 @@ async function doApprovePlan(planId: unknown, status?: unknown) {
     await api.approvePlan(String(planId))
     message.value = '方案 #' + planId + ' 已审核通过'
     await loadLists()
+    try { await loadPlanResult(planId) } catch { /* map optional */ }
   } catch (err) {
     error.value = errMessage(err, '审核失败')
   } finally {
     pending.value = false
   }
+}
+
+
+function asCompareObj(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' ? (v as Record<string, unknown>) : {}
+}
+function planCompareSide(side: 'left' | 'right') {
+  return asCompareObj(asCompareObj(compareResult.value)[side])
+}
+function planCompareList(key: 'onlyLeft' | 'onlyRight' | 'scoreDiff') {
+  const raw = asCompareObj(compareResult.value)[key]
+  return Array.isArray(raw) ? (raw as Record<string, unknown>[]) : []
+}
+function scoreDeltaClass(delta: unknown) {
+  const n = Number(delta)
+  if (!Number.isFinite(n) || n === 0) return 'diff-same'
+  return n > 0 ? 'diff-up' : 'diff-down'
 }
 
 async function runPlanCompare() {
@@ -1249,6 +1275,22 @@ async function clearMapLinks() {
       <p v-if="message" class="ok-text">{{ message }}</p>
       <p v-if="hasTask" class="hint">当前任务 #{{ taskId }} · 状态 {{ taskStatus || '—' }} · 当前步骤 {{ currentStep }}</p>
 
+      <div v-if="taskId && currentAction" class="current-action-bar panel soft sticky-action" data-testid="planning-primary-bar">
+        <div>
+          <strong>当前应执行：{{ currentAction.label }}</strong>
+          <p class="muted" style="margin:0.2rem 0 0">{{ stepBlockedReason(currentAction.action) || '点击后推进流程并刷新地图关联结果' }}</p>
+        </div>
+        <button
+          class="btn"
+          type="button"
+          data-action-primary="1"
+          :data-action="currentAction.action"
+          :disabled="canRun(currentAction.action) === false"
+          :title="stepBlockedReason(currentAction.action) || currentAction.label"
+          @click="runCurrentStep"
+        >{{ pending ? '处理中…' : currentAction.label }}</button>
+      </div>
+
       <section v-if="tab === 'tasks'" class="panel">
         <h2>观测任务列表</h2>
         <table class="table">
@@ -1295,21 +1337,6 @@ async function clearMapLinks() {
           当前步骤：{{ STEPS.find((x) => x.key === currentStep)?.title || currentStep }}；
           已完成 {{ doneSteps.size }} 步。点击已完成步骤可回看/重跑。上方「…上图」只刷新地图；下方「执行…」才真正推进流程。
         </p>
-        <div v-if="taskId && currentAction" class="current-action-bar panel soft">
-          <div>
-            <strong>当前应执行：{{ currentAction.label }}</strong>
-            <p class="muted" style="margin:0.2rem 0 0">{{ stepBlockedReason(currentAction.action) || '点击后推进流程并刷新地图关联结果' }}</p>
-          </div>
-          <button
-            class="btn"
-            type="button"
-            data-action-primary="1"
-            :data-action="currentAction.action"
-            :disabled="canRun(currentAction.action) === false"
-            :title="stepBlockedReason(currentAction.action) || currentAction.label"
-            @click="runCurrentStep"
-          >{{ pending ? '处理中…' : currentAction.label }}</button>
-        </div>
 
         <div class="grid-2">
           <section class="panel">
@@ -1473,6 +1500,7 @@ async function clearMapLinks() {
         <table class="table">
           <thead><tr><th>ID</th><th>名称</th><th>任务</th><th>类型</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
+            <tr v-if="!plans.length"><td colspan="6" class="muted">暂无方案。请先完成观测规划关联流程生成方案。</td></tr>
             <tr v-for="p in plans" :key="String(p.id)" class="row-click" @click="onPlanRowClick(p)">
               <td>{{ p.id }}</td>
               <td>{{ p.name }}</td>
@@ -1507,10 +1535,100 @@ async function clearMapLinks() {
           </label>
           <button class="btn" type="button" :disabled="pending" @click="runPlanCompare">开始对比</button>
         </div>
-        <pre v-if="compareResult" class="result-pre">{{ JSON.stringify(compareResult, null, 2).slice(0, 4000) }}</pre>
+        <div v-if="compareResult" class="compare-panel">
+          <div class="compare-grid">
+            <div class="compare-card">
+              <h4>左方案 #{{ planCompareSide('left').id }} · {{ planCompareSide('left').name || '-' }}</h4>
+              <p>状态：{{ planStatusLabel(planCompareSide('left').status) }}</p>
+              <p>类型：{{ planCompareSide('left').planType || '-' }}</p>
+              <p>任务 / 指标：{{ planCompareSide('left').taskId || '-' }} / {{ planCompareSide('left').instanceId || '-' }}</p>
+              <p>匹配数：{{ planCompareSide('left').matchCount ?? '-' }}（命中 {{ planCompareSide('left').matchedCount ?? '-' }}）</p>
+              <p>平均分：{{ planCompareSide('left').avgScore ?? '-' }}</p>
+            </div>
+            <div class="compare-card">
+              <h4>右方案 #{{ planCompareSide('right').id }} · {{ planCompareSide('right').name || '-' }}</h4>
+              <p>状态：{{ planStatusLabel(planCompareSide('right').status) }}</p>
+              <p>类型：{{ planCompareSide('right').planType || '-' }}</p>
+              <p>任务 / 指标：{{ planCompareSide('right').taskId || '-' }} / {{ planCompareSide('right').instanceId || '-' }}</p>
+              <p>匹配数：{{ planCompareSide('right').matchCount ?? '-' }}（命中 {{ planCompareSide('right').matchedCount ?? '-' }}）</p>
+              <p>平均分：{{ planCompareSide('right').avgScore ?? '-' }}</p>
+            </div>
+          </div>
+          <p class="compare-meta">
+            共享匹配 {{ asCompareObj(compareResult).sharedMatchCount ?? 0 }}
+            · 同任务 {{ asCompareObj(compareResult).sameTask ? '是' : '否' }}
+            · 同指标 {{ asCompareObj(compareResult).sameInstance ? '是' : '否' }}
+          </p>
 
-        <pre v-if="planResult" class="result-pre">{{ JSON.stringify(planResult, null, 2).slice(0, 3500) }}</pre>
+          <h4>评分差异</h4>
+          <table class="table">
+            <thead><tr><th>资源</th><th>左分</th><th>右分</th><th>差值</th></tr></thead>
+            <tbody>
+              <tr v-if="!planCompareList('scoreDiff').length"><td colspan="4" class="muted">无评分差异项</td></tr>
+              <tr v-for="(row, i) in planCompareList('scoreDiff')" :key="'sd'+i">
+                <td>{{ row.platformName || ('平台#' + row.platformId) }}</td>
+                <td>{{ row.leftScore ?? '-' }}</td>
+                <td>{{ row.rightScore ?? '-' }}</td>
+                <td :class="scoreDeltaClass(row.delta)">{{ row.delta ?? '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4>仅左侧资源</h4>
+          <table class="table">
+            <thead><tr><th>资源</th><th>评分</th><th>命中</th></tr></thead>
+            <tbody>
+              <tr v-if="!planCompareList('onlyLeft').length"><td colspan="3" class="muted">无</td></tr>
+              <tr v-for="(row, i) in planCompareList('onlyLeft')" :key="'ol'+i">
+                <td>{{ row.platformName || ('平台#' + row.platformId) }}</td>
+                <td>{{ row.score ?? '-' }}</td>
+                <td>{{ row.matched ? '是' : '否' }}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4>仅右侧资源</h4>
+          <table class="table">
+            <thead><tr><th>资源</th><th>评分</th><th>命中</th></tr></thead>
+            <tbody>
+              <tr v-if="!planCompareList('onlyRight').length"><td colspan="3" class="muted">无</td></tr>
+              <tr v-for="(row, i) in planCompareList('onlyRight')" :key="'or'+i">
+                <td>{{ row.platformName || ('平台#' + row.platformId) }}</td>
+                <td>{{ row.score ?? '-' }}</td>
+                <td>{{ row.matched ? '是' : '否' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div v-if="planResult" class="compare-card" style="margin-top:12px">
+          <h4>当前方案结果摘要</h4>
+          <p>方案 #{{ asCompareObj(planResult).id || asCompareObj(planResult).planId || '-' }} · 状态 {{ planStatusLabel(asCompareObj(planResult).status) }}</p>
+          <p class="muted">完整 JSON 已折叠展示，便于核对：</p>
+          <pre class="result-pre">{{ JSON.stringify(planResult, null, 2).slice(0, 2500) }}</pre>
+        </div>
       </section>
     </template>
   </section>
 </template>
+.sticky-action {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0.4rem 0 0.75rem;
+}
+.sticky-action .btn {
+  flex-shrink: 0;
+  min-width: 140px;
+}
+.current-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+

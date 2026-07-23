@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
 import {
   applyShellSensorStatusFilter,
@@ -313,7 +313,7 @@ async function showOnMap() {
         <p class="eyebrow">传感资源中心</p>
         <h1>传感器类型、资源建模与查询</h1>
       </div>
-      <RouterLink class="btn" to="/gis">GIS 上图</RouterLink>
+      <button class="btn" type="button" :disabled="shellLoading" @click="showOnMap">资源上图</button>
     </header>
     <div class="tabs">
       <button v-for="t in tabs" :key="t.key" type="button" class="tab" :class="{ active: tab === t.key }" @click="setTab(t.key)">{{ t.label }}</button>
@@ -330,6 +330,7 @@ async function showOnMap() {
           <table class="table">
             <thead><tr><th>ID</th><th>编码</th><th>名称</th></tr></thead>
             <tbody>
+              <tr v-if="!platformTypes.length"><td colspan="3" class="muted">暂无平台类型</td></tr>
               <tr v-for="t in platformTypes" :key="'pt'+t.id"><td>{{ t.id }}</td><td><code>{{ t.code }}</code></td><td>{{ t.name }}</td></tr>
             </tbody>
           </table>
@@ -339,6 +340,7 @@ async function showOnMap() {
           <table class="table">
             <thead><tr><th>ID</th><th>编码</th><th>名称</th></tr></thead>
             <tbody>
+              <tr v-if="!sensorTypes.length"><td colspan="3" class="muted">暂无传感器类型</td></tr>
               <tr v-for="t in sensorTypes" :key="'st'+t.id"><td>{{ t.id }}</td><td><code>{{ t.code }}</code></td><td>{{ t.name }}</td></tr>
             </tbody>
           </table>
@@ -365,6 +367,7 @@ async function showOnMap() {
       <table class="table">
         <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>标识</th><th>状态</th><th></th></tr></thead>
         <tbody>
+          <tr v-if="!platforms.length"><td colspan="6" class="muted">暂无平台/传感器资源，请先新增平台</td></tr>
           <tr v-for="p in platforms" :key="String(p.id)" class="row-click" :class="{ selected: shellSelected && shellSelected.kind === 'sensor' && shellSelected.id === String(p.id) }" @click="locateOnMap('sensor', String(p.id))">
             <td>{{ p.id }}</td><td>{{ p.name }}</td><td>{{ p.platformTypeId }}</td><td><code>{{ p.identifier }}</code></td><td>{{ p.status }}</td>
             <td class="ops">
@@ -396,6 +399,7 @@ async function showOnMap() {
       <table class="table">
         <thead><tr><th>ID</th><th>名称</th><th>平台</th><th>类型</th><th>精度</th><th></th></tr></thead>
         <tbody>
+          <tr v-if="!sensors.length"><td colspan="6" class="muted">暂无传感器记录</td></tr>
           <tr v-for="s in sensors" :key="'s'+s.id" class="row-click" @click="locateOnMap('sensor', String(s.platformId || s.id))">
             <td>{{ s.id }}</td>
             <td>{{ s.sensorName || s.name || s.id }}</td>
@@ -440,6 +444,7 @@ async function showOnMap() {
       <table class="table">
         <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>标识</th><th>所属单位</th><th>位置</th><th>状态</th></tr></thead>
         <tbody>
+          <tr v-if="!filteredPlatforms.length"><td colspan="6" class="muted">无匹配查询结果</td></tr>
           <tr v-for="p in filteredPlatforms" :key="'f'+p.id" class="row-click" :class="{ selected: shellSelected && shellSelected.kind === 'sensor' && shellSelected.id === String(p.id) }" @click="locateOnMap('sensor', String(p.id))">
             <td>{{ p.id }}</td>
             <td>{{ p.name }}</td>
@@ -462,7 +467,7 @@ async function showOnMap() {
         <label>关键字<input v-model="vizFilter.keyword" /></label>
         <button class="btn" type="button" @click="loadViz">刷新摘要</button>
         <button class="btn" type="button" :disabled="shellLoading" @click="showOnMap">底图上图</button>
-        <RouterLink class="btn ghost" to="/gis?tab=sensors">图层控制</RouterLink>
+        <button class="btn ghost" type="button" :disabled="shellLoading" @click="showOnMap">图层刷新上图</button>
       </div>
       <p class="muted">摘要条数 {{ vizRows.length }}</p>
       <table class="table" v-if="vizRows.length">
@@ -472,6 +477,7 @@ async function showOnMap() {
           </tr>
         </thead>
         <tbody>
+          <tr v-if="!vizRows.length"><td colspan="6" class="muted">暂无可视化资源，请先上图或调整筛选</td></tr>
           <tr v-for="row in vizRows" :key="String(row.platformId || row.id)" class="row-click" @click="locateOnMap('sensor', String(row.platformId || row.id))">
             <td>{{ row.platformId || row.id }}</td>
             <td>{{ row.platformName || row.name }}</td>

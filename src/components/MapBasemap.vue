@@ -12,6 +12,7 @@ import {
   focusLonLat,
   reloadShellLayers,
   resetShellView,
+  parseEntityBizId,
   selectShellFeature,
   setShellBasemap,
   setShellVisibility,
@@ -320,30 +321,27 @@ watch(
 
 watch(mapBoxSelectResult, async (res) => {
   if (!res || !res.entityIds.length) return
-  const first = res.entityIds[0]
-  if (!first) return
-  let kind: ShellFeatureKind = 'unknown'
-  let id = first
-  if (first.startsWith('sensor-cov-')) {
-    kind = 'sensor'
-    id = first.slice('sensor-cov-'.length)
-  } else if (first.startsWith('sensor-')) {
-    kind = 'sensor'
-    id = first.slice('sensor-'.length)
-  } else if (first.startsWith('data-heat-')) {
-    kind = 'data'
-    id = first.slice('data-heat-'.length)
-  } else if (first.startsWith('data-')) {
-    kind = 'data'
-    id = first.slice('data-'.length)
-  } else if (first.startsWith('task-')) {
-    kind = 'task'
-    id = first.slice('task-'.length)
-  } else if (first.startsWith('indicator-')) {
-    kind = 'indicator'
-    id = first.slice('indicator-'.length)
+  // Prefer first selectable business entity (skip heat/assoc helpers when possible)
+  let picked: { kind: ShellFeatureKind; id: string } | null = null
+  for (const eid of res.entityIds) {
+    const parsed = parseEntityBizId(String(eid))
+    if (parsed.id && ['sensor', 'data', 'task', 'indicator'].includes(parsed.kind)) {
+      // ignore pure geometry helpers without numeric/business id tail
+      if (String(parsed.id).startsWith('heat')) continue
+      if (String(eid).startsWith('assoc-link-')) continue
+      if (String(eid).startsWith('data-heat-')) continue
+      picked = parsed
+      break
+    }
   }
-  await selectShellFeature(kind, id, { openBubble: true, fly: true })
+  if (!picked) {
+    mapToolMessage.value = `框选到 ${res.count} 个要素`
+    return
+  }
+  const ok = await selectShellFeature(picked.kind, picked.id, { openBubble: true, fly: false })
+  mapToolMessage.value = ok
+    ? `框选 ${res.count} 个，已选中${picked.kind} #${picked.id}`
+    : `框选到 ${res.count} 个要素`
 })
 
 onBeforeUnmount(() => {
@@ -362,8 +360,8 @@ function setHost(el: unknown) {
 
     <div class="map-toolbar" aria-label="地图工具">
       <button type="button" class="map-tool" title="放大" @click="zoomIn">+</button>
-      <button type="button" class="map-tool" title="缩小" @click="zoomOut">−</button>
-      <button type="button" class="map-tool" title="复位" @click="resetShellView">定位</button>
+      <button type="button" class="map-tool" title="缩小" @click="zoomOut">-</button>
+      <button type="button" class="map-tool" title="复位" @click="resetShellView">复位</button>
       <button type="button" class="map-tool" title="适应" @click="fitShellView">适应</button>
       <button type="button" class="map-tool" :class="{ active: panel === 'basemap' }" title="底图" @click="togglePanel('basemap')">底图</button>
       <button type="button" class="map-tool" :class="{ active: panel === 'layers' }" title="图层" @click="togglePanel('layers')">图层</button>

@@ -16,6 +16,7 @@ import {
   shellViewer,
   type ShellFeatureKind,
 } from '../gis/mapShell'
+import { mapToolMessage } from '../gis/mapTools'
 import type { BasemapKey } from '../gis/mapConfig'
 import * as api from '../api/endpoints'
 
@@ -191,7 +192,11 @@ watch(
 
 // 仅中心路径切换时重载底图业务图层，避免二级菜单切换清空关联线/高亮
 watch(
-  () => [route.path, String(route.query.tab || '')],
+  () => {
+    const path = route.path
+    const tab = String(route.query.tab || '')
+    return path.startsWith('/gis') ? path + '::' + tab : path
+  },
   async () => {
     await reloadShellLayers(route.path, { tab: String(route.query.tab || '') })
   },
@@ -211,6 +216,15 @@ function toggleRight() {
 function closeRight() {
   rightOpen.value = false
 }
+function trayKindLabel(kind: unknown) {
+  const k = String(kind || '')
+  if (k === 'sensor') return '传感器'
+  if (k === 'data') return '监测数据'
+  if (k === 'task') return '观测任务'
+  if (k === 'indicator') return '指标实例'
+  return k || '对象'
+}
+
 function toggleBottom() {
   bottomOpen.value = !bottomOpen.value
 }
@@ -548,7 +562,7 @@ async function doLogout() {
         <span class="muted">{{ bottomSummary }}</span>
       </button>
       <div v-if="bottomOpen" class="bottom-body">
-        <div class="bottom-grid four">
+        <div class="bottom-grid five">
           <div>
             <h4>总览</h4>
             <p>
@@ -577,6 +591,15 @@ async function doLogout() {
             <p v-else-if="activeCenter?.key === 'algorithms'">列表点击任务后地图高亮输入/结果范围</p>
             <p v-else-if="activeCenter?.key === 'applications'">点击统计卡片联动过滤地图图层</p>
             <p v-else>切换中心保留地图视角；右键地图可快速新建与查询</p>
+          </div>
+
+          <div>
+            <h4>当前选中 / 工具</h4>
+            <p v-if="shellSelected">
+              {{ trayKindLabel(shellSelected.kind) }} · {{ shellSelected.name }} · #{{ shellSelected.id }}
+            </p>
+            <p v-else class="muted">未选中地图对象</p>
+            <p v-if="mapToolMessage" class="muted">{{ mapToolMessage }}</p>
           </div>
         </div>
       </div>

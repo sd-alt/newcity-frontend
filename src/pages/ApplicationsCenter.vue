@@ -9,6 +9,7 @@ import {
   shellFilters,
   shellLoading,
   shellStatus,
+  shellSelected,
 } from '../gis/mapShell'
 import { errMessage } from '../utils/errors'
 import { useAuthStore } from '../stores/auth'
@@ -20,6 +21,7 @@ const tab = ref('gis')
 const error = ref<string | null>(null)
 const message = ref<string | null>(null)
 const pending = ref(false)
+const mapFocus = ref<{ kind: string; id: string; name: string } | null>(null)
 
 const resourceStats = ref<Record<string, unknown> | null>(null)
 const dataStats = ref<Record<string, unknown> | null>(null)
@@ -159,6 +161,75 @@ async function loadGisPreview() {
   }
 }
 
+function kindLabel(kind: unknown) {
+  const k = String(kind || '')
+  if (k === "sensor") return "传感资源"
+  if (k === "data") return "监测数据"
+  if (k === "task") return "观测任务"
+  if (k === "indicator") return "指标实例"
+  return k || "对象"
+}
+
+watch(shellSelected, async (v) => {
+  if (!v) {
+    return
+  }
+  if (!String(route.path || "").includes("/applications")) return
+  mapFocus.value = {
+    kind: String(v.kind || ""),
+    id: String(v.id || ""),
+    name: String(v.name || ""),
+  }
+  error.value = null
+  // 地图点选反向联动：切换对应业务图层（不强制 fly，避免打断用户视角）
+  try {
+    if (v.kind === "sensor") {
+      await patchShellFilters(
+        { showSensors: true, showData: false, showTasks: false },
+        { fit: false, rerender: false },
+      )
+    } else if (v.kind === "data") {
+      await patchShellFilters(
+        { showSensors: false, showData: true, showTasks: false },
+        { fit: false, rerender: false },
+      )
+    } else if (v.kind === "task") {
+      await patchShellFilters(
+        { showSensors: false, showData: false, showTasks: true },
+        { fit: false, rerender: false },
+      )
+    } else if (v.kind === "indicator") {
+      await patchShellFilters(
+        { showSensors: false, showData: false, showTasks: false },
+        { fit: false, rerender: false },
+      )
+    }
+  } catch {
+    /* map filter optional */
+  }
+  message.value =
+    "地图选中：" +
+    kindLabel(v.kind) +
+    " " +
+    String(v.name || "") +
+    "（#" +
+    String(v.id) +
+    "）— 已反向联动图层/统计，业务 ID 与列表一致"
+})
+
+function clearMapFocus() {
+  mapFocus.value = null
+}
+
+async function jumpFromMapFocus() {
+  const f = mapFocus.value
+  if (!f) return
+  if (f.kind === "sensor") await router.push({ path: "/resources", query: { tab: "crud" } })
+  else if (f.kind === "data") await router.push({ path: "/data", query: { tab: "query" } })
+  else if (f.kind === "task") await router.push({ path: "/planning", query: { tab: "tasks" } })
+  else if (f.kind === "indicator") await router.push({ path: "/indicators", query: { tab: "instances" } })
+}
+
 onMounted(async () => {
   syncTab()
   await loadStats({ quiet: true })
@@ -262,6 +333,7 @@ function toggleShellLayer(key: 'showSensors' | 'showData' | 'showTasks', ev: Eve
 }
 
 async function filterMapByStat(kind: 'sensors' | 'data' | 'tasks' | 'all' | 'indicators') {
+  error.value = null
   if (kind === 'all') await mapShowAll()
   else if (kind === 'sensors') await mapShowSensors()
   else if (kind === 'data') await mapShowData()
@@ -357,7 +429,7 @@ async function filterTasksByStatus(status: unknown) {
         <h1>综合统计与 GIS 展示</h1>
         <p class="muted">统计与地图联动：点击下方按钮切换地图图层；也可在地图右侧「图层」工具中勾选。</p>
       </div>
-      <RouterLink class="btn" to="/gis">进入 GIS 工作台</RouterLink>
+      <button class="btn" type="button" :disabled="shellLoading" @click="mapShowAll">底图全部上图</button>
     </header>
     <div class="tabs">
       <button
@@ -371,8 +443,20 @@ async function filterTasksByStatus(status: unknown) {
         {{ t.label }}
       </button>
     </div>
-    <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="message" class="ok">{{ message }}</p>
+    
+      <div v-if="mapFocus" class="map-focus-banner">
+        <div>
+          <strong>地图联动对象</strong>
+          {{ kindLabel(mapFocus.kind) }} · {{ mapFocus.name || '未命名' }} · #{{ mapFocus.id }}
+        </div>
+        <div class="ops">
+          <button class="btn ghost tiny" type="button" @click="jumpFromMapFocus">打开所属中心</button>
+          <button class="btn ghost tiny" type="button" @click="clearMapFocus">清除联动</button>
+        </div>
+      </div>
+
+      <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="message" class="ok-text">{{ message }}</p>
 
     <section v-if="tab === 'stats'" class="panel">
 
@@ -409,6 +493,7 @@ async function filterTasksByStatus(status: unknown) {
           <table class="table">
             <thead><tr><th>类型</th><th>编码</th><th>数量</th></tr></thead>
             <tbody>
+              <tr v-if="!resourceByType.length"><td colspan="3" class="muted">暂无类型统计，点击刷新统计或检查数据</td></tr>
               <tr v-for="(row, i) in resourceByType" :key="'rt'+i" class="row-click" @click="filterSensorsByType(row.typeCode || row.code)">
                 <td>{{ rowLabel(row, ['typeName', 'name', 'label']) }}</td>
                 <td>{{ rowLabel(row, ['typeCode', 'code']) }}</td>
@@ -422,6 +507,7 @@ async function filterTasksByStatus(status: unknown) {
           <table class="table">
             <thead><tr><th>状态</th><th>数量</th></tr></thead>
             <tbody>
+              <tr v-if="!resourceByStatus.length"><td colspan="3" class="muted">暂无状态统计</td></tr>
               <tr v-for="(row, i) in resourceByStatus" :key="'rs'+i" class="row-click" @click="filterSensorsByStatus(row.status || row.label || row.name)">
                 <td>{{ rowLabel(row, ['status', 'label', 'name']) }}</td>
                 <td>{{ rowCount(row) }}</td>
@@ -479,6 +565,7 @@ async function filterTasksByStatus(status: unknown) {
           <table class="table">
             <thead><tr><th>质量</th><th>数量</th></tr></thead>
             <tbody>
+              <tr v-if="!dataByQuality.length"><td colspan="3" class="muted">暂无质量统计</td></tr>
               <tr v-for="(row, i) in dataByQuality" :key="'dq'+i" class="row-click" @click="filterDataByQuality(row.qualityStatus || row.label || row.name)">
                 <td>{{ rowLabel(row, ['qualityStatus', 'label', 'name']) }}</td>
                 <td>{{ rowCount(row) }}</td>
@@ -511,6 +598,7 @@ async function filterTasksByStatus(status: unknown) {
           <table class="table">
             <thead><tr><th>状态</th><th>数量</th></tr></thead>
             <tbody>
+              <tr v-if="!taskByStatus.length"><td colspan="3" class="muted">暂无任务状态统计</td></tr>
               <tr v-for="(row, i) in taskByStatus" :key="'ts'+i" class="row-click" @click="filterTasksByStatus(row.status || row.label || row.name)">
                 <td>{{ rowLabel(row, ['status', 'label', 'name']) }}</td>
                 <td>{{ rowCount(row) }}</td>
@@ -554,7 +642,7 @@ async function filterTasksByStatus(status: unknown) {
         <button class="btn ghost" type="button" :disabled="shellLoading" @click="filterMapByStat('all')">显示全部图层</button>
         <button class="btn ghost" type="button" :disabled="shellLoading" @click="mapShowIndicators">仅指标范围</button>
         <button class="btn ghost" type="button" :disabled="shellLoading" @click="mapRefresh">刷新图层</button>
-        <RouterLink class="btn ghost" to="/gis">图层控制页</RouterLink>
+        <button class="btn ghost" type="button" :disabled="shellLoading" @click="mapRefresh">刷新底图图层</button>
       </div>
       <div class="form-row" style="margin-top:0.6rem">
         <label class="check"><input type="checkbox" :checked="shellFilters.showSensors" @change="toggleShellLayer('showSensors', $event)" /> 传感器 <span class="badge">{{ shellCounts.sensors }}</span></label>
@@ -601,7 +689,7 @@ async function filterTasksByStatus(status: unknown) {
       <p v-else class="muted">暂无图层目录记录。</p>
       <h3>工作台原始摘要</h3>
       <pre class="result-pre">{{ workbench ? JSON.stringify(workbench, null, 2).slice(0, 3500) : '暂无' }}</pre>
-      <RouterLink class="btn" to="/gis">进入地图交互</RouterLink>
+      <button class="btn" type="button" :disabled="shellLoading" @click="mapShowAll">底图全部上图</button>
     </section>
   </section>
 </template>

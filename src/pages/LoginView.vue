@@ -36,11 +36,11 @@ async function onSubmit() {
       <form class="form" @submit.prevent="onSubmit">
         <label>
           用户名
-          <input v-model="username" autocomplete="username" />
+          <input v-model="username" type="text" name="username" autocomplete="username" placeholder="用户名" />
         </label>
         <label>
           密码
-          <input v-model="password" type="password" autocomplete="current-password" />
+          <input v-model="password" type="password" name="password" autocomplete="current-password" placeholder="密码" />
         </label>
         <p v-if="error" class="error">{{ error }}</p>
         <button class="btn block" type="submit" :disabled="pending">

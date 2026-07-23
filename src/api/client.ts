@@ -3,9 +3,24 @@ import type { Envelope } from './types'
 const CSRF_COOKIE = 'csrftoken'
 
 function readCookie(name: string): string | null {
-  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`))
+  const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'))
   if (!match || match[1] == null) return null
   return decodeURIComponent(match[1])
+}
+
+function errorMessage(body: unknown, status: number): string {
+  if (typeof body === 'object' && body) {
+    const obj = body as Record<string, unknown>
+    if (typeof obj.detail === 'string') return obj.detail
+    if (typeof obj.message === 'string') return obj.message
+  }
+  if (typeof body === 'string' && body.trim()) return body
+  return 'HTTP ' + status
+}
+
+function isCsrfFailure(status: number, message: string): boolean {
+  if (status !== 403) return false
+  return /csrf/i.test(message) || /trusted origins/i.test(message)
 }
 
 export class ApiError extends Error {
@@ -28,7 +43,24 @@ async function parseBody(response: Response): Promise<unknown> {
   }
 }
 
-export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function ensureCsrfCookie(force = false): Promise<string | null> {
+  if (!force) {
+    const existing = readCookie(CSRF_COOKIE)
+    if (existing) return existing
+  }
+  await fetch('/api/v1/auth/csrf', {
+    method: 'GET',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  })
+  return readCookie(CSRF_COOKIE)
+}
+
+export async function apiRequest<T>(
+  path: string,
+  options: RequestInit = {},
+  retried = false,
+): Promise<T> {
   const method = (options.method || 'GET').toUpperCase()
   const headers = new Headers(options.headers || {})
   if (!headers.has('Accept')) headers.set('Accept', 'application/json')
@@ -42,7 +74,7 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
     if (isFormData && headers.has('Content-Type')) {
       headers.delete('Content-Type')
     }
-    const csrf = readCookie(CSRF_COOKIE)
+    const csrf = await ensureCsrfCookie(false)
     if (csrf) headers.set('X-CSRFToken', csrf)
   }
 
@@ -54,10 +86,11 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   })
   const body = await parseBody(response)
   if (!response.ok) {
-    const message =
-      typeof body === 'object' && body && 'message' in body
-        ? String((body as { message: string }).message)
-        : `HTTP ${response.status}`
+    const message = errorMessage(body, response.status)
+    if (isWrite && !retried && isCsrfFailure(response.status, message)) {
+      await ensureCsrfCookie(true)
+      return apiRequest<T>(path, options, true)
+    }
     throw new ApiError(response.status, message, body)
   }
   return body as T
