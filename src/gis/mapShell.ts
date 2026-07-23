@@ -376,7 +376,7 @@ function selectFromEntity(
   shellSelected.value = {
     kind: parsed.kind,
     id: parsed.id,
-    name: String(entity.name || entity.id || '要素'),
+    name: String(entity.name || entity.id || '未命名'),
     description,
   }
   // Always prefer entity projected position so bubble anchors to the feature

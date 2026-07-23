@@ -27,7 +27,11 @@ const themes = ref<Record<string, unknown>[]>([])
 const scales = ref<Record<string, unknown>[]>([])
 const definitions = ref<Record<string, unknown>[]>([])
 const instances = ref<Record<string, unknown>[]>([])
-const tree = ref<unknown>(null)
+const tree = ref<Array<Record<string, unknown>>>([])
+const selectedTreeDefId = ref('')
+const expandedDomains = ref<Record<string, boolean>>({})
+const expandedThemes = ref<Record<string, boolean>>({})
+const expandedDefs = ref<Record<string, boolean>>({})
 const versions = ref<Record<string, unknown>[]>([])
 const exportPreview = ref('')
 const queryText = ref('')
@@ -160,7 +164,14 @@ async function loadBase() {
 async function loadTree() {
   try {
     const res = await api.getIndicatorTree()
-    tree.value = res.data
+    const data = Array.isArray(res.data) ? res.data : []
+    tree.value = data as Array<Record<string, unknown>>
+    const open: Record<string, boolean> = { ...expandedDomains.value }
+    for (const d of tree.value) {
+      const k = String(d.id ?? d.code ?? '')
+      if (k && open[k] === undefined) open[k] = true
+    }
+    expandedDomains.value = open
   } catch (err) {
     error.value = errMessage(err, '树加载失败')
   }
@@ -398,6 +409,85 @@ async function showIndicatorsOnMap() {
   message.value = `地图已加载指标实例 ${shellCounts.indicators} 个`
 }
 
+
+function domainList(): Array<Record<string, unknown>> {
+  return Array.isArray(tree.value) ? tree.value : []
+}
+
+function themeList(domain: Record<string, unknown>): Array<Record<string, unknown>> {
+  const themes = domain.themes
+  return Array.isArray(themes) ? (themes as Array<Record<string, unknown>>) : []
+}
+
+function defList(theme: Record<string, unknown>): Array<Record<string, unknown>> {
+  const defs = theme.definitions
+  return Array.isArray(defs) ? (defs as Array<Record<string, unknown>>) : []
+}
+
+function subThemeList(theme: Record<string, unknown>): Array<Record<string, unknown>> {
+  const subs = theme.subThemes || theme.sub_themes
+  return Array.isArray(subs) ? (subs as Array<Record<string, unknown>>) : []
+}
+
+function instancesForDef(defId: unknown) {
+  const id = String(defId ?? '')
+  return instances.value.filter((i) => String(i.defId ?? i.definitionId ?? '') === id)
+}
+
+function isDomainOpen(id: unknown) {
+  const key = String(id ?? '')
+  const v = expandedDomains.value[key]
+  return v === undefined ? true : v
+}
+function toggleDomain(id: unknown) {
+  const key = String(id ?? '')
+  expandedDomains.value = { ...expandedDomains.value, [key]: !isDomainOpen(key) }
+}
+function isThemeOpen(id: unknown) {
+  const key = String(id ?? '')
+  const v = expandedThemes.value[key]
+  return v === undefined ? true : v
+}
+function toggleTheme(id: unknown) {
+  const key = String(id ?? '')
+  expandedThemes.value = { ...expandedThemes.value, [key]: !isThemeOpen(key) }
+}
+function isDefOpen(id: unknown) {
+  const key = String(id ?? '')
+  if (selectedTreeDefId.value === key) return true
+  const v = expandedDefs.value[key]
+  return v === undefined ? false : v
+}
+function toggleDef(id: unknown) {
+  const key = String(id ?? '')
+  expandedDefs.value = { ...expandedDefs.value, [key]: !isDefOpen(key) }
+}
+
+async function locateDefinitionOnMap(defId: unknown) {
+  const id = String(defId ?? '')
+  selectedTreeDefId.value = id
+  expandedDefs.value = { ...expandedDefs.value, [id]: true }
+  error.value = null
+  try {
+    await showIndicatorsWorkspace('/indicators')
+  } catch {
+    /* optional */
+  }
+  const list = instancesForDef(id)
+  if (!list.length) {
+    message.value = '样例 #' + id + ' 下暂无指标实例'
+    return
+  }
+  const withGeom = list.find((i) => String(i.spatialWkt || i.spatial_wkt || '').trim())
+  const target = withGeom ?? list[0]
+  if (!target) {
+    message.value = '样例 #' + id + ' 下暂无可用实例'
+    return
+  }
+  await locateInstanceOnMap(target.id)
+  message.value = '样例 #' + id + ' 共 ' + list.length + ' 个实例，已定位 ' + String(target.instanceName || target.id)
+}
+
 async function locateInstanceOnMap(id: string | number | unknown) {
   // 指标范围图层不受 showSensors/Data/Tasks 控制，确保实例已加载后定位
   const ok = await selectShellFeature('indicator', String(id), { openBubble: true, fly: true })
@@ -510,9 +600,9 @@ async function locateInstanceOnMap(id: string | number | unknown) {
             <td>{{ i.definitionVersion || i.definition_version || '-' }}</td>
             <td>{{ i.status || '-' }}</td>
             <td class="ops">
-              <button class="btn ghost" type="button" @click="setInstanceStatus(i.id, 'published')">发布</button>
-              <button class="btn ghost" type="button" @click="setInstanceStatus(i.id, 'inactive')">停用</button>
-              <button class="btn ghost" type="button" @click="setInstanceStatus(i.id, 'draft')">回退草稿</button>
+              <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'published')">发布</button>
+              <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'inactive')">停用</button>
+              <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'draft')">回退草稿</button>
               <button class="btn ghost" type="button" @click.stop="removeInstance(i.id)">删除</button>
             </td>
           </tr>
@@ -521,10 +611,97 @@ async function locateInstanceOnMap(id: string | number | unknown) {
     </section>
 
     <section v-show="tab === 'tree'" class="panel">
-      <div class="form-row" style="margin-bottom:0.6rem"><button class="btn" type="button" :disabled="shellLoading" @click="showIndicatorsOnMap">指标范围上图</button><span class="muted">{{ shellStatus }} · 指标 {{ shellCounts.indicators }}</span></div>
+      <div class="form-row" style="margin-bottom:0.6rem">
+        <button class="btn" type="button" :disabled="shellLoading" @click="showIndicatorsOnMap">指标范围上图</button>
+        <button class="btn ghost" type="button" @click="loadTree">刷新树</button>
+        <span class="muted">{{ shellStatus }} · 指标 {{ shellCounts.indicators }} · 实例库 {{ instances.length }}</span>
+      </div>
       <h2>指标树（领域—主题—样例—实例）</h2>
-      <button class="btn ghost" type="button" @click="loadTree">刷新</button>
-      <pre class="result-pre">{{ tree ? JSON.stringify(tree, null, 2) : '暂无' }}</pre>
+      <p class="muted">点击样例或实例：地图定位并高亮对应空间范围。</p>
+      <div v-if="!domainList().length" class="muted">暂无树数据，请先维护领域/主题/样例。</div>
+      <ul v-else class="ind-tree">
+        <li v-for="domain in domainList()" :key="'d'+domain.id" class="ind-tree-domain">
+          <button type="button" class="tree-row domain" @click="toggleDomain(domain.id)">
+            <span class="tree-caret">{{ isDomainOpen(domain.id) ? '▼' : '▶' }}</span>
+            <strong>{{ domain.name || domain.code }}</strong>
+            <span class="muted">领域</span>
+          </button>
+          <ul v-show="isDomainOpen(domain.id)">
+            <li v-for="theme in themeList(domain)" :key="'t'+theme.id" class="ind-tree-theme">
+              <button type="button" class="tree-row theme" @click="toggleTheme(theme.id)">
+                <span class="tree-caret">{{ isThemeOpen(theme.id) ? '▼' : '▶' }}</span>
+                <strong>{{ theme.name || theme.code }}</strong>
+                <span class="muted">主题</span>
+              </button>
+              <ul v-show="isThemeOpen(theme.id)">
+                <li v-for="def in defList(theme)" :key="'def'+def.id" class="ind-tree-def">
+                  <button
+                    type="button"
+                    class="tree-row def"
+                    :class="{ active: selectedTreeDefId === String(def.id) }"
+                    @click="toggleDef(def.id); locateDefinitionOnMap(def.id)"
+                  >
+                    <span class="tree-caret">{{ isDefOpen(def.id) ? '▼' : '▶' }}</span>
+                    <strong>{{ def.name || def.code }}</strong>
+                    <span class="muted">样例 · {{ def.unit || '-' }} · 实例 {{ instancesForDef(def.id).length }}</span>
+                  </button>
+                  <ul v-show="isDefOpen(def.id)">
+                    <li v-for="inst in instancesForDef(def.id)" :key="'i'+inst.id">
+                      <button
+                        type="button"
+                        class="tree-row inst"
+                        :class="{ selected: shellSelected && shellSelected.kind === 'indicator' && shellSelected.id === String(inst.id) }"
+                        @click.stop="locateInstanceOnMap(inst.id)"
+                      >
+                        <span class="dot" :class="String(inst.status || '')"></span>
+                        {{ inst.instanceName || ('实例#' + inst.id) }}
+                        <span class="muted">{{ inst.status || '-' }}</span>
+                      </button>
+                    </li>
+                    <li v-if="!instancesForDef(def.id).length" class="muted tree-empty">暂无实例</li>
+                  </ul>
+                </li>
+                <li v-for="sub in subThemeList(theme)" :key="'st'+sub.id" class="ind-tree-theme">
+                  <button type="button" class="tree-row theme" @click="toggleTheme('sub-'+String(sub.id))">
+                    <span class="tree-caret">{{ isThemeOpen('sub-'+String(sub.id)) ? '▼' : '▶' }}</span>
+                    <strong>{{ sub.name || sub.code }}</strong>
+                    <span class="muted">子主题</span>
+                  </button>
+                  <ul v-show="isThemeOpen('sub-'+String(sub.id))">
+                    <li v-for="def in defList(sub)" :key="'sdef'+def.id" class="ind-tree-def">
+                      <button
+                        type="button"
+                        class="tree-row def"
+                        :class="{ active: selectedTreeDefId === String(def.id) }"
+                        @click="toggleDef(def.id); locateDefinitionOnMap(def.id)"
+                      >
+                        <span class="tree-caret">{{ isDefOpen(def.id) ? '▼' : '▶' }}</span>
+                        <strong>{{ def.name || def.code }}</strong>
+                        <span class="muted">样例 · 实例 {{ instancesForDef(def.id).length }}</span>
+                      </button>
+                      <ul v-show="isDefOpen(def.id)">
+                        <li v-for="inst in instancesForDef(def.id)" :key="'si'+inst.id">
+                          <button
+                            type="button"
+                            class="tree-row inst"
+                            :class="{ selected: shellSelected && shellSelected.kind === 'indicator' && shellSelected.id === String(inst.id) }"
+                            @click.stop="locateInstanceOnMap(inst.id)"
+                          >
+                            <span class="dot" :class="String(inst.status || '')"></span>
+                            {{ inst.instanceName || ('实例#' + inst.id) }}
+                            <span class="muted">{{ inst.status || '-' }}</span>
+                          </button>
+                        </li>
+                        <li v-if="!instancesForDef(def.id).length" class="muted tree-empty">暂无实例</li>
+                      </ul>
+                    </li>
+                  </ul>
+                </li>
+              </ul>
+            </li>
+          </ul>
+        </li>
+      </ul>
     </section>
 
     <section v-show="tab === 'query'" class="panel">
@@ -640,9 +817,9 @@ async function locateInstanceOnMap(id: string | number | unknown) {
             <td>{{ i.definitionVersion || '-' }}</td>
             <td>{{ i.status || '-' }}</td>
             <td class="ops">
-              <button class="btn ghost" type="button" @click="setInstanceStatus(i.id, 'published'); versionInstanceId = String(i.id); loadInstanceVersions()">发布</button>
-              <button class="btn ghost" type="button" @click="setInstanceStatus(i.id, 'inactive'); versionInstanceId = String(i.id); loadInstanceVersions()">停用</button>
-              <button class="btn ghost" type="button" @click="setInstanceStatus(i.id, 'draft'); versionInstanceId = String(i.id); loadInstanceVersions()">回退草稿</button>
+              <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'published'); versionInstanceId = String(i.id); loadInstanceVersions()">发布</button>
+              <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'inactive'); versionInstanceId = String(i.id); loadInstanceVersions()">停用</button>
+              <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'draft'); versionInstanceId = String(i.id); loadInstanceVersions()">回退草稿</button>
             </td>
           </tr>
         </tbody>
