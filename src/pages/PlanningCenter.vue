@@ -1488,7 +1488,12 @@ async function clearMapLinks() {
               <td>{{ c.platformName || c.platformId }}</td>
               <td><code>{{ c.platformIdentifier || '-' }}</code></td>
               <td>{{ c.platformType || c.typeCode || '-' }}</td>
-              <td>{{ scoreOf(c) }}</td>
+              <td>
+                <div class="stat-bar-row">
+                  <span>{{ scoreOf(c) }}</span>
+                  <i class="stat-bar" :style="{ width: Math.max(6, Math.min(100, Number(scoreOf(c)) || 0)) + '%' }"></i>
+                </div>
+              </td>
               <td>{{ dimScore(c, 'theme') }}</td>
               <td>{{ dimScore(c, 'space') }}</td>
               <td>{{ dimScore(c, 'time') }}</td>
@@ -1498,7 +1503,14 @@ async function clearMapLinks() {
             </tr>
           </tbody>
         </table>
-        <p v-else class="muted">暂无候选。请先完成提交/关联，再刷新。</p>
+        <div v-else class="empty-panel">
+          <p class="muted">暂无候选资源。请先：选择任务 → 提交 → 需求反算 → 执行候选评分。</p>
+          <div class="ops">
+            <button class="btn" type="button" :disabled="canRun('candidates') === false" @click="confirmCandidates">执行候选评分</button>
+            <button class="btn ghost" type="button" :disabled="taskId == null" @click="loadCandidates(false)">刷新候选</button>
+            <button class="btn ghost" type="button" :disabled="taskId == null || shellLoading" @click="showCandidatesOnMap">候选上图</button>
+          </div>
+        </div>
       
         <h3 style="margin-top:1rem">排除列表（硬约束未通过）</h3>
         <p class="muted">展示被筛选掉的资源及原因，便于解释“为何未入选”。</p>

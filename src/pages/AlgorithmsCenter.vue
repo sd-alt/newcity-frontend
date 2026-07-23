@@ -27,6 +27,7 @@ const models = ref<Record<string, unknown>[]>([])
 const versions = ref<Record<string, unknown>[]>([])
 const tasks = ref<Record<string, unknown>[]>([])
 const selectedTask = ref<Record<string, unknown> | null>(null)
+const mappedCompletedIds = ref<Set<string>>(new Set())
 const pollTimer = ref<number | null>(null)
 const autoRefresh = ref(true)
 
@@ -104,7 +105,27 @@ function startPolling() {
       await load()
       if (selectedTask.value?.id != null) {
         const latest = tasks.value.find((t) => String(t.id) === String(selectedTask.value?.id))
-        if (latest) selectedTask.value = latest
+        if (latest) {
+          const prev = String(selectedTask.value.status || '')
+          selectedTask.value = latest
+          const st = String(latest.status || '').toLowerCase()
+          const id = String(latest.id)
+          // 任务完成/失败后自动刷新一次地图输入/结果范围
+          if (
+            (st === 'completed' || st === 'failed' || st === 'succeeded' || st === 'success') &&
+            !mappedCompletedIds.value.has(id)
+          ) {
+            mappedCompletedIds.value.add(id)
+            try {
+              await inspectTask(id)
+            } catch {
+              /* map optional */
+            }
+          } else if (st === 'running' || st === 'paused' || st === 'queued') {
+            // keep selection in sync only
+          }
+          void prev
+        }
       }
       if (!hasActiveTasks()) stopPolling()
     } catch {

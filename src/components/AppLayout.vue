@@ -17,7 +17,7 @@ import {
   shellViewer,
   type ShellFeatureKind,
 } from '../gis/mapShell'
-import { mapToolMessage } from '../gis/mapTools'
+import { mapToolMessage, setMapToolMode, mapDrawGeometry } from '../gis/mapTools'
 import type { BasemapKey } from '../gis/mapConfig'
 import * as api from '../api/endpoints'
 
@@ -199,6 +199,14 @@ watch(
     return path.startsWith('/gis') ? path + '::' + tab : path
   },
   async () => {
+    // 切换中心时退出测距/绘制，避免工具状态串台
+    try {
+      setMapToolMode(shellViewer.value, 'none')
+      mapToolMessage.value = ''
+      mapDrawGeometry.value = null
+    } catch {
+      /* optional */
+    }
     await reloadShellLayers(route.path, { tab: String(route.query.tab || '') })
   },
   { immediate: true },

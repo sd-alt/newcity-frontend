@@ -1613,3 +1613,29 @@ button.card.stat.clickable:hover {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.45; transform: scale(0.85); }
 }
+
+
+.empty-panel {
+  margin: 0.6rem 0 0.9rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px dashed #D1D5DB;
+  border-radius: 10px;
+  background: #F9FAFB;
+}
+.empty-panel .ops { margin-top: 0.5rem; }
+.left-body .table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.left-body .table thead,
+.left-body .table tbody,
+.left-body .table tr {
+  white-space: nowrap;
+}
+.left-body .table td.clamp,
+.left-body .table .clamp {
+  white-space: normal;
+  max-width: 220px;
+}
