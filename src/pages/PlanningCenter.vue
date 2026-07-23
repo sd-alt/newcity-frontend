@@ -203,6 +203,23 @@ function syncFromSelectedInstance() {
   if (row.targetAccuracy != null) targetAccuracy.value = Number(row.targetAccuracy)
 }
 
+
+function preferDemoInstance() {
+  if (instanceId.value) return
+  const list = instances.value
+  const demo = list.find((i) => {
+    const name = String(i.instanceName || i.name || '')
+    const code = String(i.code || '')
+    return name.includes('演示') || code.toUpperCase().includes('DEMO')
+  })
+  const published = list.find((i) => String(i.status || '') === 'published' && String(i.spatialWkt || '').trim())
+  const pick = demo || published || list[0]
+  if (pick) {
+    instanceId.value = pickId(pick)
+    syncFromSelectedInstance()
+  }
+}
+
 async function loadLists() {
   const [inst, sc, t, p] = await Promise.all([
     api.listInstances(),
@@ -214,7 +231,7 @@ async function loadLists() {
   scales.value = sc.data
   tasks.value = t.data
   plans.value = p.data
-  if (instanceId.value === '' && instances.value[0]) instanceId.value = pickId(instances.value[0])
+  preferDemoInstance()
   if (scaleId.value === '' && scales.value[0]) scaleId.value = pickId(scales.value[0])
   syncFromSelectedInstance()
 }

@@ -352,8 +352,36 @@ async function runRollback(version: unknown) {
   }
 }
 
+
+function canPublishInstance(status: unknown) {
+  const s = String(status || '').toLowerCase()
+  return s === 'draft' || s === 'active' || s === 'inactive' || s === ''
+}
+function canRetireInstance(status: unknown) {
+  const s = String(status || '').toLowerCase()
+  return s === 'published' || s === 'active'
+}
+function canRevertDraft(status: unknown) {
+  const s = String(status || '').toLowerCase()
+  return s === 'published' || s === 'inactive' || s === 'active'
+}
+
 async function setInstanceStatus(id: unknown, status: string) {
   try {
+    const row = instances.value.find((i) => String(i.id) === String(id))
+    const cur = row ? String(row.status || '') : ''
+    if (status === 'published' && canPublishInstance(cur) === false) {
+      error.value = '当前状态不可发布：' + (cur || '-')
+      return
+    }
+    if (status === 'inactive' && canRetireInstance(cur) === false) {
+      error.value = '当前状态不可停用：' + (cur || '-')
+      return
+    }
+    if (status === 'draft' && canRevertDraft(cur) === false) {
+      error.value = '当前状态不可回退草稿：' + (cur || '-')
+      return
+    }
     await api.updateInstance(String(id), { status })
     message.value = '实例状态已更新为 ' + status
     await loadBase()
@@ -600,9 +628,9 @@ async function locateInstanceOnMap(id: string | number | unknown) {
             <td>{{ i.definitionVersion || i.definition_version || '-' }}</td>
             <td>{{ i.status || '-' }}</td>
             <td class="ops">
-              <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'published')">发布</button>
-              <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'inactive')">停用</button>
-              <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'draft')">回退草稿</button>
+              <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'published')" :disabled="canPublishInstance(i.status) === false">发布</button>
+              <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'inactive')" :disabled="canRetireInstance(i.status) === false">停用</button>
+              <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'draft')" :disabled="canRevertDraft(i.status) === false">回退草稿</button>
               <button class="btn ghost" type="button" @click.stop="removeInstance(i.id)">删除</button>
             </td>
           </tr>
@@ -817,7 +845,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
             <td>{{ i.definitionVersion || '-' }}</td>
             <td>{{ i.status || '-' }}</td>
             <td class="ops">
-              <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'published'); versionInstanceId = String(i.id); loadInstanceVersions()">发布</button>
+              <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'published'); versionInstanceId = String(i.id); loadInstanceVersions()" :disabled="canPublishInstance(i.status) === false">发布</button>
               <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'inactive'); versionInstanceId = String(i.id); loadInstanceVersions()">停用</button>
               <button class="btn ghost" type="button" @click.stop="setInstanceStatus(i.id, 'draft'); versionInstanceId = String(i.id); loadInstanceVersions()">回退草稿</button>
             </td>
