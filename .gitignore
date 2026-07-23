@@ -1,0 +1,13 @@
+node_modules
+dist
+.DS_Store
+*.local
+.vscode/*
+!.vscode/extensions.json
+*.log
+.pid
+.env
+.env.*
+playwright-report
+test-results
+.coverage
