@@ -17,6 +17,7 @@ import {
 } from '../gis/mapShell'
 import { canByStatus, errMessage, isoNow, pickId } from '../utils/errors'
 import { useAuthStore } from '../stores/auth'
+import { mapDrawGeometry } from '../gis/mapTools'
 
 type StepKey =
   | 'create'
@@ -83,6 +84,26 @@ const scaleId = ref('')
 const taskCode = ref('')
 const taskName = ref('暴雨观测任务')
 const researchAreaWkt = ref('')
+
+function applyMapDrawWkt() {
+  const g = mapDrawGeometry.value
+  if (!g || !g.wkt) {
+    error.value = '请先用地图工具绘面，双击结束'
+    return
+  }
+  if (g.type === 'point' && g.lon != null && g.lat != null) {
+    const lon = g.lon
+    const lat = g.lat
+    const d = 0.08
+    researchAreaWkt.value = `POLYGON((${lon - d} ${lat - d},${lon + d} ${lat - d},${lon + d} ${lat + d},${lon - d} ${lat + d},${lon - d} ${lat - d}))`
+  } else {
+    researchAreaWkt.value = g.wkt
+  }
+  message.value = '已将地图绘制范围写入研究区'
+  error.value = null
+}
+
+
 const resolution = ref(10)
 const temporalRes = ref('小时/次')
 const targetAccuracy = ref(90)
@@ -1208,7 +1229,10 @@ async function clearMapLinks() {
                   <option v-for="s in scales" :key="'sc'+s.id" :value="String(s.id)">{{ s.name }}</option>
                 </select>
               </label>
-              <label>研究区 WKT<input v-model="researchAreaWkt" :disabled="hasTask" /></label>
+              <label>研究区 WKT
+                <input v-model="researchAreaWkt" :disabled="hasTask" />
+                <button class="btn ghost" type="button" :disabled="hasTask" @click="applyMapDrawWkt">写入地图绘制范围</button>
+              </label>
               <div class="form-row">
                 <label>空间分辨率<input v-model.number="resolution" type="number" :disabled="hasTask" /></label>
                 <label>时间分辨率<input v-model="temporalRes" :disabled="hasTask" /></label>

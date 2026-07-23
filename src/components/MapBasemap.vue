@@ -31,6 +31,7 @@ import {
 import {
   clearMapDrawings,
   mapBoxSelectResult,
+  mapDrawGeometry,
   mapToolMessage,
   mapToolMode,
   setMapToolMode,
@@ -189,6 +190,97 @@ async function ctxCopyCoord() {
   closeShellContextMenu()
 }
 
+function ctxDrawObservationArea() {
+  closeShellContextMenu()
+  activateTool('draw-polygon')
+  mapToolMessage.value = '请在地图绘制观测区域，双击结束'
+}
+
+function ctxNewSensorAt() {
+  const m = shellContextMenu.value
+  closeShellContextMenu()
+  void router.push({ path: '/resources', query: { tab: 'crud' } })
+  activateTool('draw-point')
+  if (m?.lon != null && m.lat != null) {
+    mapToolMessage.value = `在 ${m.lon.toFixed(4)}, ${m.lat.toFixed(4)} 附近绘点创建传感器`
+  } else {
+    mapToolMessage.value = '点击地图确定传感器位置'
+  }
+}
+
+function ctxNewTaskAt() {
+  closeShellContextMenu()
+  void router.push({ path: '/planning', query: { tab: 'tasks' } })
+  activateTool('draw-polygon')
+  mapToolMessage.value = '绘制任务目标区域后，可在规划中心写入空间范围'
+}
+
+async function ctxNearbyResources() {
+  const m = shellContextMenu.value
+  closeShellContextMenu()
+  setShellVisibility({ showSensors: true, showData: false, showTasks: false })
+  if (m?.lon != null && m.lat != null) focusLonLat(m.lon, m.lat, 120000)
+  await router.push({ path: '/resources', query: { tab: 'viz' } })
+  mapToolMessage.value = '已切换到传感资源视图，可查看周边资源'
+}
+
+async function ctxViewCoverage() {
+  const m = shellContextMenu.value
+  closeShellContextMenu()
+  if (!m || m.kind !== 'sensor' || !m.id) return
+  setShellVisibility({ showSensors: true, showData: false, showTasks: false })
+  await selectShellFeature('sensor', m.id, { openBubble: true, fly: true })
+  mapToolMessage.value = '已定位传感器并显示覆盖相关图层'
+}
+
+async function ctxViewRecentData() {
+  const m = shellContextMenu.value
+  closeShellContextMenu()
+  if (!m || m.kind !== 'sensor' || !m.id) return
+  await router.push({ path: '/data', query: { tab: 'query', sensorId: m.id } })
+  setShellVisibility({ showSensors: true, showData: true, showTasks: false })
+  mapToolMessage.value = '已跳转监测数据查询'
+}
+
+async function ctxViewRelatedTasks() {
+  const m = shellContextMenu.value
+  closeShellContextMenu()
+  if (!m || !m.id) return
+  if (m.kind === 'sensor') {
+    await router.push({ path: '/planning', query: { tab: 'tasks' } })
+    mapToolMessage.value = '请在观测规划中查看关联任务'
+  } else if (m.kind === 'indicator') {
+    await router.push({ path: '/planning', query: { tab: 'tasks' } })
+  }
+}
+
+async function ctxEnterPlanningWorkbench() {
+  const m = shellContextMenu.value
+  closeShellContextMenu()
+  const q: Record<string, string> = { tab: 'flow' }
+  if (m?.kind === 'task' && m.id) q.taskId = m.id
+  await router.push({ path: '/planning', query: q })
+  if (m?.kind === 'task' && m.id) {
+    await selectShellFeature('task', m.id, { openBubble: true, fly: true })
+  }
+}
+
+async function ctxViewPlanCandidates() {
+  const m = shellContextMenu.value
+  closeShellContextMenu()
+  if (!m || m.kind !== 'task' || !m.id) return
+  await router.push({ path: '/planning', query: { tab: 'candidates', taskId: m.id } })
+  await selectShellFeature('task', m.id, { openBubble: true, fly: true })
+}
+
+async function ctxViewRelatedIndicators() {
+  const m = shellContextMenu.value
+  closeShellContextMenu()
+  if (!m || m.kind !== 'task' || !m.id) return
+  await router.push({ path: '/indicators', query: { tab: 'instances' } })
+  mapToolMessage.value = '已打开指标实例，可对照任务关联指标'
+}
+
 async function ctxJumpCenter() {
   const m = shellContextMenu.value
   closeShellContextMenu()
@@ -338,6 +430,7 @@ function setHost(el: unknown) {
     <div class="map-hud-bottom">
       <span class="map-pill">{{ shellLoading ? '图层加载中…' : shellStatus }}</span>
       <span v-if="mapToolMessage" class="map-pill">{{ mapToolMessage }}</span>
+      <span v-if="mapDrawGeometry" class="map-pill">绘制结果：{{ mapDrawGeometry.type }} 已就绪</span>
       <span v-if="shellError" class="map-pill danger">{{ shellError }}</span>
       <button v-if="shellError" type="button" class="map-pill action" @click="retryLayers">重试</button>
       <button v-if="shellError" type="button" class="map-pill action" @click="useFallbackBasemap">备用底图</button>
@@ -365,11 +458,35 @@ function setHost(el: unknown) {
       <div v-if="shellContextMenu.lon != null" class="map-ctx-sub">
         {{ shellContextMenu.lon.toFixed(5) }}, {{ shellContextMenu.lat?.toFixed(5) }}
       </div>
-      <button v-if="shellContextMenu.kind !== 'blank'" type="button" class="map-ctx-item" @click="ctxViewDetail">查看详情</button>
-      <button v-if="shellContextMenu.kind !== 'blank'" type="button" class="map-ctx-item" @click="ctxJumpCenter">进入所属中心</button>
-      <button v-if="shellContextMenu.kind !== 'blank'" type="button" class="map-ctx-item" @click="ctxOnlyThisLayer">仅显示该类图层</button>
-      <button type="button" class="map-ctx-item" @click="ctxLocateHere">以此为中心</button>
-      <button type="button" class="map-ctx-item" @click="ctxCopyCoord">复制坐标</button>
+      <!-- blank -->
+      <button v-if="shellContextMenu.kind === 'blank'" type="button" class="map-ctx-item" @click="ctxLocateHere">以此处为中心查询</button>
+      <button v-if="shellContextMenu.kind === 'blank'" type="button" class="map-ctx-item" @click="ctxDrawObservationArea">绘制观测区域</button>
+      <button v-if="shellContextMenu.kind === 'blank'" type="button" class="map-ctx-item" @click="ctxNewSensorAt">新建传感器位置</button>
+      <button v-if="shellContextMenu.kind === 'blank'" type="button" class="map-ctx-item" @click="ctxNewTaskAt">新建观测任务</button>
+      <button v-if="shellContextMenu.kind === 'blank'" type="button" class="map-ctx-item" @click="ctxNearbyResources">查看周边资源</button>
+      <button v-if="shellContextMenu.kind === 'blank'" type="button" class="map-ctx-item" @click="ctxCopyCoord">复制坐标</button>
+
+      <!-- sensor -->
+      <button v-if="shellContextMenu.kind === 'sensor'" type="button" class="map-ctx-item" @click="ctxViewDetail">查看详情</button>
+      <button v-if="shellContextMenu.kind === 'sensor'" type="button" class="map-ctx-item" @click="ctxViewCoverage">查看覆盖范围</button>
+      <button v-if="shellContextMenu.kind === 'sensor'" type="button" class="map-ctx-item" @click="ctxViewRecentData">查看最近数据</button>
+      <button v-if="shellContextMenu.kind === 'sensor'" type="button" class="map-ctx-item" @click="ctxViewRelatedTasks">查看关联任务</button>
+      <button v-if="shellContextMenu.kind === 'sensor'" type="button" class="map-ctx-item" @click="ctxLocateHere">地图定位</button>
+      <button v-if="shellContextMenu.kind === 'sensor'" type="button" class="map-ctx-item" @click="ctxJumpCenter">进入所属中心</button>
+
+      <!-- task -->
+      <button v-if="shellContextMenu.kind === 'task'" type="button" class="map-ctx-item" @click="ctxViewDetail">查看任务详情</button>
+      <button v-if="shellContextMenu.kind === 'task'" type="button" class="map-ctx-item" @click="ctxViewRelatedIndicators">查看关联指标</button>
+      <button v-if="shellContextMenu.kind === 'task'" type="button" class="map-ctx-item" @click="ctxViewPlanCandidates">查看候选资源</button>
+      <button v-if="shellContextMenu.kind === 'task'" type="button" class="map-ctx-item" @click="ctxEnterPlanningWorkbench">进入规划工作台</button>
+      <button v-if="shellContextMenu.kind === 'task'" type="button" class="map-ctx-item" @click="ctxJumpCenter">进入所属中心</button>
+
+      <!-- data / indicator / other -->
+      <button v-if="shellContextMenu.kind === 'data' || shellContextMenu.kind === 'indicator'" type="button" class="map-ctx-item" @click="ctxViewDetail">查看详情</button>
+      <button v-if="shellContextMenu.kind === 'data' || shellContextMenu.kind === 'indicator'" type="button" class="map-ctx-item" @click="ctxJumpCenter">进入所属中心</button>
+      <button v-if="shellContextMenu.kind === 'data' || shellContextMenu.kind === 'indicator'" type="button" class="map-ctx-item" @click="ctxOnlyThisLayer">仅显示该类图层</button>
+      <button v-if="shellContextMenu.kind === 'data' || shellContextMenu.kind === 'indicator'" type="button" class="map-ctx-item" @click="ctxLocateHere">以此为中心</button>
+      <button v-if="shellContextMenu.kind !== 'blank'" type="button" class="map-ctx-item" @click="ctxCopyCoord">复制坐标</button>
       <button type="button" class="map-ctx-item muted" @click="closeShellContextMenu">关闭</button>
     </div>
   </div>

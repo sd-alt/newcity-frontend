@@ -11,6 +11,7 @@ import {
   showIndicatorsWorkspace,
 } from '../gis/mapShell'
 import { errMessage, isoNow, pickId } from '../utils/errors'
+import { mapDrawGeometry } from '../gis/mapTools'
 
 const route = useRoute()
 const router = useRouter()
@@ -51,6 +52,26 @@ const instForm = ref({
   temporalRes: '小时/次',
   targetAccuracy: 90,
 })
+
+function applyMapDrawWkt() {
+  const g = mapDrawGeometry.value
+  if (!g || !g.wkt) {
+    error.value = '请先用地图工具绘制点或面（绘点/绘面）'
+    return
+  }
+  if (g.type === 'point') {
+    // expand point to small polygon for instance spatial range
+    const lon = g.lon ?? 0
+    const lat = g.lat ?? 0
+    const d = 0.05
+    instForm.value.spatialWkt = `POLYGON((${lon - d} ${lat - d},${lon + d} ${lat - d},${lon + d} ${lat + d},${lon - d} ${lat + d},${lon - d} ${lat - d}))`
+  } else {
+    instForm.value.spatialWkt = g.wkt
+  }
+  message.value = '已将地图绘制范围写入指标实例'
+  error.value = null
+}
+
 const versionDefId = ref('')
 const versionInstanceId = ref('')
 const instanceVersions = ref<Record<string, unknown>[]>([])
@@ -613,6 +634,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
           </select>
         </label>
         <label>空间WKT<input v-model="instForm.spatialWkt" /></label>
+            <button class="btn ghost" type="button" @click="applyMapDrawWkt">写入地图绘制范围</button>
         <label>分辨率<input v-model.number="instForm.resolution" type="number" /></label>
         <label>目标精度<input v-model.number="instForm.targetAccuracy" type="number" /></label>
         <button class="btn" type="button" :disabled="pending" @click="createInst">生成实例</button>

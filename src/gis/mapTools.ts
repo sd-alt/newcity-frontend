@@ -7,6 +7,7 @@ export type MapToolMode = 'none' | 'measure-line' | 'measure-area' | 'draw-point
 export const mapToolMode = ref<MapToolMode>('none')
 export const mapToolMessage = ref('')
 export const mapBoxSelectResult = ref<{ count: number; entityIds: string[] } | null>(null)
+export const mapDrawGeometry = ref<{ type: 'point' | 'polygon'; wkt: string; lon?: number; lat?: number } | null>(null)
 
 let handler: Cesium.ScreenSpaceEventHandler | null = null
 let activeDs: Cesium.CustomDataSource | null = null
@@ -68,6 +69,26 @@ function pickCartesian(viewer: Viewer, position: Cesium.Cartesian2): Cesium.Cart
   return fromEllipsoid || null
 }
 
+
+function cartesianToLonLat(c: Cesium.Cartesian3): { lon: number; lat: number } {
+  const carto = Cesium.Cartographic.fromCartesian(c)
+  return {
+    lon: Cesium.Math.toDegrees(carto.longitude),
+    lat: Cesium.Math.toDegrees(carto.latitude),
+  }
+}
+
+function ringToWkt(points: Array<{ lon: number; lat: number }>): string {
+  if (!points.length) return ''
+  const ring = points.slice()
+  const first = ring[0]
+  const last = ring[ring.length - 1]
+  if (first && last && (first.lon !== last.lon || first.lat !== last.lat)) {
+    ring.push({ lon: first.lon, lat: first.lat })
+  }
+  return 'POLYGON((' + ring.map((p) => p.lon.toFixed(6) + ' ' + p.lat.toFixed(6)).join(', ') + '))'
+}
+
 export function clearMapDrawings(viewer: Viewer | null) {
   positions.length = 0
   if (activeDs && viewer && !viewer.isDestroyed()) {
@@ -79,6 +100,7 @@ export function clearMapDrawings(viewer: Viewer | null) {
   }
   activeDs = null
   mapToolMessage.value = ''
+  mapDrawGeometry.value = null
   mapToolMode.value = 'none'
   clearHandler()
 }
@@ -105,7 +127,14 @@ export function setMapToolMode(viewer: Viewer | null, mode: MapToolMode) {
           position: cartesian,
           point: { pixelSize: 10, color: Cesium.Color.CYAN, outlineColor: Cesium.Color.WHITE, outlineWidth: 2 },
         })
-        mapToolMessage.value = '已添加点位'
+        const ll = cartesianToLonLat(cartesian)
+        mapDrawGeometry.value = {
+          type: 'point',
+          wkt: 'POINT(' + ll.lon.toFixed(6) + ' ' + ll.lat.toFixed(6) + ')',
+          lon: ll.lon,
+          lat: ll.lat,
+        }
+        mapToolMessage.value = '已添加点位，可写入业务表单'
         return
       }
       positions.push(cartesian)
@@ -233,7 +262,10 @@ export function setMapToolMode(viewer: Viewer | null, mode: MapToolMode) {
       if (mode === 'measure-area') {
         mapToolMessage.value = `面积 ${formatArea(polygonArea(positions))}`
       } else {
-        mapToolMessage.value = '多边形已绘制'
+        const pts = positions.map((c) => cartesianToLonLat(c))
+        const wkt = ringToWkt(pts)
+        mapDrawGeometry.value = { type: 'polygon', wkt }
+        mapToolMessage.value = '多边形已绘制，可写入业务表单'
       }
     }
     mapToolMode.value = 'none'

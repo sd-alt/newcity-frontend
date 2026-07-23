@@ -167,10 +167,16 @@ const activeSubKey = computed(() => {
   return activeCenter.value?.defaultTab || ''
 })
 
-const bottomSummary = computed(
-  () =>
-    `传感器 ${shellCounts.sensors} · 监测数据 ${shellCounts.data} · 观测任务 ${shellCounts.tasks} · 指标实例 ${shellCounts.indicators}`,
-)
+const bottomSummary = computed(() => {
+  const key = activeCenter.value?.key || 'home'
+  if (key === 'indicators') return `指标实例 ${shellCounts.indicators} · 感知指标中心`
+  if (key === 'resources') return `传感资源 ${shellCounts.sensors} · 离线 ${shellAlerts.offlineSensors} · 故障 ${shellAlerts.faultSensors}`
+  if (key === 'data') return `监测数据 ${shellCounts.data} · 异常 ${shellAlerts.anomalousData}`
+  if (key === 'planning') return `观测任务 ${shellCounts.tasks} · 失败 ${shellAlerts.failedTasks}`
+  if (key === 'algorithms') return `算法处理 · 输入/结果图层联动`
+  if (key === 'applications') return `综合应用 · 多中心图层叠加`
+  return `传感器 ${shellCounts.sensors} · 数据 ${shellCounts.data} · 任务 ${shellCounts.tasks} · 指标 ${shellCounts.indicators}`
+})
 
 watch(
   () => route.fullPath,
@@ -553,6 +559,7 @@ async function doLogout() {
           <div>
             <h4>当前页面</h4>
             <p>{{ currentCenterLabel }} / {{ pageLabel }}</p>
+            <p class="muted">{{ bottomSummary }}</p>
           </div>
           <div>
             <h4>告警</h4>
@@ -562,8 +569,14 @@ async function doLogout() {
             </p>
           </div>
           <div>
-            <h4>操作提示</h4>
-            <p>切换中心保留地图视角；点击对象打开右侧详情</p>
+            <h4>地图操作提示</h4>
+            <p v-if="activeCenter?.key === 'planning'">流程：任务建模 → 反算 → 候选评分 → 关联 → 方案；右键任务可进工作台</p>
+            <p v-else-if="activeCenter?.key === 'resources'">右键传感器可查看覆盖、最近数据与关联任务</p>
+            <p v-else-if="activeCenter?.key === 'indicators'">绘面后点“写入地图绘制范围”同步指标实例空间</p>
+            <p v-else-if="activeCenter?.key === 'data'">点选数据气泡查看质量与来源；图层可切换实时/历史</p>
+            <p v-else-if="activeCenter?.key === 'algorithms'">列表点击任务后地图高亮输入/结果范围</p>
+            <p v-else-if="activeCenter?.key === 'applications'">点击统计卡片联动过滤地图图层</p>
+            <p v-else>切换中心保留地图视角；右键地图可快速新建与查询</p>
           </div>
         </div>
       </div>
