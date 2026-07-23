@@ -183,6 +183,15 @@ function advanceTo(step: StepKey) {
   currentStep.value = step
 }
 
+const selectedInstanceWindow = computed(() => {
+  const row = instances.value.find((i) => String(i.id) === instanceId.value)
+  if (!row) return ''
+  const a = row.timeStart ? String(row.timeStart) : ''
+  const b = row.timeEnd ? String(row.timeEnd) : ''
+  if (!a && !b) return '未设置'
+  return (a || '-') + ' ~ ' + (b || '-')
+})
+
 function syncFromSelectedInstance() {
   if (hasTask.value) return
   const row = instances.value.find((i) => String(i.id) === instanceId.value)
@@ -1174,6 +1183,7 @@ async function clearMapLinks() {
                   <option disabled value="">请选择</option>
                   <option v-for="item in instances" :key="String(item.id)" :value="String(item.id)">#{{ item.id }} {{ item.instanceName }}</option>
                 </select>
+        <p class="muted">实例时间窗：{{ selectedInstanceWindow }}（创建任务将自动采用）</p>
               </label>
               <label>尺度
                 <select v-model="scaleId" :disabled="hasTask">
