@@ -18,7 +18,7 @@ const router = createRouter({
       path: '/',
       component: AppLayout,
       children: [
-        { path: '', name: 'home', component: HomeView },
+        { path: '', name: 'home', component: HomeView, meta: { requiresAuth: true } },
         { path: 'indicators', name: 'indicators', component: IndicatorsCenter, meta: { requiresAuth: true } },
         { path: 'resources', name: 'resources', component: ResourcesCenter, meta: { requiresAuth: true } },
         { path: 'data', name: 'data', component: DataCenter, meta: { requiresAuth: true } },

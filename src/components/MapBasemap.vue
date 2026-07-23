@@ -27,6 +27,8 @@ import {
   shellSelected,
   shellStatus,
   shellViewer,
+  shellRightOpen,
+  toggleShellRight,
   type ShellFeatureKind,
 } from '../gis/mapShell'
 import {
@@ -61,7 +63,7 @@ const bubbleStyle = computed(() => {
   const padX = 12
   const padTop = 8
   const bubbleW = 240
-  const toolCol = 56 // toolbar width + gap
+  const toolCol = 100 // 2-col toolbar width + gap
   const shell = document.querySelector('.app-shell') as HTMLElement | null
   const drawerOpen = !!shell?.classList.contains('right-open')
   let drawerW = 0
@@ -88,9 +90,20 @@ const bubbleStyle = computed(() => {
 
 async function boot() {
   await nextTick()
-  if (!host) return
-  await ensureShellViewer(host)
-  await reloadShellLayers(route.path, route.query as Record<string, unknown>)
+  if (!host) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    await nextTick()
+  }
+  if (!host) {
+    shellError.value = '地图容器未就绪，请刷新页面重试'
+    return
+  }
+  try {
+    await ensureShellViewer(host)
+    await reloadShellLayers(route.path, route.query as Record<string, unknown>)
+  } catch (err) {
+    shellError.value = err instanceof Error ? err.message : '地图初始化失败'
+  }
 }
 
 async function retryLayers() {
@@ -146,7 +159,7 @@ function clearAll() {
 function closeBubble() {
   closeShellBubble()
 }
-function toggleLayer(key: 'showSensors' | 'showData' | 'showTasks', on: boolean) {
+function toggleLayer(key: 'showSensors' | 'showData' | 'showTasks' | 'showIndicators', on: boolean) {
   setShellVisibility({ [key]: on })
 }
 
@@ -210,20 +223,30 @@ function ctxDrawObservationArea() {
 function ctxNewSensorAt() {
   const m = shellContextMenu.value
   closeShellContextMenu()
-  void router.push({ path: '/resources', query: { tab: 'crud' } })
-  activateTool('draw-point')
+  const q: Record<string, string> = { tab: 'crud' }
   if (m?.lon != null && m.lat != null) {
-    mapToolMessage.value = `在 ${m.lon.toFixed(4)}, ${m.lat.toFixed(4)} 附近绘点创建传感器`
+    q.lon = String(m.lon)
+    q.lat = String(m.lat)
+    mapToolMessage.value = `已带入坐标 ${m.lon.toFixed(4)}, ${m.lat.toFixed(4)}，可直接创建或再绘点微调`
   } else {
     mapToolMessage.value = '点击地图确定传感器位置'
+    activateTool('draw-point')
   }
+  void router.push({ path: '/resources', query: q })
+  if (m?.lon == null) activateTool('draw-point')
 }
 
 function ctxNewTaskAt() {
+  const m = shellContextMenu.value
   closeShellContextMenu()
-  void router.push({ path: '/planning', query: { tab: 'tasks' } })
+  const q: Record<string, string> = { tab: 'flow' }
+  if (m?.lon != null && m.lat != null) {
+    q.lon = String(m.lon)
+    q.lat = String(m.lat)
+  }
+  void router.push({ path: '/planning', query: q })
   activateTool('draw-polygon')
-  mapToolMessage.value = '绘制任务目标区域后，可在规划中心写入空间范围'
+  mapToolMessage.value = '绘制任务目标区域后，在规划中心点“写入地图绘制范围”'
 }
 
 async function ctxNearbyResources() {
@@ -368,23 +391,33 @@ function setHost(el: unknown) {
   <div class="map-basemap" :class="{ 'is-loading': shellLoading, 'tool-active': mapToolMode !== 'none' }">
     <div class="map-basemap-host" :ref="setHost"></div>
 
-    <div class="map-toolbar" aria-label="地图工具">
-      <button type="button" class="map-tool" title="放大" @click="zoomIn">+</button>
-      <button type="button" class="map-tool" title="缩小" @click="zoomOut">-</button>
-      <button type="button" class="map-tool" title="复位" @click="resetShellView">复位</button>
-      <button type="button" class="map-tool" title="适应" @click="fitShellView">适应</button>
-      <button type="button" class="map-tool" :class="{ active: panel === 'basemap' }" title="底图" @click="togglePanel('basemap')">底图</button>
-      <button type="button" class="map-tool" :class="{ active: panel === 'layers' }" title="图层" @click="togglePanel('layers')">图层</button>
-      <button type="button" class="map-tool" :class="{ active: panel === 'legend' }" title="图例" @click="togglePanel('legend')">图例</button>
-      <button type="button" class="map-tool" :class="{ active: mapToolMode === 'measure-line' }" title="测距" @click="activateTool('measure-line')">测距</button>
-      <button type="button" class="map-tool" :class="{ active: mapToolMode === 'measure-area' }" title="测面" @click="activateTool('measure-area')">测面</button>
-      <button type="button" class="map-tool" :class="{ active: mapToolMode === 'draw-point' }" title="绘点" @click="activateTool('draw-point')">绘点</button>
-      <button type="button" class="map-tool" :class="{ active: mapToolMode === 'draw-polygon' }" title="绘面" @click="activateTool('draw-polygon')">绘面</button>
-      <button type="button" class="map-tool" :class="{ active: mapToolMode === 'box-select' }" title="框选" @click="activateTool('box-select')">框选</button>
-      <button type="button" class="map-tool" title="清除" @click="clearAll">清除</button>
-      <button type="button" class="map-tool" title="刷新" :disabled="shellLoading" @click="retryLayers">刷新</button>
-      <button type="button" class="map-tool" title="全屏" @click="goFullscreen">全屏</button>
+    <div class="map-tool-rail" aria-label="地图工具栏">
+      <div class="map-toolbar" aria-label="地图工具">
+        <button type="button" class="map-tool" title="放大" @click="zoomIn">+</button>
+        <button type="button" class="map-tool" title="缩小" @click="zoomOut">-</button>
+        <button type="button" class="map-tool" title="复位" @click="resetShellView">复</button>
+        <button type="button" class="map-tool" title="适应" @click="fitShellView">适</button>
+        <button type="button" class="map-tool" :class="{ active: panel === 'basemap' }" title="底图" @click="togglePanel('basemap')">图</button>
+        <button type="button" class="map-tool" :class="{ active: panel === 'layers' }" title="图层" @click="togglePanel('layers')">层</button>
+        <button type="button" class="map-tool" :class="{ active: panel === 'legend' }" title="图例" @click="togglePanel('legend')">例</button>
+        <button type="button" class="map-tool" :class="{ active: mapToolMode === 'measure-line' }" title="测距" @click="activateTool('measure-line')">距</button>
+        <button type="button" class="map-tool" :class="{ active: mapToolMode === 'measure-area' }" title="测面" @click="activateTool('measure-area')">面</button>
+        <button type="button" class="map-tool" :class="{ active: mapToolMode === 'draw-point' }" title="绘点" @click="activateTool('draw-point')">点</button>
+        <button type="button" class="map-tool" :class="{ active: mapToolMode === 'draw-polygon' }" title="绘面" @click="activateTool('draw-polygon')">绘</button>
+        <button type="button" class="map-tool" :class="{ active: mapToolMode === 'box-select' }" title="框选" @click="activateTool('box-select')">框</button>
+        <button type="button" class="map-tool" title="清除" @click="clearAll">清</button>
+        <button type="button" class="map-tool" title="刷新" :disabled="shellLoading" @click="retryLayers">刷</button>
+        <button type="button" class="map-tool" title="全屏" @click="goFullscreen">全</button>
+      </div>
     </div>
+    <button
+      type="button"
+      class="map-tool map-tool-detail"
+      :class="{ active: shellRightOpen }"
+      title="详情面板"
+      aria-label="详情"
+      @click="toggleShellRight"
+    >详</button>
 
     <div v-if="panel === 'basemap'" class="map-float-panel">
       <div class="map-float-title">底图切换</div>
@@ -413,6 +446,10 @@ function setHost(el: unknown) {
         <input type="checkbox" :checked="shellFilters.showTasks" @change="toggleLayer('showTasks', ($event.target as HTMLInputElement).checked)" />
         观测任务（{{ shellCounts.tasks }}）
       </label>
+        <label class="map-float-item">
+          <input type="checkbox" :checked="shellFilters.showIndicators" @change="toggleLayer('showIndicators', ($event.target as HTMLInputElement).checked)" />
+          指标实例 <span class="muted">{{ shellCounts.indicators }}</span>
+        </label>
       <div class="map-float-item static">指标实例：{{ shellCounts.indicators }}</div>
     </div>
     <div v-if="panel === 'legend'" class="map-float-panel">
@@ -423,10 +460,11 @@ function setHost(el: unknown) {
       <div class="map-float-item static"><i class="dot blue" /> 监测数据·正常</div>
       <div class="map-float-item static"><i class="dot orange" /> 监测数据·异常</div>
       <div class="map-float-item static"><i class="dot purple" /> 观测任务</div>
-      <div class="map-float-item static"><i class="dot blue" /> 关联·候选</div>
-      <div class="map-float-item static"><i class="dot green" /> 关联·基础</div>
-      <div class="map-float-item static"><i class="dot orange" /> 关联·优化</div>
-      <div class="map-float-item static"><i class="dot gray" /> 关联·增补</div>
+      <div class="map-float-item static"><i class="dot red" /> 指标实例范围</div>
+      <div class="map-float-item static"><i class="dot purple" /> 关联·候选</div>
+      <div class="map-float-item static"><i class="dot blue" /> 关联·基础</div>
+      <div class="map-float-item static"><i class="dot green" /> 关联·优化</div>
+      <div class="map-float-item static"><i class="dot orange" /> 关联·增补</div>
       <div class="map-float-item static"><i class="dot blue" /> 指标范围</div>
       <div class="map-float-item static"><i class="dot blue" /> 任务目标区域</div>
       <div class="map-float-item static"><i class="dot green" /> 方案覆盖范围</div>
@@ -436,7 +474,7 @@ function setHost(el: unknown) {
     </div>
 
     <div class="map-hud-bottom">
-      <span class="map-pill">{{ shellLoading ? '图层加载中…' : shellStatus }}</span>
+      <span class="map-pill">{{ shellLoading ? '图层加载中…' : (shellStatus || ('底图就绪 · 传感' + shellCounts.sensors + ' / 数据' + shellCounts.data + ' / 任务' + shellCounts.tasks + ' / 指标' + shellCounts.indicators)) }}</span>
       <span v-if="mapToolMessage" class="map-pill">{{ mapToolMessage }}</span>
       <span v-if="mapDrawGeometry" class="map-pill">绘制结果：{{ mapDrawGeometry.type }} 已就绪</span>
       <span v-if="shellError" class="map-pill danger">{{ shellError }}</span>

@@ -202,9 +202,16 @@ async function locatePreview(kind: 'sensor' | 'data' | 'task') {
     return
   }
   const ok = await selectShellFeature(kind, id, { openBubble: true, fly: true })
-  message.value = ok
-    ? '已在地图定位' + (kind === 'sensor' ? '传感器' : kind === 'data' ? '数据' : '任务') + ' #' + id
-    : '定位失败：未找到对应空间要素'
+  if (ok) {
+    mapFocus.value = {
+      kind,
+      id,
+      name: (kind === 'sensor' ? '传感器' : kind === 'data' ? '数据' : '任务') + ' #' + id,
+    }
+    message.value = '已在地图定位' + mapFocus.value.name
+  } else {
+    message.value = '定位失败：未找到对应空间要素'
+  }
 }
 
 function kindLabel(kind: unknown) {
@@ -232,25 +239,25 @@ watch(shellSelected, async (v) => {
     if (v.kind === "sensor") {
       activeMapFilter.value = "sensors"
       await patchShellFilters(
-        { showSensors: true, showData: false, showTasks: false },
+        { showSensors: true, showData: false, showTasks: false, showIndicators: false },
         { fit: false, rerender: false },
       )
     } else if (v.kind === "data") {
       activeMapFilter.value = "data"
       await patchShellFilters(
-        { showSensors: false, showData: true, showTasks: false },
+        { showSensors: false, showData: true, showTasks: false, showIndicators: false },
         { fit: false, rerender: false },
       )
     } else if (v.kind === "task") {
       activeMapFilter.value = "tasks"
       await patchShellFilters(
-        { showSensors: false, showData: false, showTasks: true },
+        { showSensors: false, showData: false, showTasks: true, showIndicators: false },
         { fit: false, rerender: false },
       )
     } else if (v.kind === "indicator") {
       activeMapFilter.value = "indicators"
       await patchShellFilters(
-        { showSensors: false, showData: false, showTasks: false },
+        { showSensors: false, showData: false, showTasks: false, showIndicators: true },
         { fit: false, rerender: false },
       )
     }
@@ -267,8 +274,11 @@ watch(shellSelected, async (v) => {
     "）— 已反向联动图层/统计，业务 ID 与列表一致"
 })
 
-function clearMapFocus() {
+async function clearMapFocus() {
   mapFocus.value = null
+  activeMapFilter.value = 'all'
+  await mapShowAll()
+  message.value = '已清除地图联动并恢复全部图层'
 }
 
 async function jumpFromMapFocus() {
@@ -301,6 +311,7 @@ async function mapShowSensors() {
       showSensors: true,
       showData: false,
       showTasks: false,
+      showIndicators: false,
       sensorType: '',
       sensorStatus: '',
       dataQuality: '',
@@ -318,6 +329,7 @@ async function mapShowData() {
       showSensors: false,
       showData: true,
       showTasks: false,
+      showIndicators: false,
       sensorType: '',
       sensorStatus: '',
       dataQuality: '',
@@ -335,6 +347,7 @@ async function mapShowTasks() {
       showSensors: false,
       showData: false,
       showTasks: true,
+      showIndicators: false,
       sensorType: '',
       sensorStatus: '',
       dataQuality: '',
@@ -352,6 +365,7 @@ async function mapShowAll() {
       showSensors: true,
       showData: true,
       showTasks: true,
+      showIndicators: true,
       sensorType: '',
       sensorStatus: '',
       dataQuality: '',
@@ -366,7 +380,7 @@ async function mapShowAll() {
 async function mapShowIndicators() {
   await reloadShellLayers('/applications', {})
   await patchShellFilters(
-    { showSensors: false, showData: false, showTasks: false },
+    { showSensors: false, showData: false, showTasks: false, showIndicators: true },
     { fit: true, rerender: false },
   )
   message.value = `已切换：主显指标实例范围（${shellCounts.indicators} 个）`
@@ -377,9 +391,23 @@ async function mapRefresh() {
   message.value = '图层已刷新'
 }
 
-function toggleShellLayer(key: 'showSensors' | 'showData' | 'showTasks', ev: Event) {
+async function toggleShellLayer(key: 'showSensors' | 'showData' | 'showTasks' | 'showIndicators', ev: Event) {
   const checked = (ev.target as HTMLInputElement).checked
-  void patchShellFilters({ [key]: checked }, { rerender: false })
+  // 勾选空图层时补载一次，避免只有开关没有要素
+  if (checked) {
+    const empty =
+      (key === 'showSensors' && shellCounts.sensors === 0) ||
+      (key === 'showData' && shellCounts.data === 0) ||
+      (key === 'showTasks' && shellCounts.tasks === 0) ||
+      (key === 'showIndicators' && shellCounts.indicators === 0)
+    if (empty) {
+      await reloadShellLayers(route.path, route.query as Record<string, unknown>)
+    }
+  }
+  await patchShellFilters({ [key]: checked }, { rerender: false })
+  message.value =
+    (checked ? '已显示' : '已隐藏') +
+    ({ showSensors: '传感资源', showData: '监测数据', showTasks: '观测任务', showIndicators: '指标实例' }[key] || '图层')
 }
 
 async function filterMapByStat(kind: 'sensors' | 'data' | 'tasks' | 'all' | 'indicators') {
@@ -480,7 +508,10 @@ async function filterTasksByStatus(status: unknown) {
         <h1>综合统计与 GIS 展示</h1>
         <p class="muted">统计与地图联动：点击下方按钮切换地图图层；也可在地图右侧「图层」工具中勾选。</p>
       </div>
-      <button class="btn" type="button" :disabled="shellLoading" @click="mapShowAll">底图全部上图</button>
+      <div class="plan-head-actions" style="display:flex;gap:0.35rem;flex-wrap:wrap">
+        <button class="btn" type="button" :disabled="pending" @click="mapShowAll">底图全部上图</button>
+        <button class="btn ghost" type="button" :disabled="pending" data-map-action="restore-all" @click="clearMapFocus">恢复全部图层</button>
+      </div>
     </header>
     <div class="tabs">
       <button
@@ -712,14 +743,15 @@ async function filterTasksByStatus(status: unknown) {
         <button class="btn" type="button" :disabled="shellLoading" @click="filterMapByStat('sensors')">仅显示传感器</button>
         <button class="btn" type="button" :disabled="shellLoading" @click="filterMapByStat('data')">仅显示监测数据</button>
         <button class="btn" type="button" :disabled="shellLoading" @click="filterMapByStat('tasks')">仅显示观测任务</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading" @click="filterMapByStat('all')">显示全部图层</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="filterMapByStat('all')">显示全部图层</button>
         <button class="btn ghost" type="button" :disabled="shellLoading" @click="mapShowIndicators">仅指标范围</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading" @click="mapRefresh">刷新图层</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="mapRefresh">刷新图层</button>
       </div>
       <div class="form-row" style="margin-top:0.6rem">
         <label class="check"><input type="checkbox" :checked="shellFilters.showSensors" @change="toggleShellLayer('showSensors', $event)" /> 传感器 <span class="badge">{{ shellCounts.sensors }}</span></label>
         <label class="check"><input type="checkbox" :checked="shellFilters.showData" @change="toggleShellLayer('showData', $event)" /> 监测数据 <span class="badge">{{ shellCounts.data }}</span></label>
         <label class="check"><input type="checkbox" :checked="shellFilters.showTasks" @change="toggleShellLayer('showTasks', $event)" /> 观测任务 <span class="badge">{{ shellCounts.tasks }}</span></label>
+        <label class="check"><input type="checkbox" :checked="shellFilters.showIndicators" @change="toggleShellLayer('showIndicators', $event)" /> 指标实例 <span class="badge">{{ shellCounts.indicators }}</span></label>
       </div>
       <div class="cards" style="margin-top:0.8rem">
         <button type="button" class="card stat clickable" @click="filterMapByStat('sensors')"><h3>传感器要素</h3><p class="stat-num">{{ shellCounts.sensors }}</p></button>
@@ -732,6 +764,7 @@ async function filterTasksByStatus(status: unknown) {
         <label class="check"><input type="checkbox" :checked="shellFilters.showSensors" @change="toggleShellLayer('showSensors', $event)" /> 传感资源 <span class="badge">{{ shellCounts.sensors }}</span></label>
         <label class="check"><input type="checkbox" :checked="shellFilters.showData" @change="toggleShellLayer('showData', $event)" /> 监测数据 <span class="badge">{{ shellCounts.data }}</span></label>
         <label class="check"><input type="checkbox" :checked="shellFilters.showTasks" @change="toggleShellLayer('showTasks', $event)" /> 观测任务 <span class="badge">{{ shellCounts.tasks }}</span></label>
+        <label class="check"><input type="checkbox" :checked="shellFilters.showIndicators" @change="toggleShellLayer('showIndicators', $event)" /> 指标实例 <span class="badge">{{ shellCounts.indicators }}</span></label>
         <div class="form-row" style="margin-top:0.45rem">
           <button class="btn ghost tiny" type="button" @click="mapShowIndicators">仅指标范围</button>
           <button class="btn ghost tiny" type="button" @click="mapShowAll">全部显示</button>
@@ -761,7 +794,7 @@ async function filterTasksByStatus(status: unknown) {
       <p v-else class="muted">暂无图层目录记录。</p>
       <h3>工作台原始摘要</h3>
       <pre class="result-pre">{{ workbench ? JSON.stringify(workbench, null, 2).slice(0, 3500) : '暂无' }}</pre>
-      <button class="btn" type="button" :disabled="shellLoading" @click="mapShowAll">底图全部上图</button>
+      <button class="btn" type="button" :disabled="pending" @click="mapShowAll">底图全部上图</button>
     </section>
   </section>
 </template>

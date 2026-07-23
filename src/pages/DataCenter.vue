@@ -14,7 +14,8 @@ import {
   setDataTimeWindow,
   clearDataTimeWindow,
   getCachedDataTimeExtent,
-  patchShellFilters,
+  shellStatus,
+  setDataLayerStyle,
 } from '../gis/mapShell'
 import { mapDrawGeometry } from '../gis/mapTools'
 import { canByStatus, errMessage, isoNow, pickId } from '../utils/errors'
@@ -336,7 +337,10 @@ function clearAlerts() {
 
 async function setTab(key: string) {
   tab.value = key
-  await router.replace({ path: '/data', query: { tab: key } })
+  const q: Record<string, string> = { ...Object.fromEntries(
+    Object.entries(route.query).filter(([, v]) => v != null && !Array.isArray(v)).map(([k, v]) => [k, String(v)]),
+  ), tab: key }
+  await router.replace({ path: '/data', query: q })
 }
 function syncTab() {
   const t = route.query.tab
@@ -344,7 +348,7 @@ function syncTab() {
 }
 
 
-function applyMapDrawSpatial(target: 'live' | 'pull' = 'live') {
+function applyMapDrawSpatial(_target: 'live' | 'pull' = 'live') {
   const g = mapDrawGeometry.value
   if (!g || !g.wkt) {
     error.value = '请先用地图工具绘点/绘面，再写入接入空间条件'
@@ -384,9 +388,23 @@ async function load() {
     if (pullForm.value.datasetId === '' && datasets.value[0]) pullForm.value.datasetId = pickId(datasets.value[0])
     if (importForm.value.datasetId === '' && datasets.value[0]) importForm.value.datasetId = pickId(datasets.value[0])
     if (importForm.value.platformId === '' && platforms.value[0]) importForm.value.platformId = pickId(platforms.value[0])
-    if (selectedAuditSourceId.value === '' && sources.value[0]) {
-      selectedAuditSourceId.value = pickId(sources.value[0])
-      pullForm.value.sourceId = selectedAuditSourceId.value
+    // 优先选中已启用的 sample/活接入通道，便于演示多源接入
+    if (sources.value.length) {
+      const preferred =
+        sources.value.find((s) => String(s.protocol || '').toLowerCase() === 'sample' && String(s.status || '').toLowerCase() === 'enabled') ||
+        sources.value.find((s) => String(s.status || '').toLowerCase() === 'enabled') ||
+        sources.value[0]
+      if (preferred) {
+        const sid = pickId(preferred)
+        if (selectedAuditSourceId.value === '') selectedAuditSourceId.value = sid
+        if (pullForm.value.sourceId === '') pullForm.value.sourceId = sid
+      }
+    }
+    if (pullForm.value.datasetId === '' && datasets.value[0]) {
+      pullForm.value.datasetId = pickId(datasets.value[0])
+    }
+    if (pullForm.value.sourceId) {
+      void refreshLiveStatus(pullForm.value.sourceId)
     }
   } catch (err) {
     error.value = errMessage(err, '加载失败')
@@ -640,7 +658,13 @@ async function pullSource() {
       await showDataOnMap()
       const payload = res.data as Record<string, unknown> | null
       const rec = (payload?.record || payload?.data || payload) as Record<string, unknown> | null
-      const dataId = rec?.dataId ?? rec?.id ?? payload?.dataId ?? payload?.id
+      const dataId =
+        rec?.observationDataId ??
+        rec?.dataId ??
+        rec?.id ??
+        payload?.observationDataId ??
+        payload?.dataId ??
+        payload?.id
       if (dataId != null) await selectShellFeature('data', String(dataId), { openBubble: true, fly: true })
     } catch { /* map optional */ }
   } catch (err) {
@@ -708,10 +732,17 @@ async function startLivePull() {
     liveStatus.value = (res.data as any)?.live || null
     lastLivePullCount = Number((res.data as any)?.live?.pullCount ?? (res.data as any)?.live?.recordCount ?? 0) || 0
     startLivePolling(pullForm.value.sourceId)
-    try { await showDataOnMap() } catch { /* map optional */ }
+    try {
+      await showDataOnMap()
+      await refreshLiveStatus(pullForm.value.sourceId)
+      const lastId = (liveStatus.value as any)?.lastObservationDataId
+      if (lastId != null && lastId !== '' && lastId !== '-') {
+        await selectShellFeature('data', String(lastId), { openBubble: true, fly: true })
+      }
+    } catch { /* map optional */ }
     message.value = '实时接入已启动，间隔 ' +
       String((res.data as any)?.live?.intervalSeconds || liveIntervalSeconds.value) +
-      ' 秒'
+      ' 秒；地图数据层将随新数据自动刷新'
     await loadSourceAudits(pullForm.value.sourceId)
     await load()
   } catch (err) {
@@ -872,8 +903,27 @@ const vizByQuality = computed(() => {
 onMounted(async () => {
   syncTab()
   await load()
+  applyRouteSensorQuery()
+  if (tab.value === 'query' && qPlatformId.value) {
+    try { await runDataQuery(true) } catch { /* optional */ }
+  }
 })
 watch(() => route.query.tab, syncTab)
+watch(
+  () => [route.query.sensorId, route.query.platformId],
+  () => {
+    applyRouteSensorQuery()
+  },
+)
+
+function applyRouteSensorQuery() {
+  const sid = route.query.sensorId ?? route.query.platformId
+  if (sid == null || sid === '') return
+  const id = String(Array.isArray(sid) ? sid[0] : sid)
+  qPlatformId.value = id
+  if (tab.value !== 'query') void setTab('query')
+  message.value = '已根据地图跳转筛选平台/传感器 #' + id
+}
 
 
 async function locateOnMap(id: string | number | unknown) {
@@ -888,17 +938,35 @@ async function locateOnMap(id: string | number | unknown) {
 
 async function showDataOnMap() {
   refreshTimeExtent()
-
   await showShellAndFit('data', '/data')
-  message.value = `已在底图显示监测数据图层（${shellCounts.data} 个要素）`
+  await setDataLayerStyle('all')
+  message.value = `已在底图显示监测数据（点+热力聚合，${shellCounts.data} 个要素）`
 }
 
-async function filterDataQualityOnMap(quality: string) {
+async function showHeatmapOnMap() {
+  refreshTimeExtent()
   await showShellAndFit('data', '/data')
-  await applyShellDataQualityFilter(quality)
-  message.value = quality
-    ? `地图已按质量筛选: ${quality} · ${shellCounts.data} 个`
-    : `已清除质量筛选，显示全部数据 ${shellCounts.data} 个`
+  await setDataLayerStyle('heat')
+  message.value = `已切换热力聚合上图（${shellCounts.data} 个数据要素的网格聚合）`
+}
+
+async function showDataPointsOnMap() {
+  refreshTimeExtent()
+  await showShellAndFit('data', '/data')
+  await setDataLayerStyle('points')
+  message.value = `已切换采样点上图（${shellCounts.data} 个要素）`
+}
+
+async function filterDataQualityOnMap(quality: string = '') {
+  const q = String(quality || '').trim()
+  error.value = null
+  await showShellAndFit('data', '/data')
+  await applyShellDataQualityFilter(q)
+  if (q) {
+    message.value = `地图已按质量筛选: ${q} · ${shellCounts.data} 个`
+  } else {
+    message.value = `已清除质量筛选，显示全部数据 ${shellCounts.data} 个`
+  }
 }
 
 
@@ -924,6 +992,18 @@ onUnmounted(() => {
     </div>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="message" class="ok-text">{{ message }}</p>
+      <div class="plan-map-actions panel soft" data-testid="data-map-actions" style="margin:0.35rem 0;padding:0.45rem 0.55rem">
+        <strong style="font-size:12px;margin-right:0.35rem">地图联动</strong>
+        <button class="btn ghost" type="button" :disabled="pending" @click="showDataOnMap">数据上图</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="showHeatmapOnMap">热力聚合上图</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="showDataPointsOnMap">采样点上图</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="filterDataQualityOnMap('unchecked')">仅未检</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="filterDataQualityOnMap('warning')">仅告警</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="filterDataQualityOnMap('anomaly')">仅异常</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="filterDataQualityOnMap()">全部数据</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="clearTimeFilterOnMap">清除时间过滤</button>
+        <span class="muted" style="font-size:12px">{{ shellStatus }}</span>
+      </div>
 
     <section v-if="tab === 'crud'" class="panel">
       <h2>监测数据建模与增删改查</h2>
@@ -967,6 +1047,7 @@ onUnmounted(() => {
             <td>{{ d.platformId }}</td>
             <td>{{ d.qualityStatus || '-' }}</td>
             <td class="ops">
+              <button class="btn ghost" type="button" @click.stop="locateOnMap(String(d.id))">定位</button>
               <button class="btn ghost" type="button" @click="runQuality(d.id)">质检</button>
               <button class="btn ghost" type="button" @click="doQuarantine(d.id)">隔离</button>
               <button class="btn ghost" type="button" @click="doRelease(d.id)">放行</button>
@@ -1099,7 +1180,7 @@ onUnmounted(() => {
         </div>
         <div class="ops" style="margin:0.4rem 0 0.2rem">
           <button class="btn ghost tiny" type="button" @click="locateLatestLiveOnMap">定位最近观测到地图</button>
-          <button class="btn ghost tiny" type="button" :disabled="shellLoading" @click="showDataOnMap">刷新数据图层</button>
+          <button class="btn ghost tiny" type="button" :disabled="pending" @click="showDataOnMap">刷新数据图层</button>
         </div>
         <div class="live-status-grid">
           <div><span class="muted">拉取次数</span><strong>{{ liveStatus.pullCount ?? 0 }}</strong></div>
@@ -1240,9 +1321,9 @@ onUnmounted(() => {
         <button class="btn ghost" type="button" :disabled="pending || queryPage * queryPageSize >= queryTotal" @click="changeDataPage(1)">下一页</button>
       </div>
       <table class="table">
-        <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>质量</th><th>时间</th><th>空间</th></tr></thead>
+        <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>质量</th><th>时间</th><th>空间</th><th>操作</th></tr></thead>
         <tbody>
-          <tr v-if="!filtered.length"><td colspan="7" class="muted">无查询结果</td></tr>
+          <tr v-if="!filtered.length"><td colspan="8" class="muted">无查询结果</td></tr>
           <tr v-for="d in filtered" :key="'q'+d.id" class="row-click" :class="{ selected: shellSelected && shellSelected.kind === 'data' && shellSelected.id === String(d.id) }" @click="locateOnMap(String(d.id))">
             <td>{{ d.id }}</td>
             <td>{{ d.name }}</td>
@@ -1250,6 +1331,10 @@ onUnmounted(() => {
             <td>{{ d.qualityStatus || '-' }}</td>
             <td>{{ d.timeStart }} ~ {{ d.timeEnd }}</td>
             <td><code>{{ String(d.spatialWkt || '-').slice(0, 48) }}</code></td>
+            <td class="ops">
+              <button class="btn ghost" type="button" @click.stop="locateOnMap(String(d.id))">定位</button>
+              <button class="btn ghost" type="button" @click.stop="showDataOnMap">数据上图</button>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -1260,11 +1345,11 @@ onUnmounted(() => {
       <h2>监测数据可视化</h2>
       <p class="muted">空间分布请打开 GIS 工作台的数据图层；中心内提供类型/质量分布快览，详细统计在综合应用中心。</p>
       <div class="form-row" style="margin:0.5rem 0">
-        <button class="btn" type="button" :disabled="shellLoading" @click="showDataOnMap">数据上图</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading" @click="filterDataQualityOnMap('unchecked')">仅未检</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading" @click="filterDataQualityOnMap('warning')">仅告警</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading" @click="filterDataQualityOnMap('anomaly')">仅异常</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading" @click="filterDataQualityOnMap('')">全部数据</button>
+        <button class="btn" type="button" :disabled="pending" @click="showDataOnMap">数据上图</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="filterDataQualityOnMap('unchecked')">仅未检</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="filterDataQualityOnMap('warning')">仅告警</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="filterDataQualityOnMap('anomaly')">仅异常</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="filterDataQualityOnMap()">全部数据</button>
       </div>
       <div class="timeline-panel">
         <h3>时间轴过滤（联动底图数据图层）</h3>
@@ -1282,9 +1367,9 @@ onUnmounted(() => {
             />
           </label>
           <label>窗口（小时）<input v-model.number="timeWindowHours" type="number" min="1" step="1" /></label>
-          <button class="btn" type="button" :disabled="!timeMax || shellLoading" @click="applyTimeFilterOnMap">应用时间窗</button>
+          <button class="btn" type="button" :disabled="!timeMax || pending" @click="applyTimeFilterOnMap">应用时间窗</button>
           <button class="btn ghost" type="button" :disabled="!timeMax || shellLoading" @click="toggleTimePlayback">{{ timePlaying ? '暂停播放' : '播放时间轴' }}</button>
-          <button class="btn ghost" type="button" :disabled="shellLoading" @click="clearTimeFilterOnMap">清除时间过滤</button>
+          <button class="btn ghost" type="button" @click="clearTimeFilterOnMap">清除时间过滤</button>
         </div>
         <p class="muted">
           范围：{{ formatTimeLabel(timeMin) }} ~ {{ formatTimeLabel(timeMax) }}
@@ -1320,7 +1405,7 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="form-row" style="margin-top:1rem">
-        <button class="btn" type="button" :disabled="shellLoading" @click="showDataOnMap">底图上图</button>
+        <button class="btn" type="button" :disabled="pending" @click="showDataOnMap">底图上图</button>
         <RouterLink class="btn ghost" to="/applications?tab=gis">图层控制</RouterLink>
         <RouterLink class="btn ghost" to="/applications?tab=stats">数据统计</RouterLink>
       </div>

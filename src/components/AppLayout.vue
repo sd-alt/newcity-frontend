@@ -15,6 +15,9 @@ import {
   shellPickScreen,
   shellSelected,
   shellViewer,
+  shellRightOpen,
+  openShellRight,
+  closeShellRight,
   type ShellFeatureKind,
 } from '../gis/mapShell'
 import { mapToolMessage, setMapToolMode, mapDrawGeometry } from '../gis/mapTools'
@@ -26,13 +29,15 @@ const route = useRoute()
 const router = useRouter()
 
 const leftOpen = ref(true)
-const rightOpen = ref(false)
+// right panel state lives in mapShell (shared with map toolbar)
+const rightOpen = shellRightOpen
 const bottomOpen = ref(false)
 const leftWidth = ref(320)
 const basemapOpen = ref(false)
 const searchQ = ref('')
 const searchOpen = ref(false)
 const searchLoading = ref(false)
+const drawerTab = ref<'basic' | 'spatial' | 'relations' | 'status'>('basic')
 const lastTabByCenter = ref<Record<string, string>>({})
 
 const searchGroups = ref<
@@ -213,7 +218,10 @@ watch(
 )
 
 watch(shellSelected, (v) => {
-  if (v) rightOpen.value = true
+  if (v) {
+    openShellRight()
+    drawerTab.value = 'basic'
+  }
 })
 
 watch(rightOpen, () => {
@@ -225,11 +233,8 @@ watch(rightOpen, () => {
 function toggleLeft() {
   leftOpen.value = !leftOpen.value
 }
-function toggleRight() {
-  rightOpen.value = !rightOpen.value
-}
 function closeRight() {
-  rightOpen.value = false
+  closeShellRight()
 }
 function trayKindLabel(kind: unknown) {
   const k = String(kind || '')
@@ -314,7 +319,7 @@ function reflySelected() {
       shellPickScreen.value = { x: 320, y: 180 }
     }
     shellBubbleOpen.value = true
-    rightOpen.value = true
+    openShellRight()
     return
   }
   void selectShellFeature(s.kind, s.id, { openBubble: true, fly: true })
@@ -340,9 +345,11 @@ async function runSearch() {
 
     function rows(r: PromiseSettledResult<any>): any[] {
       if (r.status !== 'fulfilled') return []
-      const v = r.value
-      if (Array.isArray(v)) return v
-      if (v && Array.isArray(v.results)) return v.results
+      const v = r.value as any
+      const candidates = [v, v?.data, v?.data?.records, v?.data?.results, v?.data?.items, v?.results, v?.records]
+      for (const c of candidates) {
+        if (Array.isArray(c)) return c
+      }
       return []
     }
 
@@ -372,7 +379,7 @@ async function runSearch() {
       .slice(0, 8)
       .map((x: any) => ({
       id: String(x.id),
-      title: String(x.name || x.taskName || `监测数据 #${x.id}`),
+      title: String(x.name || x.taskName || `观测任务 #${x.id}`),
       subtitle: String(x.status || '概览'),
       route: '/planning',
       tab: 'tasks',
@@ -381,7 +388,7 @@ async function runSearch() {
 
     const indItems = rows(instances).map((x: any) => ({
       id: String(x.id),
-      title: String(x.name || x.instanceName || `监测数据 #${x.id}`),
+      title: String(x.name || x.instanceName || `指标实例 #${x.id}`),
       subtitle: String(x.status || '概览'),
       route: '/indicators',
       tab: 'instances',
@@ -404,11 +411,34 @@ async function openSearchItem(item: {
 }) {
   searchOpen.value = false
   await router.push({ path: item.route, query: item.tab ? { tab: item.tab } : {} })
-  if (item.route === '/resources') selectShellFeature('sensor', item.id)
-  else if (item.route === '/data') selectShellFeature('data', item.id)
-  else if (item.route === '/planning') selectShellFeature('task', item.id)
-  else if (item.route === '/indicators') selectShellFeature('indicator', item.id)
-  rightOpen.value = true
+  await new Promise((r) => setTimeout(r, 150))
+  let ok = false
+  if (item.route === '/resources') ok = await selectShellFeature('sensor', item.id, { openBubble: true, fly: true })
+  else if (item.route === '/data') ok = await selectShellFeature('data', item.id, { openBubble: true, fly: true })
+  else if (item.route === '/planning') ok = await selectShellFeature('task', item.id, { openBubble: true, fly: true })
+  else if (item.route === '/indicators') ok = await selectShellFeature('indicator', item.id, { openBubble: true, fly: true })
+  openShellRight()
+  if (!ok && item.id) {
+    const kind =
+      item.route === '/resources'
+        ? 'sensor'
+        : item.route === '/data'
+          ? 'data'
+          : item.route === '/planning'
+            ? 'task'
+            : item.route === '/indicators'
+              ? 'indicator'
+              : 'unknown'
+    shellSelected.value = {
+      kind: kind as any,
+      id: item.id,
+      name: item.title,
+      description: item.subtitle || ('ID: ' + item.id),
+      status: item.subtitle || '',
+      spatial: '',
+      relations: '',
+    }
+  }
 }
 
 async function doLogout() {
@@ -536,7 +566,7 @@ async function doLogout() {
     <main class="map-main">
       <MapBasemap />
       <button v-if="!leftOpen" type="button" class="edge-btn left" @click="toggleLeft">展开</button>
-      <button v-if="!rightOpen" type="button" class="edge-btn right" @click="toggleRight">详情</button>
+      <!-- 详情入口已并入地图工具栏末项，避免与放大等同列叠压 -->
     </main>
 
     <!-- section -->
@@ -548,14 +578,19 @@ async function doLogout() {
       <div class="drawer-body">
         <template v-if="shellSelected">
           <div class="drawer-tabs">
-            <span class="on">基本信息</span>
-            <span>空间信息</span>
-            <span>关联关系</span>
-            <span>状态</span>
+            <span :class="{ on: drawerTab === 'basic' }" role="button" tabindex="0" @click="drawerTab = 'basic'">基本信息</span>
+            <span :class="{ on: drawerTab === 'spatial' }" role="button" tabindex="0" @click="drawerTab = 'spatial'">空间信息</span>
+            <span :class="{ on: drawerTab === 'relations' }" role="button" tabindex="0" @click="drawerTab = 'relations'">关联关系</span>
+            <span :class="{ on: drawerTab === 'status' }" role="button" tabindex="0" @click="drawerTab = 'status'">状态</span>
           </div>
           <div class="drawer-meta">{{ kindLabel(shellSelected.kind) }} · ID {{ shellSelected.id }}</div>
           <h3>{{ shellSelected.name }}</h3>
-          <pre class="drawer-pre">{{ shellSelected.description || '暂无描述' }}</pre>
+          <pre v-if="drawerTab === 'basic'" class="drawer-pre">{{ shellSelected.description || '暂无描述' }}</pre>
+          <pre v-else-if="drawerTab === 'spatial'" class="drawer-pre">{{ shellSelected.spatial || '暂无空间信息（可在业务中心维护 WKT / 坐标）' }}</pre>
+          <pre v-else-if="drawerTab === 'relations'" class="drawer-pre">{{ shellSelected.relations || '暂无关联关系' }}</pre>
+          <pre v-else class="drawer-pre">{{ shellSelected.status || '状态未知' }}
+
+{{ shellSelected.description || '' }}</pre>
           <div class="drawer-actions">
             <button type="button" class="btn" @click="jumpSelectedCenter">跳转业务中心</button>
             <button type="button" class="btn ghost" @click="reflySelected">地图定位</button>

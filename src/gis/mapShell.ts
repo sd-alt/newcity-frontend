@@ -31,6 +31,7 @@ export const shellViewer = shallowRef<Viewer | null>(null)
 export const shellStatus = ref('底图准备中…')
 export const shellError = ref<string | null>(null)
 export const shellLoading = ref(false)
+let reloadGeneration = 0
 export const shellBasemap = ref<BasemapKey>('vector')
 export const shellCounts = reactive({
   sensors: 0,
@@ -55,6 +56,9 @@ export const shellFilters = reactive({
   showSensors: true,
   showData: true,
   showTasks: true,
+  showIndicators: true,
+  /** data layer style: all | points | heat */
+  dataStyle: 'all',
 })
 export type ShellFeatureKind = 'sensor' | 'data' | 'task' | 'indicator' | 'unknown'
 
@@ -63,6 +67,20 @@ export type ShellSelected = {
   id: string
   name: string
   description: string
+  status?: string
+  spatial?: string
+  relations?: string
+}
+
+export const shellRightOpen = ref(false)
+export function openShellRight() {
+  shellRightOpen.value = true
+}
+export function closeShellRight() {
+  shellRightOpen.value = false
+}
+export function toggleShellRight() {
+  shellRightOpen.value = !shellRightOpen.value
 }
 
 export const shellSelected = ref<ShellSelected | null>(null)
@@ -382,11 +400,19 @@ function selectFromEntity(
   const description = entityDescription(entity)
   applyHighlight(entity)
   shellBubbleEntity = entity
+  const descLines = description.split('\n').map((s) => s.trim()).filter(Boolean)
+  const statusLine = descLines.find((l) => /状态|status|质量/i.test(l))
+  const spatialLine = descLines.find((l) => /WKT|POINT|POLYGON|LINESTRING|位置|研究区|覆盖/i.test(l))
+  const relationLines = descLines.filter((l) => /ID|平台|任务|指标|传感器|标识|关联|platform|task|instance|sensor/i.test(l))
+  const stripLabel = (line: string) => line.replace(/^[^:：]*[:：]\s*/, '').trim()
   shellSelected.value = {
     kind: parsed.kind,
     id: parsed.id,
     name: String(entity.name || entity.id || '未命名'),
     description,
+    status: statusLine ? stripLabel(statusLine) : '',
+    spatial: spatialLine ? stripLabel(spatialLine) || spatialLine : '',
+    relations: relationLines.join('\n') || description,
   }
   // Always prefer entity projected position so bubble anchors to the feature
   const projected = projectEntityToScreen(entity)
@@ -404,6 +430,7 @@ function selectFromEntity(
     }
   }
   shellBubbleOpen.value = openBubble
+  if (openBubble && shellSelected.value) shellStatus.value = `已选中：${shellSelected.value.name || shellSelected.value.id}`
   const viewer = shellViewer.value
   if (viewer && !viewer.isDestroyed() && openBubble) ensureBubbleFollow(viewer)
 }
@@ -529,6 +556,7 @@ async function ensureFeatureOnMap(kind: ShellFeatureKind, forceRefresh = false):
       }
     }
   } else if (kind === 'indicator') {
+    setShellVisibility({ showIndicators: true })
     if (forceRefresh || !cacheIndicators.length) {
       try {
         const res = await api.listInstances('?pageSize=100')
@@ -559,6 +587,7 @@ export async function selectShellFeature(
   if (kind === 'sensor') setShellVisibility({ showSensors: true })
   else if (kind === 'data') setShellVisibility({ showData: true })
   else if (kind === 'task') setShellVisibility({ showTasks: true })
+  else if (kind === 'indicator') setShellVisibility({ showIndicators: true })
 
   let entity = findEntityByBiz(kind, sid)
 
@@ -604,6 +633,9 @@ export async function selectShellFeature(
         y: Math.round(viewer.scene.canvas.clientHeight * 0.35),
       }
       shellBubbleOpen.value = true
+      if (shellSelected.value) {
+        shellStatus.value = `已选中：${shellSelected.value.name || shellSelected.value.id}`
+      }
     } else {
       shellBubbleOpen.value = false
       shellPickScreen.value = null
@@ -677,7 +709,37 @@ function buildCacheSummary(kind: ShellFeatureKind, id: string): ShellSelected {
       .join('\n')
   }
 
-  return { kind, id, name, description }
+  let status = ''
+  let spatial = ''
+  let relations = ''
+  if (hit) {
+    const p2 = (hit.properties || hit) as Record<string, unknown>
+    status = String(p2.status || p2.qualityStatus || p2.runStatus || '-')
+    spatial = String(
+      p2.geometryWkt ||
+        p2.locationWkt ||
+        p2.spatialWkt ||
+        p2.coverageWkt ||
+        p2.researchAreaWkt ||
+        p2.wkt ||
+        '',
+    )
+    if (!spatial) {
+      const lon = p2.lon ?? p2.longitude ?? p2.lng
+      const lat = p2.lat ?? p2.latitude
+      if (lon != null && lat != null) spatial = `POINT(${lon} ${lat})`
+    }
+    relations = [
+      p2.platformId != null ? `platformId: ${p2.platformId}` : '',
+      p2.taskId != null ? `taskId: ${p2.taskId}` : '',
+      p2.instanceId != null ? `instanceId: ${p2.instanceId}` : '',
+      p2.sensorId != null ? `sensorId: ${p2.sensorId}` : '',
+      p2.platformIdentifier ? `identifier: ${p2.platformIdentifier}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n')
+  }
+  return { kind, id, name, description, status, spatial, relations }
 }
 
 
@@ -695,10 +757,26 @@ function applyVisibility() {
   for (const ds of dataSources) {
     const name = ds.name || ''
     if (name === 'sensors') ds.show = shellFilters.showSensors
-    else if (name === 'data') ds.show = shellFilters.showData
-    else if (name === 'tasks') ds.show = shellFilters.showTasks
+    else if (name === 'data') {
+      ds.show = shellFilters.showData
+      if (ds.show) {
+        const style = String((shellFilters as { dataStyle?: string }).dataStyle || 'all')
+        const entities = (ds as { entities?: { values: Array<{ id?: unknown; show?: boolean }> } }).entities
+        const list = entities?.values || []
+        for (const ent of list) {
+          const id = String(ent.id || '')
+          const isHeat = id.startsWith('data-heat-')
+          if (style === 'heat') ent.show = isHeat
+          else if (style === 'points') ent.show = !isHeat
+          else ent.show = true
+        }
+      }
+    } else if (name === 'tasks') ds.show = shellFilters.showTasks
+    else if (name === 'indicators') ds.show = shellFilters.showIndicators
     else if (name === 'assoc-links') ds.show = shellFilters.showSensors || shellFilters.showTasks
-    else ds.show = true // indicators / heat / other
+    else if (name.startsWith('algo-')) ds.show = true
+    else if (name.startsWith('planning-') || name.includes('coverage') || name.includes('gap')) ds.show = true
+    else ds.show = true
   }
 }
 
@@ -831,9 +909,20 @@ export async function reloadShellLayers(path: string, query: Record<string, unkn
   const viewer = shellViewer.value
   if (!viewer || viewer.isDestroyed()) return
   const center = centerFromPath(path)
+  const gen = ++reloadGeneration
   shellLoading.value = true
   shellError.value = null
   shellStatus.value = '正在加载业务图层…'
+  const safetyTimer = typeof window !== 'undefined'
+    ? window.setTimeout(() => {
+        if (gen === reloadGeneration && shellLoading.value) {
+          shellLoading.value = false
+          if (String(shellStatus.value).includes('正在加载')) {
+            shellStatus.value = '图层加载较慢，可继续操作或点刷新'
+          }
+        }
+      }, 5000)
+    : 0
   await clearSources(viewer)
   shellCounts.sensors = 0
   shellCounts.data = 0
@@ -853,27 +942,33 @@ export async function reloadShellLayers(path: string, query: Record<string, unkn
     shellFilters.showSensors = true
     shellFilters.showData = false
     shellFilters.showTasks = false
+    shellFilters.showIndicators = false
   } else if (center === 'data') {
     shellFilters.showSensors = false
     shellFilters.showData = true
     shellFilters.showTasks = false
+    shellFilters.showIndicators = false
   } else if (center === 'planning') {
     // 任务区 + 候选传感资源，便于规划关联
     shellFilters.showSensors = true
     shellFilters.showData = false
     shellFilters.showTasks = true
+    shellFilters.showIndicators = true
   } else if (center === 'algorithms') {
     shellFilters.showSensors = true
     shellFilters.showData = true
     shellFilters.showTasks = true
+    shellFilters.showIndicators = false
   } else if (center === 'indicators') {
-    shellFilters.showSensors = true
+    shellFilters.showSensors = false
     shellFilters.showData = false
-    shellFilters.showTasks = true
+    shellFilters.showTasks = false
+    shellFilters.showIndicators = true
   } else {
     shellFilters.showSensors = true
     shellFilters.showData = true
     shellFilters.showTasks = true
+    shellFilters.showIndicators = true
   }
 
   try {
@@ -953,7 +1048,14 @@ export async function reloadShellLayers(path: string, query: Record<string, unkn
             `实例: ${item.instanceName || item.name || '-'}`,
             `状态: ${item.status || '-'}`,
             `定义: ${item.definitionCode || item.definitionName || '-'}`,
-          ].join('<br/>'),
+            `实例ID: ${item.id}`,
+            item.definitionId != null ? `定义ID: ${item.definitionId}` : '',
+            String(item.spatialWkt || item.geometryWkt || '').trim()
+              ? `范围WKT: ${String(item.spatialWkt || item.geometryWkt)}`
+              : '',
+          ]
+            .filter(Boolean)
+            .join('<br/>'),
       })
       dataSources.push(ds)
       shellCounts.indicators = rows.length
@@ -961,10 +1063,12 @@ export async function reloadShellLayers(path: string, query: Record<string, unkn
       cacheIndicators = []
     }
 
+    if (gen !== reloadGeneration) return
     recomputeAlerts()
     applyVisibility()
     if (!hasFittedView) {
       await flyToDataSources(viewer)
+      if (gen !== reloadGeneration) return
       hasFittedView = true
     }
     const total =
@@ -972,11 +1076,20 @@ export async function reloadShellLayers(path: string, query: Record<string, unkn
     shellStatus.value =
       total > 0 ? `底图就绪 · 当前上图 ${total} 个要素` : '底图就绪 · 暂无业务空间要素（仍可浏览底图）'
   } catch (err) {
-    shellError.value = err instanceof Error ? err.message : '图层加载失败'
-    shellStatus.value = '底图就绪（业务图层加载失败）'
+    if (gen !== reloadGeneration) return
+    const msg = err instanceof Error ? err.message : '图层加载失败'
+    const status = typeof err === 'object' && err && 'status' in err ? Number((err as { status?: number }).status) : 0
+    if (status === 401 || status === 403 || /credentials|Authentication|未登录|Forbidden/i.test(msg)) {
+      shellError.value = '请先登录后加载业务图层'
+      shellStatus.value = '未登录 · 底图可用，业务图层需登录'
+    } else {
+      shellError.value = msg
+      shellStatus.value = '底图就绪（业务图层加载失败）'
+    }
     flyToChina(viewer)
   } finally {
-    shellLoading.value = false
+    if (safetyTimer) window.clearTimeout(safetyTimer)
+    if (gen === reloadGeneration) shellLoading.value = false
   }
 }
 
@@ -1121,13 +1234,13 @@ export async function focusShellMode(mode: ShellLayerMode, path = '/applications
   // 先按路由装载缓存图层，再强制可见性（避免被 center 默认上图策略覆盖）
   await reloadShellLayers(path, {})
   if (mode === 'sensors') {
-    setShellVisibility({ showSensors: true, showData: false, showTasks: false })
+    setShellVisibility({ showSensors: true, showData: false, showTasks: false, showIndicators: false })
   } else if (mode === 'data') {
-    setShellVisibility({ showSensors: false, showData: true, showTasks: false })
+    setShellVisibility({ showSensors: false, showData: true, showTasks: false, showIndicators: false })
   } else if (mode === 'tasks') {
-    setShellVisibility({ showSensors: false, showData: false, showTasks: true })
+    setShellVisibility({ showSensors: false, showData: false, showTasks: true, showIndicators: false })
   } else {
-    setShellVisibility({ showSensors: true, showData: true, showTasks: true })
+    setShellVisibility({ showSensors: true, showData: true, showTasks: true, showIndicators: true })
   }
   const total =
     (shellFilters.showSensors ? shellCounts.sensors : 0) +
@@ -1161,6 +1274,18 @@ export async function applyShellSensorStatusFilter(status: string) {
   shellStatus.value = status
     ? `传感器状态筛选: ${status} · ${shellCounts.sensors} 个`
     : `传感器状态筛选已清除`
+}
+
+
+export async function setDataLayerStyle(style: 'all' | 'points' | 'heat') {
+  shellFilters.dataStyle = style
+  shellFilters.showData = true
+  shellFilters.showSensors = false
+  shellFilters.showTasks = false
+  shellFilters.showIndicators = false
+  applyVisibility()
+  const label = style === 'heat' ? '热力聚合' : style === 'points' ? '采样点' : '点+热力'
+  shellStatus.value = `数据图层样式：${label}（${shellCounts.data} 个数据要素）`
 }
 
 export async function applyShellDataQualityFilter(quality: string) {
@@ -1224,7 +1349,7 @@ export async function fitShellView() {
 /** 业务按钮：刷新指定中心图层并缩放到可见要素 */
 export async function showShellAndFit(mode: ShellLayerMode, path: string) {
   await focusShellMode(mode, path)
-  await fitShellView()
+  void fitShellView()
 }
 
 // ---------- planning association map story ----------
@@ -1297,6 +1422,23 @@ async function removeDataSourceByName(name: string) {
   }
   dataSources.length = 0
   dataSources.push(...keep)
+  // 兜底：清理 viewer 中同名残留（避免 ID 冲突）
+  try {
+    const bag: Array<{ name?: string }> = []
+    for (let i = 0; i < viewer.dataSources.length; i += 1) {
+      const ds = viewer.dataSources.get(i)
+      if (ds && (ds.name || '') === name) bag.push(ds as { name?: string })
+    }
+    for (const ds of bag) {
+      try {
+        viewer.dataSources.remove(ds as never, true)
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Planning workspace: tasks + sensors visible together */
@@ -1309,10 +1451,15 @@ export async function showPlanningWorkspace(path = '/planning') {
 
 /** Indicators workspace: instance ranges only */
 export async function showIndicatorsWorkspace(path = '/indicators') {
-  await reloadShellLayers(path, {})
-  setShellVisibility({ showSensors: false, showData: false, showTasks: false })
-  await fitShellView()
+  if (!cacheIndicators.length) {
+    await reloadShellLayers(path, {})
+  } else {
+    setShellVisibility({ showSensors: false, showData: false, showTasks: false, showIndicators: true })
+    await rerenderShellLayers(false)
+  }
+  setShellVisibility({ showSensors: false, showData: false, showTasks: false, showIndicators: true })
   shellStatus.value = `指标范围上图：${shellCounts.indicators} 个实例`
+  void fitShellView()
 }
 
 
@@ -1465,23 +1612,23 @@ export async function drawAssociationLinks(
   if (!viewer || viewer.isDestroyed()) return 0
 
   if (options?.ensureLayers !== false) {
-    // Always refresh sensors/tasks so association lines can resolve platform coordinates.
+    // 仅补齐坐标缓存；避免与中心图层 reload 并发 clearSources 引发 Cesium DeveloperError
     try {
-      const [sRes, tRes] = await Promise.all([api.getSensorGis(), api.getTaskGis()])
-      cacheSensors = asList((sRes.data as { features?: unknown })?.features ?? sRes.data)
-      cacheTasks = asList((tRes.data as { features?: unknown })?.features ?? tRes.data)
-    } catch {
       if (!cacheSensors.length || !cacheTasks.length) {
-        await reloadShellLayers('/planning', {})
+        const [sRes, tRes] = await Promise.all([api.getSensorGis(), api.getTaskGis()])
+        cacheSensors = asList((sRes.data as { features?: unknown })?.features ?? sRes.data)
+        cacheTasks = asList((tRes.data as { features?: unknown })?.features ?? tRes.data)
       }
+    } catch {
+      /* keep existing cache */
     }
-    // Clear filters that may hide linked sensors on the map.
     shellFilters.sensorType = ''
     shellFilters.sensorStatus = ''
     shellFilters.taskStatus = ''
     shellFilters.taskId = ''
     setShellVisibility({ showSensors: true, showData: false, showTasks: true })
-    await rerenderShellLayers(false)
+    // 不强制全量 rerender；连线图层独立叠加
+    applyVisibility()
   }
 
   await removeDataSourceByName('assoc-links')
@@ -1504,6 +1651,7 @@ export async function drawAssociationLinks(
     score?: number
   }> = []
 
+  const seen = new Set<string>()
   for (const link of links) {
     let to = sensorLonLat(link.platformId)
     if (!to) {
@@ -1511,7 +1659,6 @@ export async function drawAssociationLinks(
       try {
         const res = await api.getSensorGis()
         cacheSensors = asList((res.data as { features?: unknown })?.features ?? res.data)
-        await rerenderShellLayers(false)
       } catch {
         /* ignore */
       }
@@ -1519,8 +1666,11 @@ export async function drawAssociationLinks(
     }
     if (!to) continue
     const mode = link.mode || 'candidate'
+    const eid = `${taskId}-${link.platformId}-${mode}`
+    if (seen.has(eid)) continue
+    seen.add(eid)
     drawn.push({
-      id: `${taskId}-${link.platformId}-${mode}`,
+      id: eid,
       fromLon: from[0],
       fromLat: from[1],
       toLon: to[0],
@@ -1548,8 +1698,8 @@ export async function drawAssociationLinks(
   const ds = await loadAssociationLinksLayer(viewer, drawn)
   dataSources.push(ds)
   applyVisibility()
-  if (options?.fit !== false) await fitShellView()
   shellStatus.value = `已绘制关联连线 ${drawn.length} 条`
+  if (options?.fit !== false) void fitShellView()
   return drawn.length
 }
 

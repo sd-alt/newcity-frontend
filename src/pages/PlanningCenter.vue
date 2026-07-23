@@ -10,7 +10,6 @@ import {
   selectShellFeature,
   setShellVisibility,
   shellCounts,
-  shellLoading,
   shellSelected,
   shellStatus,
   showPlanningWorkspace,
@@ -58,8 +57,8 @@ const router = useRouter()
 const route = useRoute()
 const tab = ref('tasks')
 const tabs = [
-  { key: 'tasks', label: '任务管理' },
-  { key: 'flow', label: '关联流程' },
+  { key: 'tasks', label: '任务建模' },
+  { key: 'flow', label: '需求与关联' },
   { key: 'candidates', label: '候选与评分' },
   { key: 'plans', label: '方案管理' },
 ]
@@ -68,6 +67,24 @@ const instances = ref<Record<string, unknown>[]>([])
 const scales = ref<Record<string, unknown>[]>([])
 const tasks = ref<Record<string, unknown>[]>([])
 const plans = ref<Record<string, unknown>[]>([])
+const lastCopiedPlanId = ref<string | number | null>(null)
+
+function sortPlans(list: Record<string, unknown>[]) {
+  const rank = (status: unknown) => {
+    const s = String(status || '').toLowerCase()
+    if (s === 'draft' || s === 'created') return 0
+    if (s === 'approved') return 1
+    if (s.includes('complete') || s.includes('basic')) return 2
+    if (s === 'published') return 3
+    if (s === 'archived') return 4
+    return 5
+  }
+  return [...list].sort((a, b) => {
+    const d = rank(a.status) - rank(b.status)
+    if (d !== 0) return d
+    return Number(b.id || 0) - Number(a.id || 0)
+  })
+}
 const candidateRows = ref<Record<string, unknown>[]>([])
 const excludedRows = ref<Record<string, unknown>[]>([])
 const candidateMeta = ref<Record<string, unknown> | null>(null)
@@ -75,6 +92,11 @@ const reverseResult = ref<unknown>(null)
 const evalResult = ref<unknown>(null)
 const outputResult = ref<unknown>(null)
 const planResult = ref<unknown>(null)
+/** 优化/增补选中的平台，用于地图着色（后端 planType 仍为 basic，状态字段为 optimized/completed） */
+const lastOptLinks = ref<Array<Record<string, unknown>>>([])
+const lastSupLinks = ref<Array<Record<string, unknown>>>([])
+const lastOptMeta = ref<Record<string, unknown> | null>(null)
+const lastSupMeta = ref<Record<string, unknown> | null>(null)
 const comparePlanLeft = ref('')
 const comparePlanRight = ref('')
 const compareResult = ref<unknown>(null)
@@ -157,7 +179,15 @@ function inferStepFromStatus(status: string): StepKey {
 
 async function setTab(key: string) {
   tab.value = key
-  await router.replace({ path: '/planning', query: { tab: key } })
+  const q: Record<string, string> = {}
+  for (const [k, v] of Object.entries(route.query)) {
+    if (v == null) continue
+    q[k] = Array.isArray(v) ? String(v[0] ?? '') : String(v)
+  }
+  q.tab = key
+  // keep current task id in URL for refresh / map jump
+  if (taskId.value != null) q.taskId = String(taskId.value)
+  await router.replace({ path: '/planning', query: q })
 }
 function syncTab() {
   const t = route.query.tab
@@ -169,6 +199,11 @@ function canRun(step: StepKey) {
   if (user.value == null) return false
   if (step === 'create') return currentStep.value === 'create' && taskId.value == null
   if (taskId.value == null) return false
+  // 已提交任务不可再次“提交”
+  if (step === 'submit') {
+    const st = String(taskStatus.value || '').toLowerCase()
+    if (st && st !== 'draft' && st !== 'created') return false
+  }
   // 当前步可执行；已完成步骤可重跑；不可跳过未完成步骤
   if (currentStep.value === step) return true
   if (doneSteps.value.has(step)) return true
@@ -179,11 +214,16 @@ function stepBlockedReason(step: StepKey): string {
   if (pending.value) return '请等待当前操作完成'
   if (user.value == null) return '请先登录'
   if (step === 'create') {
-    if (taskId.value != null) return '当前已有任务，请点“新建任务”后再创建'
+    // 已选任务时创建步视为完成，不显示误导性锁定文案
+    if (taskId.value != null || doneSteps.value.has('create')) return ''
     if (currentStep.value !== 'create') return '当前不在创建步骤'
     return ''
   }
   if (taskId.value == null) return '请先创建并选中任务'
+  if (step === 'submit') {
+    const st = String(taskStatus.value || '').toLowerCase()
+    if (st && st !== 'draft' && st !== 'created') return '任务已提交，无需重复提交'
+  }
   if (currentStep.value === step || doneSteps.value.has(step)) return ''
   const curIdx = STEP_ORDER.indexOf(currentStep.value)
   const stepIdx = STEP_ORDER.indexOf(step)
@@ -192,6 +232,8 @@ function stepBlockedReason(step: StepKey): string {
     const prevTitle = STEPS.find((s) => s.key === prev)?.title || String(prev)
     return '请先完成：' + prevTitle
   }
+  // 已越过的步骤允许回看，不显示“不可执行”
+  if (stepIdx < curIdx) return ''
   return '该步骤当前不可执行'
 }
 
@@ -217,23 +259,33 @@ function onStepClick(step: StepKey) {
 
 const currentAction = computed(() => {
   const key = currentStep.value
-  const map: Record<StepKey, { action: StepKey; label: string }> = {
-    create: { action: 'create', label: '执行创建任务' },
-    submit: { action: 'submit', label: '执行提交任务' },
-    reverse: { action: 'reverse', label: '执行需求反算' },
-    candidates: { action: 'candidates', label: '执行候选评分' },
-    basic: { action: 'basic', label: '执行基础关联' },
-    optimize: { action: 'optimize', label: '执行优化关联' },
-    supplement: { action: 'supplement', label: '执行增补关联' },
-    evaluate: { action: 'evaluate', label: '执行满足度评估' },
-    output: { action: 'output', label: '执行规划输出' },
+  const map: Record<StepKey, { action: StepKey; label: string; redoLabel: string }> = {
+    create: { action: 'create', label: '执行创建任务', redoLabel: '重新创建任务' },
+    submit: { action: 'submit', label: '执行提交任务', redoLabel: '重新提交任务' },
+    reverse: { action: 'reverse', label: '执行需求反算', redoLabel: '重新执行需求反算' },
+    candidates: { action: 'candidates', label: '执行候选评分', redoLabel: '重新执行候选评分' },
+    basic: { action: 'basic', label: '执行基础关联', redoLabel: '重新执行基础关联' },
+    optimize: { action: 'optimize', label: '执行优化关联', redoLabel: '重新执行优化关联' },
+    supplement: { action: 'supplement', label: '执行增补关联', redoLabel: '重新执行增补关联' },
+    evaluate: { action: 'evaluate', label: '执行满足度评估', redoLabel: '重新执行满足度评估' },
+    output: { action: 'output', label: '执行规划输出', redoLabel: '重新生成规划输出' },
   }
-  return map[key]
+  const item = map[key]
+  if (!item) return item
+  // 当前步已完成且仍停留在该步时，按钮文案改为“重新…”，避免看起来像没做完
+  if (doneSteps.value.has(key) && key !== 'create') {
+    return { action: item.action, label: item.redoLabel }
+  }
+  return { action: item.action, label: item.label }
 })
 
 async function runCurrentStep() {
   const a = currentAction.value?.action
   if (!a) return
+  // 主操作在「需求与关联」表单区；若人在列表页，先切过去避免盲点
+  if (tab.value !== 'flow' && a !== 'candidates') {
+    await setTab('flow')
+  }
   if (a === 'create') return createTask()
   if (a === 'submit') return submitTask()
   if (a === 'reverse') return requirementReverse()
@@ -322,7 +374,15 @@ async function loadLists() {
   instances.value = inst.data
   scales.value = sc.data
   tasks.value = t.data
-  plans.value = p.data
+  {
+    const raw = p.data as unknown
+    const list = Array.isArray(raw)
+      ? raw
+      : raw && typeof raw === 'object' && Array.isArray((raw as Record<string, unknown>).results)
+        ? ((raw as Record<string, unknown>).results as Record<string, unknown>[])
+        : []
+    plans.value = sortPlans(list as Record<string, unknown>[])
+  }
   preferDemoInstance()
   if (scaleId.value === '' && scales.value[0]) scaleId.value = pickId(scales.value[0])
   syncFromSelectedInstance()
@@ -331,12 +391,12 @@ async function loadLists() {
 async function createTask() {
   if (canRun('create') === false) return
   if (instanceId.value === '' || scaleId.value === '' || taskName.value === '') {
-    error.value = '请选择指标实例、尺度，并填写任务名称'
+    error.value = '请选择指标实例、尺度，并填写任务名称（表单内容已保留）'
     return
   }
   syncFromSelectedInstance()
   if (!researchAreaWkt.value) {
-    error.value = '研究区 WKT 不能为空，请选择带空间范围的指标实例'
+    error.value = '研究区 WKT 不能为空：请选择带空间范围的指标实例，或地图绘面后点“写入地图绘制范围”'
     return
   }
   pending.value = true
@@ -373,6 +433,7 @@ async function createTask() {
     markDone('create')
     advanceTo('submit')
     message.value = '任务已创建 #' + data.id + '，请提交任务'
+    await setTab('flow')
     try { await showPlanningWorkspace('/planning') } catch { /* map refresh optional */ }
     try {
       await selectShellFeature('task', String(data.id), { openBubble: true, fly: true })
@@ -472,8 +533,7 @@ async function confirmCandidates() {
     if (STEP_ORDER.indexOf(currentStep.value) <= STEP_ORDER.indexOf('candidates')) {
       advanceTo('basic')
     }
-    tab.value = 'flow'
-    await router.replace({ path: '/planning', query: { tab: 'flow' } })
+    await setTab('flow')
     message.value = '候选筛选与评分已确认，可进行基础关联'
     try { await showCandidatesOnMap() } catch { /* map optional */ }
   } catch (err) {
@@ -491,7 +551,7 @@ async function basicAssociation() {
     await api.basicAssociation(taskId.value)
     markDone('basic')
     advanceTo('optimize')
-    tab.value = 'flow'
+    await setTab('flow')
     message.value = '基础关联完成'
     await loadLists()
     // 关联后同步最新方案匹配，便于地图连线与方案管理
@@ -516,17 +576,23 @@ async function optimizeAssociation() {
   pending.value = true
   error.value = null
   try {
-    await api.optimizeAssociation(taskId.value)
+    const res = await api.optimizeAssociation(taskId.value)
+    lastOptMeta.value = asRec(res.data)
+    lastOptLinks.value = buildLinksFromOptPayload(res.data, 'optimized')
     markDone('optimize')
     advanceTo('supplement')
-    tab.value = 'flow'
-    message.value = '优化关联完成'
+    await setTab('flow')
+    message.value =
+      '优化关联完成：入选资源 ' +
+      lastOptLinks.value.length +
+      ' 个' +
+      (lastOptLinks.value.length ? '，正在上图…' : '')
     await loadLists()
     const planRow = plans.value.find((pl) => String(pl.taskId) === String(taskId.value))
     if (planRow?.id != null) {
       try {
-        const res = await api.getAssociationResult(String(planRow.id))
-        planResult.value = res.data
+        const ar = await api.getAssociationResult(String(planRow.id))
+        planResult.value = ar.data
       } catch { /* optional */ }
     }
     await showAssociationOnMap('optimized')
@@ -543,17 +609,51 @@ async function supplementAssociation() {
   pending.value = true
   error.value = null
   try {
-    await api.supplementAssociation(taskId.value)
+    const res = await api.supplementAssociation(taskId.value)
+    lastSupMeta.value = asRec(res.data)
+    // 增补：优先 after.resourceIds（优化入选+增补），否则 added+opt
+    const built = buildLinksFromOptPayload(res.data, 'supplement')
+    if (!built.length && lastOptLinks.value.length) {
+      // fallback merge opt + added ids from payload
+      const root = asRec(res.data)
+      const results = Array.isArray(root.results) ? (root.results as Record<string, unknown>[]) : []
+      const added = new Set<string>()
+      for (const item of results) {
+        for (const id of (item.addedResourceIds || []) as unknown[]) added.add(String(id))
+        for (const id of (asRec(item.after).resourceIds || []) as unknown[]) added.add(String(id))
+      }
+      const base: Array<Record<string, unknown>> = lastOptLinks.value.map((x) => ({ ...x, mode: 'supplement' }))
+      for (const id of added) {
+        if (base.some((b) => String(b.platformId) === id)) continue
+        base.push({
+          platformId: Number(id) || id,
+          id: Number(id) || id,
+          score: 0,
+          matched: true,
+          mode: 'supplement',
+          platformName: '平台#' + id,
+          name: '平台#' + id,
+          reason: '增补入选',
+        })
+      }
+      lastSupLinks.value = base
+    } else {
+      lastSupLinks.value = built
+    }
     markDone('supplement')
     advanceTo('evaluate')
-    tab.value = 'flow'
-    message.value = '增补关联完成'
+    await setTab('flow')
+    message.value =
+      '增补关联完成：资源 ' +
+      lastSupLinks.value.length +
+      ' 个' +
+      (lastSupLinks.value.length ? '，正在上图…' : '')
     await loadLists()
     const planRow = plans.value.find((pl) => String(pl.taskId) === String(taskId.value))
     if (planRow?.id != null) {
       try {
-        const res = await api.getAssociationResult(String(planRow.id))
-        planResult.value = res.data
+        const ar = await api.getAssociationResult(String(planRow.id))
+        planResult.value = ar.data
       } catch { /* optional */ }
     }
     await showAssociationOnMap('supplement')
@@ -582,7 +682,7 @@ async function requirementEvaluation() {
     } catch { /* map optional */ }
     markDone('evaluate')
     advanceTo('output')
-    tab.value = 'flow'
+    await setTab('flow')
     message.value = '满足度评估完成（关联后核查）'
   } catch (err) {
     error.value = errMessage(err, '评估失败')
@@ -647,8 +747,7 @@ async function loadCandidates(switchTab = true, drawMap = true) {
     }
     excludedRows.value = excluded
     if (switchTab) {
-      tab.value = 'candidates'
-      await router.replace({ path: '/planning', query: { tab: 'candidates' } })
+      await setTab('candidates')
     }
     message.value = '候选资源 ' + list.length + ' 条'
   } catch (err) {
@@ -660,26 +759,35 @@ function inferStepFromPlans(taskPlans: Record<string, unknown>[], status: string
   if (!taskPlans.length) {
     return inferStepFromStatus(status)
   }
-  const statuses = taskPlans.map((p) => String(p.status || '').toLowerCase())
-  if (statuses.some((s) => s.includes('complete') || s === 'completed' || s.includes('supplement'))) {
+  // 同时看方案状态与 planType（basic/optimized/supplement），避免 published 方案被误判回需求反算
+  const tags = taskPlans.map((p) => {
+    const st = String(p.status || '').toLowerCase()
+    const pt = String(p.planType || p.associationMode || p.mode || p.type || '').toLowerCase()
+    return `${st} ${pt}`
+  })
+  const has = (keys: string[]) => tags.some((t) => keys.some((k) => t.includes(k)))
+  if (has(['archived', 'published', 'approved', 'complete', 'completed', 'output', 'final'])) {
+    // 已有正式方案：进入评估/输出阶段
+    if (has(['supplement', '增补'])) return 'evaluate'
+    if (has(['optim', '优化'])) return 'supplement'
+    if (has(['basic', 'base', '基础'])) return 'optimize'
     return 'evaluate'
   }
-  if (statuses.some((s) => s.includes('optim'))) {
-    return 'supplement'
-  }
-  if (statuses.some((s) => s.includes('basic') || s === 'draft' || s === 'created' || s === 'basic_completed')) {
-    return 'optimize'
-  }
+  if (has(['supplement', '增补'])) return 'evaluate'
+  if (has(['optim', '优化'])) return 'supplement'
+  if (has(['basic', 'base', '基础', 'draft', 'created', 'basic_completed'])) return 'optimize'
   return inferStepFromStatus(status)
 }
 
 async function selectTask(id: unknown) {
-  void locateTaskOnMap(String(id as string | number))
+  void locateTaskOnMap(String(id as string | number), { silent: true })
 
   const tid = Number(id)
   if (Number.isFinite(tid) === false) return
   taskId.value = tid
   setLastTaskId(tid)
+  // 选择并继续：进入需求与关联工作台
+  await setTab('flow')
   reverseResult.value = null
   evalResult.value = null
   outputResult.value = null
@@ -730,15 +838,34 @@ async function selectTask(id: unknown) {
       const step = STEP_ORDER[i]
       if (step) done.add(step)
     }
-    // 若已有方案，说明候选/反算至少可视为已走过
+    // 若已有方案，严格按 planType 标记完成，避免“任意 published”误标优化/增补已完成
     if (taskPlans.length) {
+      done.add('submit')
       done.add('reverse')
       done.add('candidates')
       done.add('basic')
+      const typeTags = taskPlans
+        .map((p) => String(p.planType || p.associationMode || p.mode || p.type || '').toLowerCase())
+        .join(' ')
+      if (typeTags.includes('optim') || typeTags.includes('优化')) {
+        done.add('optimize')
+      }
+      if (typeTags.includes('supplement') || typeTags.includes('增补')) {
+        done.add('supplement')
+      }
+      // 仅当已到增补之后，或方案已发布/审核且至少完成基础关联，才视评估可回看
+      const statusTags = taskPlans.map((p) => String(p.status || '').toLowerCase()).join(' ')
+      if (
+        done.has('supplement')
+        || ((statusTags.includes('published') || statusTags.includes('approved') || statusTags.includes('archived'))
+          && done.has('optimize'))
+      ) {
+        done.add('evaluate')
+      }
     }
     doneSteps.value = done
     advanceTo(inferred)
-    message.value =
+    const summary =
       '已选择任务 #' +
       tid +
       ' · 状态 ' +
@@ -747,20 +874,46 @@ async function selectTask(id: unknown) {
       taskPlans.length +
       ' · 下一步 ' +
       inferred
-    // 选中后进入关联流程页，展示当前步骤主按钮，避免停在列表找不到执行入口
-    tab.value = 'flow'
-    // 选中任务后自动上图：有方案则画关联线，否则尝试候选资源
-    try {
-      if (taskPlans.some((p) => Array.isArray(p.resourceMatches) && p.resourceMatches.length)) {
-        planResult.value = taskPlans[0] as Record<string, unknown>
-        await showAssociationOnMap('basic')
-      } else {
-        await loadCandidates(false)
-        if (candidateRows.value.length) await showCandidatesOnMap()
+    message.value = summary
+    // 选中后进入「需求与关联」，并同步左侧二级菜单与 URL
+    await setTab('flow')
+    // 选中任务后自动上图：有方案则画关联线，否则尝试候选资源（最终文案在地图同步后写回）
+    // 地图同步异步进行，避免阻塞任务选择反馈
+    void (async () => {
+      try {
+        let hasMatches = taskPlans.some((p) => Array.isArray(p.resourceMatches) && p.resourceMatches.length)
+        if (!hasMatches && taskPlans[0]?.id != null) {
+          try {
+            const res = await api.getAssociationResult(String(taskPlans[0].id))
+            planResult.value = res.data as Record<string, unknown>
+            const data = res.data as Record<string, unknown>
+            const planObj = (data.plan || data) as Record<string, unknown>
+            const rm = planObj.resourceMatches || data.resourceMatches
+            hasMatches = Array.isArray(rm) && rm.length > 0
+          } catch {
+            /* optional */
+          }
+        } else if (taskPlans[0]) {
+          planResult.value = taskPlans[0] as Record<string, unknown>
+        }
+        if (hasMatches) {
+          await showAssociationOnMap('basic')
+          if (taskId.value === tid) message.value = summary + ' · 已同步基础关联上图'
+        } else {
+          await loadCandidates(false, false)
+          if (taskId.value === tid) {
+            if (candidateRows.value.length) {
+              await showCandidatesOnMap()
+              message.value = summary + ' · 候选 ' + candidateRows.value.length + ' 已上图'
+            } else {
+              message.value = summary
+            }
+          }
+        }
+      } catch {
+        if (taskId.value === tid) message.value = summary
       }
-    } catch {
-      /* map overlay optional */
-    }
+    })()
   } catch (err) {
     error.value = errMessage(err, '加载任务失败')
   }
@@ -772,7 +925,7 @@ async function removeTask(id: unknown) {
   error.value = null
   try {
     await api.deleteTask(String(id))
-    if (taskId.value != null && String(taskId.value) === String(id)) resetForm()
+    if (taskId.value != null && String(taskId.value) === String(id)) await resetForm()
     message.value = '任务已删除'
     try { await showPlanningWorkspace('/planning') } catch { /* map refresh optional */ }
     await loadLists()
@@ -793,7 +946,7 @@ async function openOnMap() {
 }
 
 
-function resetForm() {
+async function resetForm() {
   taskId.value = null
   taskStatus.value = ''
   currentStep.value = 'create'
@@ -808,9 +961,18 @@ function resetForm() {
   candidateMeta.value = null
   planResult.value = null
   taskCode.value = 'TASK-' + Date.now()
+  // clear taskId from URL so map jump / watch does not re-select
+  const q: Record<string, string> = {}
+  for (const [k, v] of Object.entries(route.query)) {
+    if (v == null || k === 'taskId') continue
+    q[k] = Array.isArray(v) ? String(v[0] ?? '') : String(v)
+  }
+  q.tab = 'flow'
+  tab.value = 'flow'
+  await router.replace({ path: '/planning', query: q })
 }
 
-async function loadPlanResult(planId: unknown) {
+async function loadPlanResult(planId: unknown, opts?: { silent?: boolean }) {
   try {
     const res = await api.getAssociationResult(String(planId))
     planResult.value = res.data
@@ -822,18 +984,32 @@ async function loadPlanResult(planId: unknown) {
     }
     try {
       await showPlanningWorkspace('/planning')
-      const ptype = String(plan?.planType || plan?.status || '').toLowerCase()
-      let mode: 'basic' | 'optimized' | 'supplement' = 'basic'
-      if (ptype.includes('optim')) mode = 'optimized'
-      else if (ptype.includes('supple')) mode = 'supplement'
-      await showAssociationOnMap(mode)
+    } catch {
+      /* map optional */
+    }
+    const planObj = (planResult.value as Record<string, unknown> | null) || {}
+    const nested = (planObj.plan as Record<string, unknown> | undefined) || {}
+    const rawType = String(
+      planObj.planType || nested.planType || plan?.planType || plan?.status || '',
+    ).toLowerCase()
+    const mode: 'basic' | 'optimized' | 'supplement' =
+      rawType.includes('optim') || rawType.includes('优化')
+        ? 'optimized'
+        : rawType.includes('supple') || rawType.includes('增补')
+          ? 'supplement'
+          : 'basic'
+    try {
+      await showAssociationOnMap(mode, { silent: !!opts?.silent })
       if (taskId.value != null) {
         await selectShellFeature('task', String(taskId.value), { openBubble: true, fly: true })
       }
     } catch {
       /* map optional */
     }
-    message.value = '已加载方案 #' + planId + ' 并同步地图关联'
+    const modeLabel = mode === 'basic' ? '基础' : mode === 'optimized' ? '优化' : '增补'
+    if (!opts?.silent) {
+      message.value = '已加载方案 #' + planId + ' 并同步' + modeLabel + '关联上图'
+    }
   } catch (err) {
     error.value = errMessage(err, '方案结果加载失败')
   }
@@ -849,7 +1025,23 @@ async function onPlanRowClick(p: Record<string, unknown>) {
   await loadPlanResult(p.id)
 }
 
+
+function planById(planId: unknown) {
+  return plans.value.find((p) => String(p.id) === String(planId)) || null
+}
+function planLiveStatus(planId: unknown, fallback?: unknown) {
+  const row = planById(planId)
+  return row?.status ?? fallback
+}
+function canApprovePlanStatus(status: unknown) {
+  return !canByStatus(status, ['published', 'archived', 'approved'])
+}
+function canPublishPlanStatus(status: unknown) {
+  return canByStatus(status, ['approved']) && !canByStatus(status, ['published', 'archived'])
+}
+
 async function doPublishPlan(planId: unknown, status?: unknown) {
+  status = planLiveStatus(planId, status)
   if (canByStatus(status, ['published'])) {
     error.value = '方案已发布，无需重复操作'
     return
@@ -858,13 +1050,17 @@ async function doPublishPlan(planId: unknown, status?: unknown) {
     error.value = '已归档方案不能发布'
     return
   }
+  if (canByStatus(status, ['approved']) === false) {
+    error.value = '请先审核通过后再发布（当前：' + planStatusLabel(status) + '）'
+    return
+  }
   pending.value = true
   error.value = null
   try {
     await api.publishPlan(String(planId))
-    message.value = '方案 #' + planId + ' 已发布'
     await loadLists()
-    try { await loadPlanResult(planId) } catch { /* map optional */ }
+    try { await loadPlanResult(planId, { silent: true }) } catch { /* map optional */ }
+    message.value = '方案 #' + planId + ' 已发布，已同步地图关联'
   } catch (err) {
     error.value = errMessage(err, '方案发布失败')
   } finally {
@@ -873,6 +1069,7 @@ async function doPublishPlan(planId: unknown, status?: unknown) {
 }
 
 async function doArchivePlan(planId: unknown, status?: unknown) {
+  status = planLiveStatus(planId, status)
   if (canByStatus(status, ['archived'])) {
     error.value = '方案已归档'
     return
@@ -897,9 +1094,25 @@ async function doCopyPlan(planId: unknown) {
   error.value = null
   try {
     const res = await api.copyPlan(String(planId))
-    const data = res.data as { id?: number }
-    message.value = '方案已复制为草稿 #' + String(data.id ?? '')
+    const data = res.data as { id?: number; status?: string }
+    const newId = data.id
+    lastCopiedPlanId.value = newId ?? null
+    message.value =
+      '方案已复制为草稿 #' +
+      String(newId ?? '') +
+      '（已排到列表前部；请先点「审核」再「发布」）'
     await loadLists()
+    if (newId != null) {
+      try {
+        await loadPlanResult(newId, { silent: true })
+      } catch {
+        /* map optional */
+      }
+    }
+    message.value =
+      '方案已复制为草稿 #' +
+      String(newId ?? '') +
+      '（已排到列表前部；请先点「审核」再「发布」）'
   } catch (err) {
     error.value = errMessage(err, '复制方案失败')
   } finally {
@@ -910,6 +1123,7 @@ async function doCopyPlan(planId: unknown) {
 
 
 async function doApprovePlan(planId: unknown, status?: unknown) {
+  status = planLiveStatus(planId, status)
   if (canByStatus(status, ['published', 'archived', 'approved'])) {
     error.value = '该方案不可审核（已审核/已发布/已归档）'
     return
@@ -918,9 +1132,9 @@ async function doApprovePlan(planId: unknown, status?: unknown) {
   error.value = null
   try {
     await api.approvePlan(String(planId))
-    message.value = '方案 #' + planId + ' 已审核通过'
     await loadLists()
-    try { await loadPlanResult(planId) } catch { /* map optional */ }
+    try { await loadPlanResult(planId, { silent: true }) } catch { /* map optional */ }
+    message.value = '方案 #' + planId + ' 已审核通过，可继续发布；已同步地图关联'
   } catch (err) {
     error.value = errMessage(err, '审核失败')
   } finally {
@@ -1075,6 +1289,16 @@ function planStatusLabel(status: unknown) {
   return map[s] || String(status || '-')
 }
 
+function isPlanRowSelected(p: Record<string, unknown>) {
+  if (taskId.value != null && String(p.taskId ?? p.task_id ?? '') === String(taskId.value)) return true
+  const pr = planResult.value as Record<string, unknown> | null
+  if (!pr) return false
+  const planObj = (pr.plan || pr) as Record<string, unknown>
+  const pid = planObj.id ?? planObj.planId ?? pr.id ?? pr.planId
+  return pid != null && String(pid) === String(p.id)
+}
+
+
 
 async function ensureListsLoaded() {
   if (!user.value) return
@@ -1089,7 +1313,47 @@ onMounted(async () => {
   syncTab()
   taskCode.value = 'TASK-' + Date.now()
   await ensureListsLoaded()
+  await applyRouteTaskQuery()
+  applyRouteCoordHint()
+  // 无路由指定任务时，优先载入演示故事线任务，便于直接走规划
+  if (taskId.value == null && user.value && tasks.value.length) {
+    const demo =
+      tasks.value.find((t) => String(t.code || '').toUpperCase().includes('DEMO') || String(t.name || '').includes('演示')) ||
+      tasks.value.find((t) => String(t.status || '') === 'submitted') ||
+      tasks.value[0]
+    if (demo?.id != null) {
+      await selectTask(demo.id)
+      message.value = '已载入任务 #' + demo.id + '，可继续规划步骤或地图上图'
+    }
+  }
 })
+
+async function applyRouteTaskQuery() {
+  const raw = route.query.taskId
+  if (raw == null || raw === '') return
+  const id = Number(Array.isArray(raw) ? raw[0] : raw)
+  if (!Number.isFinite(id)) return
+  // avoid re-entry when setTab writes the same taskId
+  if (taskId.value === id && taskStatus.value) return
+  try {
+    await selectTask(id)
+    message.value = '已根据地图跳转载入任务 #' + id
+  } catch {
+    /* optional */
+  }
+}
+
+function applyRouteCoordHint() {
+  const lon = Number(Array.isArray(route.query.lon) ? route.query.lon[0] : route.query.lon)
+  const lat = Number(Array.isArray(route.query.lat) ? route.query.lat[0] : route.query.lat)
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return
+  // seed a small study area if empty so user can create task near map click
+  if (!researchAreaWkt.value) {
+    const d = 0.08
+    researchAreaWkt.value = `POLYGON((${lon - d} ${lat - d},${lon + d} ${lat - d},${lon + d} ${lat + d},${lon - d} ${lat + d},${lon - d} ${lat - d}))`
+    message.value = `已根据地图点击预填研究区（${lon.toFixed(4)}, ${lat.toFixed(4)} 附近）`
+  }
+}
 
 watch(user, async (u) => {
   if (u) await ensureListsLoaded()
@@ -1108,26 +1372,37 @@ watch(
 )
 
 watch(() => route.query.tab, syncTab)
+watch(() => route.query.taskId, () => { void applyRouteTaskQuery() })
 watch(instanceId, () => { syncFromSelectedInstance() })
 
 
-async function locateTaskOnMap(id: string | number | unknown) {
+async function locateTaskOnMap(id: string | number | unknown, options?: { silent?: boolean }) {
   setShellVisibility({ showSensors: true, showData: false, showTasks: true })
   const ok = await selectShellFeature('task', String(id), { openBubble: true, fly: true })
+  if (options?.silent) return ok
   message.value = ok
     ? `已在地图定位观测任务 #${id}`
     : `地图未找到任务 #${id} 的空间范围`
   if (!ok) error.value = message.value
   else error.value = null
+  return ok
 }
 async function locateCandidateOnMap(c: Record<string, unknown>) {
   const pid = c.platformId ?? c.id
   if (pid == null) return
   setShellVisibility({ showSensors: true, showTasks: true, showData: false })
   await selectShellFeature('sensor', String(pid), { openBubble: true, fly: true })
-  message.value = `已加入候选 #${pid}`
+  message.value = `已在地图定位候选资源 #${pid}`
 }
 
+
+
+async function pickTaskFromSelect(ev: Event) {
+  const el = ev.target as HTMLSelectElement | null
+  const v = el?.value
+  if (!v) return
+  await selectTask(v)
+}
 
 async function showTasksOnMap() {
   await showPlanningWorkspace('/planning')
@@ -1154,57 +1429,203 @@ async function showCandidatesOnMap() {
     : '当前无候选资源'
 }
 
-async function showAssociationOnMap(mode: 'basic' | 'optimized' | 'supplement') {
+
+function asRec(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' ? (v as Record<string, unknown>) : {}
+}
+
+function buildLinksFromOptPayload(data: unknown, mode: 'optimized' | 'supplement') {
+  const root = asRec(data)
+  const results = Array.isArray(root.results) ? (root.results as Record<string, unknown>[]) : []
+  const links: Array<Record<string, unknown>> = []
+  const seen = new Set<string>()
+  for (const item of results) {
+    const after = asRec(item.after)
+    const selectedIds = (item.selectedResourceIds || item.addedResourceIds || after.resourceIds || []) as unknown[]
+    const ids = selectedIds.map((x) => String(x))
+    // candidates may hold scores
+    const snap = asRec(item.inputSnapshot)
+    const cands = Array.isArray(snap.candidates)
+      ? (snap.candidates as Record<string, unknown>[])
+      : Array.isArray(snap.supplementCandidates)
+        ? (snap.supplementCandidates as Record<string, unknown>[])
+        : []
+    const candByPlat = new Map<string, Record<string, unknown>>()
+    for (const c of cands) candByPlat.set(String(c.platformId ?? c.id), c)
+    for (const id of ids) {
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      const c = candByPlat.get(id) || {}
+      links.push({
+        platformId: Number(id) || id,
+        id: Number(id) || id,
+        score: Number(c.score ?? after.totalScore ?? 0),
+        matched: true,
+        mode,
+        platformName: String(c.platformName || c.name || ('平台#' + id)),
+        name: String(c.platformName || c.name || ('平台#' + id)),
+        reason: mode === 'optimized' ? '优化筛选入选' : '增补入选',
+      })
+    }
+  }
+  return links
+}
+
+async function showAssociationOnMap(mode: 'basic' | 'optimized' | 'supplement', opts?: { silent?: boolean }) {
   if (taskId.value == null) {
     error.value = '请先选择任务'
     return
   }
+  const label0 =
+    mode === 'basic' ? '基础关联(蓝)' : mode === 'optimized' ? '优化关联(绿)' : '增补关联(橙)'
+  if (!opts?.silent) message.value = `正在绘制${label0}…`
+  error.value = null
   let matches: Array<Record<string, unknown>> = []
 
-  const collectMatches = (rm: unknown) => {
+  const modeHint: Record<string, string[]> = {
+    basic: ['basic', 'base', 'foundation', '基础'],
+    optimized: ['optim', 'optimized', 'optimize', '优化'],
+    supplement: ['supple', 'supplement', 'augment', '增补'],
+  }
+  const hints = modeHint[mode] || []
+
+  const planTypeMatches = (planLike: Record<string, unknown>) => {
+    // 后端优化/增补多写在 status，planType 常仍为 basic
+    const raw = [
+      planLike.planType,
+      planLike.status,
+      planLike.associationMode,
+      planLike.mode,
+      planLike.type,
+    ]
+      .map((x) => String(x || '').toLowerCase())
+      .join(' ')
+    if (!raw.trim()) return true
+    return hints.some((h) => raw.includes(h.toLowerCase()))
+  }
+
+  // 优先使用本会话优化/增补结果（含 selectedResourceIds）
+  if (mode === 'optimized' && lastOptLinks.value.length) {
+    matches = lastOptLinks.value.slice()
+  } else if (mode === 'supplement' && lastSupLinks.value.length) {
+    matches = lastSupLinks.value.slice()
+  }
+
+  const collectMatches = (rm: unknown, planLike: Record<string, unknown> | null = null) => {
+    if (planLike && !planTypeMatches(planLike)) return
     if (!Array.isArray(rm)) return
     for (const row of rm as Array<Record<string, unknown>>) {
-      // 仅绘制匹配成功的资源；排除硬约束失败项
+      // only matched resources
       if (row.matched === false) continue
+      const rowMode = String(row.mode || row.associationMode || row.planType || '').toLowerCase()
+      if (rowMode && !hints.some((h) => rowMode.includes(h.toLowerCase()))) continue
       matches.push(row)
     }
   }
 
   const pr = planResult.value as Record<string, unknown> | null
-  if (pr) {
+  if (!matches.length && pr) {
     const planObj = (pr.plan || pr) as Record<string, unknown>
-    collectMatches(planObj.resourceMatches)
-    collectMatches(pr.resourceMatches)
+    collectMatches(planObj.resourceMatches, planObj)
+    collectMatches(pr.resourceMatches, pr)
     const planList = Array.isArray(pr.plans) ? (pr.plans as Array<Record<string, unknown>>) : []
-    for (const pl of planList) collectMatches(pl.resourceMatches)
+    for (const pl of planList) collectMatches(pl.resourceMatches, pl)
   }
 
   if (!matches.length) {
     for (const pl of plans.value) {
       if (String(pl.taskId) !== String(taskId.value)) continue
-      collectMatches(pl.resourceMatches)
+      collectMatches(pl.resourceMatches, pl)
     }
   }
 
-  // 列表无嵌套匹配时，拉取关联结果详情
+  // 列表无嵌套匹配时，优先拉取与当前 mode 匹配的方案结果
   if (!matches.length) {
-    const planRow = plans.value.find((pl) => String(pl.taskId) === String(taskId.value))
-    if (planRow?.id != null) {
+    const taskPlans = plans.value.filter((pl) => String(pl.taskId) === String(taskId.value))
+    const ranked = [...taskPlans].sort((a, b) => {
+      const score = (pl: Record<string, unknown>) => {
+        const t = String(pl.planType || pl.status || pl.associationMode || pl.mode || pl.type || '').toLowerCase()
+        if (mode === 'basic' && (t.includes('basic') || t.includes('base') || t.includes('基础') || !t)) return 2
+        if (mode === 'optimized' && (t.includes('optim') || t.includes('优化'))) return 2
+        if (mode === 'supplement' && (t.includes('supple') || t.includes('增补') || t.includes('complete'))) return 2
+        return 0
+      }
+      return score(b) - score(a)
+    })
+    for (const planRow of ranked) {
+      if (planRow?.id == null) continue
       try {
         const res = await api.getAssociationResult(String(planRow.id))
         planResult.value = res.data
         const data = res.data as Record<string, unknown>
         const planObj = (data.plan || data) as Record<string, unknown>
-        collectMatches(planObj.resourceMatches)
-        collectMatches(data.resourceMatches)
+        collectMatches(planObj.resourceMatches, planObj)
+        collectMatches(data.resourceMatches, data)
+        if (matches.length) break
       } catch {
-        /* optional */
+        /* try next plan */
       }
+    }
+  }
+
+  // 刷新后无会话缓存：从优化任务 resultJson 还原选中资源
+  if (!matches.length && (mode === 'optimized' || mode === 'supplement')) {
+    try {
+      const res = await api.listOptimizationTasks()
+      const rows = Array.isArray(res.data) ? (res.data as Record<string, unknown>[]) : []
+      const taskPlans = plans.value.filter((pl) => String(pl.taskId) === String(taskId.value))
+      const planIds = new Set(taskPlans.map((p) => String(p.id)))
+      const related = rows
+        .filter((r) => planIds.has(String(r.planId)))
+        .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+      for (const row of related) {
+        let payload: Record<string, unknown> = {}
+        const rj = row.resultJson
+        if (typeof rj === 'string' && rj) {
+          try { payload = JSON.parse(rj) as Record<string, unknown> } catch { payload = {} }
+        } else if (rj && typeof rj === 'object') {
+          payload = rj as Record<string, unknown>
+        }
+        const ids = (payload.selectedResourceIds || payload.addedResourceIds || []) as unknown[]
+        if (!ids.length) continue
+        const built = ids.map((id) => ({
+          platformId: Number(id) || id,
+          id: Number(id) || id,
+          score: Number(payload.after && (payload.after as any).totalScore || row.bestFitness || 0),
+          matched: true,
+          mode,
+          platformName: '平台#' + id,
+          name: '平台#' + id,
+          reason: mode === 'optimized' ? '优化筛选入选' : '增补入选',
+        }))
+        matches = built as Array<Record<string, unknown>>
+        if (mode === 'optimized') lastOptLinks.value = matches
+        else lastSupLinks.value = matches
+        break
+      }
+    } catch {
+      /* optional */
     }
   }
 
   if (!matches.length && candidateRows.value.length && mode === 'basic') {
     matches = candidateRows.value.filter((c) => c.matched !== false)
+  }
+
+  // 若会话里有优化/增补选中 ID，则收窄匹配集合
+  if (mode === 'optimized' || mode === 'supplement') {
+    const meta = mode === 'optimized' ? lastOptMeta.value : lastSupMeta.value
+    const idSet = new Set<string>()
+    const results = Array.isArray(asRec(meta).results) ? (asRec(meta).results as Record<string, unknown>[]) : []
+    for (const item of results) {
+      for (const id of (item.selectedResourceIds || item.addedResourceIds || asRec(item.after).resourceIds || []) as unknown[]) {
+        idSet.add(String(id))
+      }
+    }
+    if (idSet.size && matches.length) {
+      const filtered = matches.filter((m) => idSet.has(String(m.platformId ?? m.id)))
+      if (filtered.length) matches = filtered
+    }
   }
 
   const links = matches.map((c) => ({
@@ -1214,21 +1635,51 @@ async function showAssociationOnMap(mode: 'basic' | 'optimized' | 'supplement') 
     name: String(c.platformName || c.name || c.platformId || ''),
     reason: explainOf(c) !== '-' ? explainOf(c) : undefined,
   }))
-  const n = await drawAssociationLinks(taskId.value, links, { fit: true, ensureLayers: true })
   const label =
     mode === 'basic' ? '基础关联(蓝)' : mode === 'optimized' ? '优化关联(绿)' : '增补关联(橙)'
-  message.value = n ? `已绘制${label} 连线 ${n} 条` : `无${label}可展示（请确认已完成关联并存在匹配资源）`
+  try {
+    const n = await drawAssociationLinks(taskId.value, links, { fit: true, ensureLayers: true })
+    if (!opts?.silent) {
+      if (n) {
+        message.value = `已绘制${label} 连线 ${n} 条`
+      } else if (!matches.length) {
+        message.value =
+          mode === 'basic'
+            ? `无${label}可展示：请先执行「基础关联」生成方案，或确认候选资源有坐标`
+            : `无${label}可展示：请先在流程中执行对应关联步骤生成方案（当前任务可能只有基础方案）`
+      } else {
+        message.value = `无${label}可展示（匹配 ${matches.length}，可上图坐标 ${links.length}；请确认传感器有位置）`
+      }
+    }
+  } catch (err) {
+    error.value = errMessage(err, `${label}上图失败`)
+    if (!opts?.silent) message.value = error.value
+  }
 }
 
 async function drawPlanningCoverageFromEval() {
-  const er = evalResult.value as { overallCoverage?: Record<string, unknown> } | null
-  const oc = er?.overallCoverage || {}
-  if (!er) {
-    error.value = '请先执行满足度评估'
+  if (taskId.value == null) {
+    error.value = '请先选择任务'
     return
   }
+  // 页面刷新后 evalResult 为空：按当前任务即时拉取评估结果再上图
+  if (!evalResult.value) {
+    try {
+      message.value = '正在拉取满足度评估结果…'
+      const res = await api.requirementEvaluation(taskId.value)
+      evalResult.value = res.data
+    } catch (err) {
+      error.value = errMessage(err, '请先执行满足度评估')
+      return
+    }
+  }
+  const er = evalResult.value as {
+    overallCoverage?: Record<string, unknown>
+    task?: { researchAreaWkt?: string }
+  } | null
+  const oc = er?.overallCoverage || {}
   const r = await drawPlanningCoverageOverlay({
-    taskWkt: researchAreaWkt.value,
+    taskWkt: researchAreaWkt.value || String(er?.task?.researchAreaWkt || ''),
     coverageWkt: String(oc.coverageWkt || ''),
     gapWkt: String(oc.gapWkt || ''),
     fit: true,
@@ -1236,7 +1687,8 @@ async function drawPlanningCoverageFromEval() {
   message.value =
     r.task + r.coverage + r.gap > 0
       ? `已上图：任务区${r.task} / 覆盖${r.coverage} / 缺口${r.gap}`
-      : '评估结果中无有效覆盖几何'
+      : '评估结果中无有效覆盖几何（可能后端未返回 coverageWkt/gapWkt）'
+  error.value = null
 }
 
 async function clearPlanningCoverageOnMap() {
@@ -1257,23 +1709,23 @@ async function clearMapLinks() {
         <div>
           <p class="eyebrow">观测规划中心</p>
           <h1>任务建模到方案输出的规划流程</h1>
-          <p class="muted">按步骤推进：创建/提交 → 需求反算 → 候选评分 → 基础/优化/增补关联 → 满足度评估 → 规划输出。不提供一键跑通。</p>
+          <p class="muted">按步骤：建模 → 需求 → 候选 → 评分 → 关联 → 方案。上图≠执行。</p>
         </div>
         <div class="plan-head-actions">
           <button class="btn ghost" type="button" @click="resetForm">新建任务</button>
-          <button class="btn ghost" type="button" :disabled="taskId == null || shellLoading" @click="openOnMap">定位当前任务</button>
+          <button class="btn ghost" type="button" :disabled="taskId == null || pending" @click="openOnMap">定位当前任务</button>
         </div>
       </div>
       <div class="plan-map-actions panel soft" aria-label="地图联动">
         <strong style="font-size:12px;margin-right:0.35rem">地图联动</strong>
-        <button class="btn ghost" type="button" :disabled="shellLoading" @click="showTasksOnMap">任务/资源上图</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showCandidatesOnMap">候选上图</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showAssociationOnMap('basic')">基础关联(蓝)</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showAssociationOnMap('optimized')">优化关联(绿)</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showAssociationOnMap('supplement')">增补关联(橙)</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading || !evalResult" @click="drawPlanningCoverageFromEval">覆盖/缺口上图</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading" @click="clearMapLinks">清关联线</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading" @click="clearPlanningCoverageOnMap">清覆盖</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="showTasksOnMap">任务/资源上图</button>
+        <button class="btn ghost" type="button" :disabled="pending || taskId == null" @click="showCandidatesOnMap">候选上图</button>
+        <button class="btn ghost" type="button" :disabled="pending || taskId == null" @click="showAssociationOnMap('basic')">基础关联(蓝)</button>
+        <button class="btn ghost" type="button" :disabled="pending || taskId == null" @click="showAssociationOnMap('optimized')">优化关联(绿)</button>
+        <button class="btn ghost" type="button" :disabled="pending || taskId == null" @click="showAssociationOnMap('supplement')">增补关联(橙)</button>
+        <button class="btn ghost" type="button" :disabled="pending || taskId == null" @click="drawPlanningCoverageFromEval">覆盖/缺口上图</button>
+        <button class="btn ghost" type="button" @click="clearMapLinks">清关联线</button>
+        <button class="btn ghost" type="button" @click="clearPlanningCoverageOnMap">清覆盖</button>
         <span class="muted" style="font-size:12px">{{ shellStatus }}</span>
       </div>
     </header>
@@ -1289,17 +1741,32 @@ async function clearMapLinks() {
       <p v-if="message" class="ok-text">{{ message }}</p>
       <p v-if="hasTask" class="hint">当前任务 #{{ taskId }} · 状态 {{ taskStatus || '—' }} · 当前步骤 {{ currentStep }}</p>
 
-      <div v-if="currentAction" class="current-action-bar panel soft sticky-action" data-testid="planning-primary-bar">
+      <div v-if="user && tab !== 'flow' && hasTask" class="panel soft" style="margin:0.35rem 0;padding:0.45rem 0.55rem;display:flex;gap:0.5rem;align-items:center;justify-content:space-between">
+        <span class="muted" style="font-size:12px">当前任务 #{{ taskId }} · 步骤 {{ STEPS.find((x) => x.key === currentStep)?.title || currentStep }}</span>
+        <button class="btn ghost" type="button" @click="setTab('flow')">进入需求与关联</button>
+      </div>
+      <div v-if="currentAction && tab === 'flow'" class="current-action-bar panel soft sticky-action" data-testid="planning-primary-bar">
         <div style="min-width:0;flex:1">
-          <strong>当前应执行：{{ currentAction.label }}</strong>
+          <strong>
+            <template v-if="doneSteps.has(currentAction.action) && currentStep === currentAction.action && currentAction.action === 'output'">
+              流程已完成 · {{ currentAction.label }}
+            </template>
+            <template v-else-if="doneSteps.has(currentAction.action) && currentStep === currentAction.action">
+              本步已完成 · {{ currentAction.label }}
+            </template>
+            <template v-else>当前应执行：{{ currentAction.label }}</template>
+          </strong>
           <p class="muted" style="margin:0.2rem 0 0">
-            <template v-if="taskId">任务 #{{ taskId }} · 状态 {{ taskStatus || '—' }} · 步骤 {{ currentStep }}</template>
+            <template v-if="taskId">任务 #{{ taskId }} · 状态 {{ taskStatus || '—' }} · 步骤 {{ STEPS.find((x) => x.key === currentStep)?.title || currentStep }}</template>
             <template v-else>尚未选择任务：请先填写下方表单并执行创建，或从任务列表选择</template>
           </p>
           <p v-if="stepBlockedReason(currentAction.action)" class="error" style="margin:0.25rem 0 0;font-size:12px">
             {{ stepBlockedReason(currentAction.action) }}
           </p>
-          <p v-else class="muted" style="margin:0.25rem 0 0;font-size:12px">执行后将更新左侧结果，并尽量同步地图关联/覆盖图层</p>
+          <p v-else class="muted" style="margin:0.25rem 0 0;font-size:12px">
+            <template v-if="doneSteps.has('output')">规划输出已生成；可切换到「方案管理」做审核/发布，或重新生成输出。</template>
+            <template v-else>执行后将更新左侧结果，并尽量同步地图关联/覆盖图层</template>
+          </p>
         </div>
         <button
           class="btn"
@@ -1312,12 +1779,38 @@ async function clearMapLinks() {
         >{{ pending ? '处理中…' : currentAction.label }}</button>
       </div>
 
+
+      <div v-if="user" class="panel soft task-picker-bar" data-testid="planning-task-picker" style="margin:0.35rem 0;padding:0.5rem 0.6rem;display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center">
+        <strong style="font-size:12px">任务选择</strong>
+        <select
+          class="task-pick-select"
+          style="min-width:220px;flex:1;max-width:420px"
+          :value="taskId == null ? '' : String(taskId)"
+          @change="pickTaskFromSelect"
+        >
+          <option value="">请选择已有观测任务…</option>
+          <option v-for="t in tasks" :key="String(t.id)" :value="String(t.id)">
+            #{{ t.id }} · {{ t.name || t.code || '未命名' }} · {{ t.status || '-' }}
+          </option>
+        </select>
+        <button class="btn ghost" type="button" @click="setTab('tasks')">任务列表</button>
+        <button class="btn ghost" type="button" @click="resetForm">新建任务</button>
+        <span v-if="taskId" class="muted" style="font-size:12px">当前 #{{ taskId }} · {{ taskStatus || '—' }}</span>
+        <span v-else class="muted" style="font-size:12px">未选任务时无法执行候选/关联/上图</span>
+      </div>
+
       <section v-if="tab === 'tasks'" class="panel">
         <h2>观测任务列表</h2>
         <table class="table">
           <thead><tr><th>ID</th><th>编码</th><th>名称</th><th>状态</th><th>指标</th><th></th></tr></thead>
           <tbody>
-            <tr v-for="t in tasks" :key="String(t.id)" class="row-click" :class="{ selected: shellSelected && shellSelected.kind === 'task' && shellSelected.id === String(t.id) }" @click.stop="selectTask(t.id)">
+            <tr v-if="!tasks.length">
+              <td colspan="6" class="muted">
+                暂无观测任务。
+                <button class="btn ghost" type="button" style="margin-left:0.35rem" @click="setTab('flow')">去创建任务</button>
+              </td>
+            </tr>
+            <tr v-for="t in tasks" :key="String(t.id)" class="row-click" :class="{ selected: taskId != null && String(taskId) === String(t.id) }" @click.stop="selectTask(t.id)">
               <td>{{ t.id }}</td>
               <td><code>{{ t.code }}</code></td>
               <td>{{ t.name }}</td>
@@ -1370,8 +1863,8 @@ async function clearMapLinks() {
                   <option disabled value="">请选择</option>
                   <option v-for="item in instances" :key="String(item.id)" :value="String(item.id)">#{{ item.id }} {{ item.instanceName }}</option>
                 </select>
-        <p class="muted">实例时间窗：{{ selectedInstanceWindow }}（创建任务将自动采用）</p>
               </label>
+              <p class="muted">实例时间窗：{{ selectedInstanceWindow || '—' }}（创建任务将自动采用）</p>
               <label>尺度
                 <select v-model="scaleId" :disabled="hasTask">
                   <option disabled value="">请选择</option>
@@ -1409,7 +1902,7 @@ async function clearMapLinks() {
           </section>
 
           <section class="panel">
-            <h2>分步业务操作</h2>
+            <h2>步骤重跑（高级）</h2>
             <div class="action-stack">
               <button class="btn" type="button" :disabled="canRun('create') === false" :title="stepBlockedReason('create') || '创建观测任务'" data-action="create" @click="createTask">执行创建任务</button>
               <button class="btn ghost" type="button" :disabled="taskId == null || pending || (taskStatus !== '' && taskStatus !== 'draft')" @click="bindSelectedIndicator">追加当前指标到任务（仅草稿）</button>
@@ -1508,7 +2001,7 @@ async function clearMapLinks() {
           <div class="ops">
             <button class="btn" type="button" :disabled="canRun('candidates') === false" @click="confirmCandidates">执行候选评分</button>
             <button class="btn ghost" type="button" :disabled="taskId == null" @click="loadCandidates(false)">刷新候选</button>
-            <button class="btn ghost" type="button" :disabled="taskId == null || shellLoading" @click="showCandidatesOnMap">候选上图</button>
+            <button class="btn ghost" type="button" :disabled="taskId == null || pending" @click="showCandidatesOnMap">候选上图</button>
           </div>
         </div>
       
@@ -1534,7 +2027,7 @@ async function clearMapLinks() {
           <thead><tr><th>ID</th><th>名称</th><th>任务</th><th>类型</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-if="!plans.length"><td colspan="6" class="muted">暂无方案。请先完成观测规划关联流程生成方案。</td></tr>
-            <tr v-for="p in plans" :key="String(p.id)" class="row-click" @click="onPlanRowClick(p)">
+            <tr v-for="p in plans" :key="String(p.id)" class="row-click" :class="{ selected: isPlanRowSelected(p) || String(lastCopiedPlanId) === String(p.id) }" @click="onPlanRowClick(p)">
               <td>{{ p.id }}</td>
               <td>{{ p.name }}</td>
               <td>{{ p.taskId }}</td>
@@ -1543,9 +2036,9 @@ async function clearMapLinks() {
               <td class="ops">
                 <button class="btn ghost" type="button" @click.stop="loadPlanResult(p.id)">查看结果</button>
                 <button class="btn ghost" type="button" :disabled="pending" @click.stop="doCopyPlan(p.id)">复制</button>
-                <button class="btn ghost" type="button" :disabled="canByStatus(p.status, ['published', 'archived', 'approved']) || pending" @click.stop="doApprovePlan(p.id, p.status)">审核</button>
-                <button class="btn ghost" type="button" :disabled="canByStatus(p.status, ['published', 'archived']) || pending" @click.stop="doPublishPlan(p.id, p.status)">发布</button>
-                <button class="btn ghost" type="button" :disabled="canByStatus(p.status, ['archived']) || pending" @click.stop="doArchivePlan(p.id, p.status)">归档</button>
+                <button class="btn ghost" type="button" :disabled="!canApprovePlanStatus(planLiveStatus(p.id, p.status)) || pending" :title="canApprovePlanStatus(planLiveStatus(p.id, p.status)) ? '审核通过' : '当前状态不可审核'" @click.stop="doApprovePlan(p.id, p.status)">审核</button>
+                <button class="btn ghost" type="button" :disabled="!canPublishPlanStatus(planLiveStatus(p.id, p.status)) || pending" :title="canPublishPlanStatus(planLiveStatus(p.id, p.status)) ? '发布方案' : '请先审核通过后再发布'" @click.stop="doPublishPlan(p.id, p.status)">发布</button>
+                <button class="btn ghost" type="button" :disabled="canByStatus(planLiveStatus(p.id, p.status), ['archived']) || pending" @click.stop="doArchivePlan(p.id, p.status)">归档</button>
               </td>
             </tr>
           </tbody>
@@ -1644,6 +2137,8 @@ async function clearMapLinks() {
     </template>
   </section>
 </template>
+
+<style scoped>
 .sticky-action {
   position: sticky;
   top: 0;
@@ -1665,3 +2160,21 @@ async function clearMapLinks() {
   gap: 12px;
 }
 
+.plan-head h1 { font-size: 16px; margin: 0.15rem 0; }
+.plan-map-actions.panel { padding: 0.45rem 0.55rem; }
+.stepper {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.35rem;
+  max-height: min(42vh, 360px);
+  overflow: auto;
+}
+.ops { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.result-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+</style>

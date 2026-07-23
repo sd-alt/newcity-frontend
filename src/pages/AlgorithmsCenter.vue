@@ -13,9 +13,9 @@ import {
   shellViewer,
   setShellVisibility,
   shellCounts,
-  shellLoading,
 } from '../gis/mapShell'
 import { canByStatus, errMessage, pickId } from '../utils/errors'
+import { mapDrawGeometry } from '../gis/mapTools'
 
 const route = useRoute()
 const router = useRouter()
@@ -201,6 +201,48 @@ function canCancelTask(status: unknown) {
 function canRequeueTask(status: unknown) {
   return canByStatus(status, ['failed', 'succeeded', 'cancelled', 'canceled', 'paused'])
 }
+
+function canDeleteTask(status: unknown) {
+  return canByStatus(status, ['running']) === false
+}
+
+function statusActionTitle(action: string, status: unknown): string {
+  if (action === 'run' && !canRunTask(status)) return '仅待执行/排队中的任务可执行'
+  if (action === 'pause' && !canPauseTask(status)) return '仅运行中的任务可暂停'
+  if (action === 'resume' && !canResumeTask(status)) return '仅已暂停任务可恢复'
+  if (action === 'cancel' && !canCancelTask(status)) return '当前状态不可终止'
+  if (action === 'requeue' && !canRequeueTask(status)) return '仅失败/终止/完成任务可重新排队'
+  if (action === 'delete' && !canDeleteTask(status)) return '运行中的任务不可删除'
+  return ''
+}
+
+function applyMapDrawToAlgoInput() {
+  const g = mapDrawGeometry.value
+  if (!g || !g.wkt) {
+    error.value = '请先用地图工具绘点/绘面，再写入算法输入区域'
+    return
+  }
+  let obj: Record<string, unknown> = {}
+  try {
+    obj = JSON.parse(taskForm.value.inputDataText || '{}') as Record<string, unknown>
+  } catch {
+    error.value = '当前输入 JSON 非法，请先修正后再写入范围'
+    return
+  }
+  let wkt = g.wkt
+  if (g.type === 'point') {
+    const lon = Number(g.lon ?? 0)
+    const lat = Number(g.lat ?? 0)
+    const d = 0.05
+    wkt = `POLYGON((${lon - d} ${lat - d},${lon + d} ${lat - d},${lon + d} ${lat + d},${lon - d} ${lat + d},${lon - d} ${lat - d}))`
+  }
+  obj.studyAreaWkt = wkt
+  obj.spatialWkt = wkt
+  taskForm.value.inputDataText = JSON.stringify(obj, null, 2)
+  message.value = '已将地图绘制范围写入算法输入 JSON（studyAreaWkt）'
+  error.value = null
+}
+
 
 const activeVersions = computed(() =>
   versions.value.filter((v) => String(v.status) === 'active' || String(v.status) === 'draft'),
@@ -393,35 +435,51 @@ async function disableModel(id: unknown) {
 }
 
 async function createTask() {
-  if (taskForm.value.code === '' || taskForm.value.algorithmVersionId === '') {
-    error.value = '请填写任务编码并选择算法版本'
+  if (taskForm.value.algorithmVersionId === '') {
+    error.value = '请选择已发布的算法版本'
     return
   }
-  let inputData: unknown = {}
+  if (taskForm.value.code.trim() === '') {
+    taskForm.value.code = 'PROC-' + Date.now()
+  }
+  let inputData: Record<string, unknown> = {}
   let parameters: unknown = {}
   try {
-    inputData = JSON.parse(taskForm.value.inputDataText || '{}')
+    inputData = JSON.parse(taskForm.value.inputDataText || '{}') as Record<string, unknown>
     parameters = JSON.parse(taskForm.value.parametersText || '{}')
   } catch {
-    error.value = '输入数据/参数必须是合法 JSON'
+    error.value = '输入数据/参数必须是合法 JSON（表单内容已保留）'
+    return
+  }
+  if (!inputData.studyAreaWkt && !inputData.spatialWkt && !inputData.geometryWkt) {
+    error.value = '请在输入 JSON 中提供 studyAreaWkt，或先地图绘面后点“写入绘制范围”'
     return
   }
   pending.value = true
   clearAlerts()
   try {
-    await api.createProcessingTask({
+    const res = await api.createProcessingTask({
       code: taskForm.value.code,
       algorithmVersionId: Number(taskForm.value.algorithmVersionId),
       inputData,
       parameters,
     })
-    message.value = '处理任务已创建'
+    const newId = pickId(res.data as Record<string, unknown>) || pickId(res as Record<string, unknown>)
+    message.value = newId ? ('处理任务已创建 #' + newId) : '处理任务已创建'
     try { await showAlgoMap() } catch { /* map refresh optional */ }
-    taskForm.value.code = ''
+    const keptVersion = taskForm.value.algorithmVersionId
+    taskForm.value.code = 'PROC-' + Date.now()
+    taskForm.value.algorithmVersionId = keptVersion
     await load()
+    if (newId) {
+      await inspectTask(newId)
+      try {
+        if (selectedTask.value) await locateLinkedOnMap(selectedTask.value)
+      } catch { /* map optional */ }
+    }
     await setTab('run')
   } catch (err) {
-    error.value = errMessage(err, '创建任务失败（需选择已发布 active 版本）')
+    error.value = errMessage(err, '创建任务失败（需选择已发布 active 版本；表单内容已保留）')
   } finally {
     pending.value = false
   }
@@ -638,11 +696,13 @@ onBeforeUnmount(() => {
 watch(() => route.query.tab, syncTab)
 
 async function clearAlgoRegionOnMap() {
+  error.value = null
   await clearAlgoRegionOverlay()
   message.value = '已清除算法区域图层'
 }
 
 async function showAlgoMap() {
+  error.value = null
   await showShellAndFit('all', '/algorithms')
   setShellVisibility({ showSensors: true, showData: true, showTasks: true })
   message.value = `已刷新算法相关图层（任务 ${shellCounts.tasks} / 数据 ${shellCounts.data} / 传感器 ${shellCounts.sensors}）`
@@ -665,6 +725,16 @@ function presentAlgoSelection(task: Record<string, unknown>, studyWkt: string, r
       resultWkt ? '结果区域: 有' : '结果区域: 无',
       'ID: ' + id,
     ].join('\n'),
+    status,
+    spatial: studyWkt || resultWkt || '',
+    relations: [
+      studyWkt ? '输入WKT: ' + studyWkt : '',
+      resultWkt ? '结果WKT: ' + resultWkt : '',
+      task.algorithmModelId != null ? '算法模型ID: ' + String(task.algorithmModelId) : '',
+      task.planningTaskId != null ? '规划任务ID: ' + String(task.planningTaskId) : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
   }
   const viewer = shellViewer.value
   if (viewer && !viewer.isDestroyed()) {
@@ -679,7 +749,7 @@ function presentAlgoSelection(task: Record<string, unknown>, studyWkt: string, r
   shellBubbleOpen.value = true
 }
 
-async function locateLinkedOnMap(task: Record<string, unknown>) {
+async function locateLinkedOnMap(task: Record<string, unknown> | null | undefined) {
   if (!task || Object.keys(task).length === 0) {
     error.value = '请先选择处理任务'
     return
@@ -809,14 +879,14 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
         <p class="muted">闭环：创建模型 → 注册并发布版本 → 创建处理任务 → 调度执行 → 监控 → 查看结果</p>
       </div>
       <div class="form-row">
-        <button class="btn ghost" type="button" :disabled="shellLoading" @click="showAlgoMap">相关图层上图</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading" @click="locateLinkedOnMap((selectedTask || {}) as Record<string, unknown>)">关联对象上图</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading" @click="clearAlgoRegionOnMap">清除算法区域</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="showAlgoMap" data-map-action="algo-layers">相关图层上图</button>
+      <button class="btn ghost" type="button" :disabled="pending" @click="locateLinkedOnMap((selectedTask || {}))">关联对象上图</button>
+      <button class="btn ghost" type="button" @click="clearAlgoRegionOnMap">清除算法区域</button>
       </div>
     </header>
 
-    <p v-if="error" class="alert error">{{ error }}</p>
-    <p v-if="message" class="alert ok">{{ message }}</p>
+    <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="message" class="ok-text">{{ message }}</p>
 
     <div class="tabs">
       <button
@@ -926,6 +996,7 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
         </label>
         <label>输入 JSON<textarea v-model="taskForm.inputDataText" rows="3" style="min-height:4rem"></textarea></label>
         <label>参数 JSON<textarea v-model="taskForm.parametersText" rows="2" style="min-height:3rem"></textarea></label>
+        <button class="btn ghost" type="button" @click="applyMapDrawToAlgoInput">写入地图绘制范围</button>
         <button class="btn" type="button" :disabled="pending" @click="createTask">创建任务</button>
       </div>
       <table class="table">
@@ -956,11 +1027,12 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
             <td>{{ taskStatusLabel(t.status) }}</td>
             <td>{{ t.progress ?? 0 }}%</td>
             <td class="ops">
-              <button class="btn" type="button" :disabled="canRunTask(t.status) === false" @click.stop="runTask(t.id)">执行</button>
-              <button class="btn ghost" type="button" :disabled="canPauseTask(t.status) === false" @click.stop="pauseTask(t.id)">暂停</button>
-              <button class="btn ghost" type="button" :disabled="canResumeTask(t.status) === false" @click.stop="resumeTask(t.id)">恢复</button>
-              <button class="btn ghost" type="button" :disabled="canCancelTask(t.status) === false" @click.stop="cancelTask(t.id)">终止</button>
-              <button class="btn ghost" type="button" :disabled="canRequeueTask(t.status) === false" @click.stop="requeueTask(t.id)">重新排队</button>
+              <button class="btn ghost" type="button" @click.stop="inspectTask(t.id); locateLinkedOnMap(t)">地图定位</button>
+              <button class="btn" type="button" :disabled="canRunTask(t.status) === false" :title="statusActionTitle('run', t.status)" @click.stop="runTask(t.id)">执行</button>
+              <button class="btn ghost" type="button" :disabled="canPauseTask(t.status) === false" :title="statusActionTitle('pause', t.status)" @click.stop="pauseTask(t.id)">暂停</button>
+              <button class="btn ghost" type="button" :disabled="canResumeTask(t.status) === false" :title="statusActionTitle('resume', t.status)" @click.stop="resumeTask(t.id)">恢复</button>
+              <button class="btn ghost" type="button" :disabled="canCancelTask(t.status) === false" :title="statusActionTitle('cancel', t.status)" @click.stop="cancelTask(t.id)">终止</button>
+              <button class="btn ghost" type="button" :disabled="canRequeueTask(t.status) === false" :title="statusActionTitle('requeue', t.status)" @click.stop="requeueTask(t.id)">重新排队</button>
             </td>
           </tr>
         </tbody>
@@ -981,7 +1053,7 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
           <tr v-for="t in tasks" :key="'m'+t.id" class="row-click" :class="{ selected: selectedTask && String(selectedTask.id) === String(t.id), active: selectedTask && selectedTask.id === t.id }" @click="inspectTask(t.id)">
             <td>{{ t.id }}</td>
             <td>{{ t.code || t.name }}</td>
-            <td>{{ t.status || 'unknown' }}</td>
+            <td>{{ taskStatusLabel(t.status) }}</td>
             <td>
               <div class="progress-wrap">
                 <div class="progress-bar" :style="{ width: Math.max(0, Math.min(100, Number(t.progress || 0))) + '%' }"></div>
@@ -997,7 +1069,7 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
       </table>
       <div v-if="selectedTask" class="panel soft" style="margin-top:0.8rem">
         <h3>任务 #{{ selectedTask.id }} 监控详情</h3>
-        <p>状态 {{ selectedTask.status }} · 结果阶段 {{ resultStage(selectedTask) }} · 错误 {{ selectedTask.errorMessage || '无' }}</p>
+        <p>状态 {{ taskStatusLabel(selectedTask.status) }} · 结果阶段 {{ resultStage(selectedTask) }} · 错误 {{ selectedTask.errorMessage || '无' }}</p>
         <div class="progress-wrap large">
           <div class="progress-bar" :style="{ width: Math.max(0, Math.min(100, selectedProgress)) + '%' }"></div>
         </div>
@@ -1024,7 +1096,7 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
           <tr v-for="t in tasks" :key="'res'+t.id" class="row-click" :class="{ selected: selectedTask && String(selectedTask.id) === String(t.id) }" @click="inspectTask(t.id)">
             <td>{{ t.id }}</td>
             <td>{{ t.code }}</td>
-            <td>{{ t.status }}</td>
+            <td>{{ taskStatusLabel(t.status) }}</td>
             <td>{{ resultStage(t) }} / {{ resultMeta(t) }}</td>
             <td><code>{{ JSON.stringify(t.outputData || t.result || t.output || t.errorMessage || {}).toString().slice(0, 100) }}</code></td>
             <td class="ops">
@@ -1033,7 +1105,7 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
               <button class="btn ghost" type="button" :disabled="!canPublishResult(t)" @click="publishResult(t.id)">发布</button>
               <button class="btn ghost" type="button" @click="downloadResult(t.id)">下载</button>
               <button class="btn ghost" type="button" :disabled="!canArchiveResult(t)" @click="archiveResult(t.id)">归档结果</button>
-              <button class="btn ghost" type="button" :disabled="canByStatus(t.status, ['running'])" @click="removeTask(t.id)">删除任务</button>
+              <button class="btn ghost" type="button" :disabled="canDeleteTask(t.status) === false" :title="statusActionTitle('delete', t.status)" @click="removeTask(t.id)">删除任务</button>
             </td>
           </tr>
         </tbody>

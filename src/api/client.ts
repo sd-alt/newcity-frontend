@@ -1,6 +1,7 @@
 import type { Envelope } from './types'
 
 const CSRF_COOKIE = 'csrftoken'
+let lastCsrfFromBody: string | null = null
 
 function readCookie(name: string): string | null {
   const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'))
@@ -47,13 +48,21 @@ async function ensureCsrfCookie(force = false): Promise<string | null> {
   if (!force) {
     const existing = readCookie(CSRF_COOKIE)
     if (existing) return existing
+    if (lastCsrfFromBody) return lastCsrfFromBody
   }
-  await fetch('/api/v1/auth/csrf', {
+  const res = await fetch('/api/v1/auth/csrf', {
     method: 'GET',
     credentials: 'include',
     headers: { Accept: 'application/json' },
   })
-  return readCookie(CSRF_COOKIE)
+  try {
+    const body = await res.clone().json() as { data?: { csrfToken?: string } }
+    const token = body?.data?.csrfToken
+    if (typeof token === 'string' && token) lastCsrfFromBody = token
+  } catch {
+    /* ignore parse */
+  }
+  return readCookie(CSRF_COOKIE) || lastCsrfFromBody
 }
 
 export async function apiRequest<T>(

@@ -10,8 +10,8 @@ import {
   showShellAndFit,
   selectShellFeature,
   shellCounts,
-  shellLoading,
   shellSelected,
+  shellStatus,
 } from '../gis/mapShell'
 import { mapDrawGeometry } from '../gis/mapTools'
 import { errMessage, pickId } from '../utils/errors'
@@ -134,7 +134,10 @@ function buildVizQuery() {
 
 async function setTab(key: string) {
   tab.value = key
-  await router.replace({ path: '/resources', query: { tab: key } })
+  const q: Record<string, string> = { ...Object.fromEntries(
+    Object.entries(route.query).filter(([, v]) => v != null && !Array.isArray(v)).map(([k, v]) => [k, String(v)]),
+  ), tab: key }
+  await router.replace({ path: '/resources', query: q })
 }
 function syncTab() {
   const q = route.query.tab
@@ -207,13 +210,17 @@ async function load() {
 
 async function createPlatform() {
   if (platformForm.value.platformTypeId === '' || platformForm.value.name === '') {
-    error.value = '请选择平台类型并填写名称'
+    error.value = '请选择平台类型并填写名称（表单内容已保留）'
+    return
+  }
+  if (!String(platformForm.value.locationWkt || '').trim()) {
+    error.value = '请填写位置 WKT，或先地图绘点后写入位置，否则无法在底图定位'
     return
   }
   pending.value = true
   error.value = null
   try {
-    await api.createPlatform({
+    const res = await api.createPlatform({
       platformTypeId: Number(platformForm.value.platformTypeId),
       name: platformForm.value.name,
       identifier: platformForm.value.identifier || undefined,
@@ -221,13 +228,18 @@ async function createPlatform() {
       owner: platformForm.value.owner || undefined,
       status: platformForm.value.status || 'active',
     })
-    message.value = '平台已创建'
+    const newId = (res.data as any)?.id ?? (res as any)?.id
+    message.value = newId ? ('平台已创建 #' + newId) : '平台已创建'
     try { await reloadShellLayers('/resources', {}) } catch { /* map refresh optional */ }
+    if (newId != null) {
+      try { await locateOnMap('sensor', newId) } catch { /* optional */ }
+    }
     platformForm.value.name = ''
     platformForm.value.identifier = ''
+    // keep location for consecutive creates near same area unless user clears
     await load()
   } catch (err) {
-    error.value = errMessage(err, '创建失败')
+    error.value = errMessage(err, '创建失败（表单内容已保留）')
   } finally {
     pending.value = false
   }
@@ -314,8 +326,21 @@ onMounted(async () => {
   syncTab()
   await load()
   if (tab.value === 'viz') await loadViz()
+  applyRouteLocationHint()
 })
 watch(() => route.query.tab, syncTab)
+watch(
+  () => [route.query.lon, route.query.lat],
+  () => applyRouteLocationHint(),
+)
+
+function applyRouteLocationHint() {
+  const lon = Number(Array.isArray(route.query.lon) ? route.query.lon[0] : route.query.lon)
+  const lat = Number(Array.isArray(route.query.lat) ? route.query.lat[0] : route.query.lat)
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return
+  platformForm.value.locationWkt = `POINT(${lon} ${lat})`
+  message.value = `已根据地图位置预填坐标 POINT(${lon.toFixed(5)} ${lat.toFixed(5)})`
+}
 watch(tab, async (v) => { if (v === 'viz') await loadViz() })
 
 
@@ -351,13 +376,18 @@ async function showOnMap() {
         <p class="eyebrow">传感资源中心</p>
         <h1>传感器类型、资源建模与查询</h1>
       </div>
-      <button class="btn" type="button" :disabled="shellLoading" @click="showOnMap">资源上图</button>
+      <button class="btn" type="button" :disabled="pending" @click="showOnMap">资源上图</button>
     </header>
     <div class="tabs">
       <button v-for="t in tabs" :key="t.key" type="button" class="tab" :class="{ active: tab === t.key }" @click="setTab(t.key)">{{ t.label }}</button>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="message" class="ok-text">{{ message }}</p>
+      <div class="plan-map-actions panel soft" data-testid="resources-map-actions" style="margin:0.35rem 0;padding:0.45rem 0.55rem">
+        <strong style="font-size:12px;margin-right:0.35rem">地图联动</strong>
+        <button class="btn ghost" type="button" :disabled="pending" @click="showOnMap">资源上图</button>
+        <span class="muted" style="font-size:12px">{{ shellStatus }}</span>
+      </div>
 
     <section v-if="tab === 'types'" class="panel">
       <h2>传感器类型维护</h2>
@@ -410,6 +440,7 @@ async function showOnMap() {
           <tr v-for="p in platforms" :key="String(p.id)" class="row-click" :class="{ selected: shellSelected && shellSelected.kind === 'sensor' && shellSelected.id === String(p.id) }" @click="locateOnMap('sensor', String(p.id))">
             <td>{{ p.id }}</td><td>{{ p.name }}</td><td>{{ p.platformTypeId }}</td><td><code>{{ p.identifier }}</code></td><td>{{ p.status }}</td>
             <td class="ops">
+              <button class="btn ghost" type="button" @click.stop="locateOnMap('sensor', String(p.id))">定位</button>
               <button class="btn ghost" type="button" @click.stop="setPlatformStatus(p.id, 'active')">启用</button>
               <button class="btn ghost" type="button" @click.stop="setPlatformStatus(p.id, 'inactive')">停用</button>
               <button class="btn ghost" type="button" @click.stop="removePlatform(p.id)">删除</button>
@@ -446,7 +477,10 @@ async function showOnMap() {
             <td>{{ s.platformId }}</td>
             <td>{{ s.sensorTypeId }}</td>
             <td>{{ s.accuracyPercent ?? '-' }}</td>
-            <td><button class="btn ghost" type="button" @click.stop="removeSensor(s.id)">删除</button></td>
+            <td class="ops">
+              <button class="btn ghost" type="button" @click.stop="locateOnMap('sensor', String(s.platformId || s.id))">定位</button>
+              <button class="btn ghost" type="button" @click.stop="removeSensor(s.id)">删除</button>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -506,8 +540,8 @@ async function showOnMap() {
         <label>状态<input v-model="vizFilter.status" placeholder="active" /></label>
         <label>关键字<input v-model="vizFilter.keyword" /></label>
         <button class="btn" type="button" @click="loadViz">刷新摘要</button>
-        <button class="btn" type="button" :disabled="shellLoading" @click="showOnMap">底图上图</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading" @click="showOnMap">图层刷新上图</button>
+        <button class="btn" type="button" :disabled="pending" @click="showOnMap">底图上图</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="showOnMap">图层刷新上图</button>
       </div>
       <p class="muted">摘要条数 {{ vizRows.length }}</p>
       <table class="table" v-if="vizRows.length">

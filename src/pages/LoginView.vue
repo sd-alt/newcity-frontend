@@ -18,10 +18,11 @@ async function onSubmit() {
   try {
     await login(username.value, password.value)
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
+    // 先结束“登录中”，避免底图/路由挂载拖住按钮状态
+    pending.value = false
     await router.replace(redirect || '/')
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : '登录失败'
-  } finally {
     pending.value = false
   }
 }

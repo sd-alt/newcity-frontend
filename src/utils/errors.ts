@@ -23,11 +23,22 @@ function flattenErrors(value: unknown, prefix = ''): string[] {
   return [prefix ? prefix + ': ' + String(value) : String(value)]
 }
 
-export function errMessage(err: unknown, fallback = '操作失败') {
+export function errMessage(err: unknown, fallback = '操作失败'): string {
   if (err instanceof ApiError) {
     const body = err.body
     if (body && typeof body === 'object') {
       const obj = body as Record<string, unknown>
+      // DRF ValidationError 常为 { status: '中文业务原因' }，优先展示纯文案
+      if (err.status >= 400 && err.status < 500) {
+        const vals = Object.values(obj).filter((v) => typeof v === 'string' && v && v !== 'success') as string[]
+        const keys = Object.keys(obj)
+        if (vals.length === 1 && keys.length <= 2 && !('message' in obj && obj.message === 'success')) {
+          // 单字段业务校验（如 status/detail）
+          if (!('code' in obj) || keys.includes('status') || keys.includes('detail')) {
+            if (!('data' in obj)) return vals[0] || fallback
+          }
+        }
+      }
       if (typeof obj.message === 'string' && obj.message && obj.message !== 'success') {
         const nested = obj.data != null ? flattenErrors(obj.data) : []
         // 关联删除等业务冲突：直接展示业务文案，避免吓人的纯状态码

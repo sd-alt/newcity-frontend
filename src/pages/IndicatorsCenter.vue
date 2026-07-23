@@ -5,7 +5,6 @@ import * as api from '../api/endpoints'
 import {
   selectShellFeature,
   shellCounts,
-  shellLoading,
   shellSelected,
   shellStatus,
   showIndicatorsWorkspace,
@@ -267,7 +266,11 @@ async function removeSample(id: unknown) {
 
 async function createInst() {
   if (instForm.value.defId === '' || instForm.value.instanceName === '' || instForm.value.scaleId === '') {
-    error.value = '请选择样例、尺度，并填写实例名称'
+    error.value = '请选择样例、尺度，并填写实例名称（表单内容已保留）'
+    return
+  }
+  if (!String(instForm.value.spatialWkt || '').trim()) {
+    error.value = '请填写空间范围 WKT，或先用地图绘点/绘面后点“写入地图绘制范围”'
     return
   }
   pending.value = true
@@ -284,7 +287,7 @@ async function createInst() {
       spatialWkt: instForm.value.spatialWkt,
       targetAccuracy: Number(instForm.value.targetAccuracy),
     })
-    const newId = pickId(created.data) || (created.data as { id?: string | number } | null)?.id
+    const newId = pickId(created.data as Record<string, unknown>) || (created.data as { id?: string | number } | null)?.id
     message.value = newId != null ? `实例已生成 #${newId}` : '实例已生成'
     try { await showIndicatorsWorkspace('/indicators') } catch { /* map refresh optional */ }
     if (newId != null && String(instForm.value.spatialWkt || '').trim()) {
@@ -479,7 +482,12 @@ watch(
 
 async function showIndicatorsOnMap() {
   await showIndicatorsWorkspace('/indicators')
-  message.value = `地图已加载指标实例 ${shellCounts.indicators} 个`
+  const n = shellCounts.indicators
+  message.value = n > 0
+    ? `地图已加载指标实例 ${n} 个（可点击列表行定位范围）`
+    : '指标图层已刷新，但当前没有带空间范围的指标实例'
+  if (n <= 0) error.value = message.value
+  else error.value = null
 }
 
 
@@ -588,6 +596,11 @@ async function locateInstanceOnMap(id: string | number | unknown) {
     </div>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="message" class="ok-text">{{ message }}</p>
+      <div class="plan-map-actions panel soft" data-testid="indicators-map-actions" style="margin:0.35rem 0;padding:0.45rem 0.55rem">
+        <strong style="font-size:12px;margin-right:0.35rem">地图联动</strong>
+        <button class="btn ghost" type="button" :disabled="pending" @click="showIndicatorsOnMap">指标范围上图</button>
+        <span class="muted" style="font-size:12px">{{ shellStatus }}</span>
+      </div>
 
     <section v-if="tab === 'samples'" class="panel">
       <h2>指标样例维护</h2>
@@ -686,7 +699,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
 
     <section v-if="tab === 'tree'" class="panel">
       <div class="form-row" style="margin-bottom:0.6rem">
-        <button class="btn" type="button" :disabled="shellLoading" @click="showIndicatorsOnMap">指标范围上图</button>
+        <button class="btn" type="button" :disabled="pending" @click="showIndicatorsOnMap">指标范围上图</button>
         <button class="btn ghost" type="button" @click="loadTree">刷新树</button>
         <span class="muted">{{ shellStatus }} · 指标 {{ shellCounts.indicators }} · 实例库 {{ instances.length }}</span>
       </div>

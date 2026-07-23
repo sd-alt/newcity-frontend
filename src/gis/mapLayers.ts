@@ -280,7 +280,11 @@ export async function loadSensorLayer(
       `状态: ${status || '-'}`,
       `标识: ${item.platformIdentifier || '-'}`,
       `平台ID: ${id}`,
-    ].join('<br/>')
+      wkt ? `位置WKT: ${wkt}` : '',
+      coverage ? `覆盖WKT: ${coverage}` : '',
+    ]
+      .filter(Boolean)
+      .join('<br/>')
     if (wkt) addGeometryEntity(ds, `sensor-${id}`, name, wkt, color, desc)
     if (coverage) {
       addGeometryEntity(ds, `sensor-cov-${id}`, `${name}-覆盖`, coverage, color.withAlpha(0.22), desc)
@@ -310,7 +314,13 @@ export async function loadDataLayer(
       `质量: ${quality || '-'}`,
       `时间: ${props.observedAt || props.timeStart || '-'}`,
       `数据ID: ${id}`,
-    ].join('<br/>')
+      props.platformId != null ? `平台ID: ${props.platformId}` : '',
+      props.taskId != null ? `任务ID: ${props.taskId}` : '',
+      props.instanceId != null ? `指标实例ID: ${props.instanceId}` : '',
+      wkt ? `位置WKT: ${wkt}` : '',
+    ]
+      .filter(Boolean)
+      .join('<br/>')
     addGeometryEntity(ds, `data-${id}`, name, wkt, color, desc)
 
     // 收集点位，用于简易热力/聚合示意（Word C2/D4）
@@ -372,7 +382,14 @@ export async function loadTaskLayer(
       `状态: ${status || '-'}`,
       `类型: ${props.taskType || '-'}`,
       `任务ID: ${id}`,
-    ].join('<br/>')
+      props.instanceId != null ? `指标实例ID: ${props.instanceId}` : '',
+      Array.isArray(props.indicatorInstanceIds)
+        ? `关联指标: ${(props.indicatorInstanceIds as unknown[]).join(',')}`
+        : '',
+      wkt ? `研究区WKT: ${wkt}` : '',
+    ]
+      .filter(Boolean)
+      .join('<br/>')
     addGeometryEntity(ds, `task-${id}`, name, wkt, color, desc)
 
     const targets = (item.targets || []) as Array<Record<string, unknown>>
@@ -407,16 +424,31 @@ export async function flyToDataSources(viewer: Cesium.Viewer) {
   for (let i = 0; i < viewer.dataSources.length; i += 1) {
     const ds = viewer.dataSources.get(i)
     if (!ds || ds.show === false) continue
-    all.push(...ds.entities.values)
+    for (const ent of ds.entities.values) {
+      // 跳过无几何实体，降低 Cesium flyTo DeveloperError
+      if (ent.position || ent.polygon || ent.polyline || ent.rectangle || ent.ellipse || ent.corridor) {
+        all.push(ent)
+      }
+    }
   }
   if (!all.length) {
     flyToChina(viewer)
     return
   }
   try {
-    await viewer.flyTo(all, { duration: 1.2 })
+    // headless/部分环境下 flyTo Promise 可能不 resolve，必须超时兜底，避免业务按钮长期“加载中”
+    await Promise.race([
+      viewer.flyTo(all, { duration: 0.8 }),
+      new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 1800)
+      }),
+    ])
   } catch {
-    flyToChina(viewer)
+    try {
+      flyToChina(viewer)
+    } catch {
+      /* ignore */
+    }
   }
 }
 

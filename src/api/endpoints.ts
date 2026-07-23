@@ -184,6 +184,7 @@ export const resourceCandidates = (id: number | string, query = '') =>
   getAny('/api/v1/planning/tasks/' + id + '/resource-candidates' + query)
 export const indicatorCandidates = (id: number | string) => getAny('/api/v1/planning/tasks/' + id + '/indicator-candidates')
 export const listPlans = () => listAny('/api/v1/association/plans')
+export const listOptimizationTasks = () => listAny('/api/v1/association/optimization-tasks')
 export const getAssociationResult = (planId: number | string) => getAny('/api/v1/association/result/' + planId)
 export const archivePlan = (id: number | string) => postAction('/api/v1/association/plans/' + id + '/archive')
 export const publishPlan = (id: number | string) => postAction('/api/v1/association/plans/' + id + '/publish')
