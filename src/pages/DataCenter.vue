@@ -72,6 +72,39 @@ const pullForm = ref({
 const sourceAudits = ref<Record<string, unknown>[]>([])
 const selectedAuditSourceId = ref('')
 const liveStatus = ref<Record<string, unknown> | null>(null)
+
+function sourceStatusLabel(status: unknown) {
+  const s = String(status || '').toLowerCase()
+  const map: Record<string, string> = {
+    enabled: '已启用',
+    disabled: '已停用',
+    active: '运行中',
+    error: '异常',
+    failed: '失败',
+  }
+  return map[s] || String(status || '-')
+}
+
+function liveStatusLabel(status: unknown) {
+  const s = String(status || '').toLowerCase()
+  const map: Record<string, string> = {
+    idle: '空闲',
+    running: '定时接入中',
+    stopped: '已停止',
+    error: '异常',
+    failed: '失败',
+  }
+  return map[s] || String(status || '-')
+}
+
+function liveStatusClass(status: unknown) {
+  const s = String(status || '').toLowerCase()
+  if (s === 'running') return 'live-dot running'
+  if (s === 'error' || s === 'failed') return 'live-dot error'
+  if (s === 'stopped') return 'live-dot stopped'
+  return 'live-dot idle'
+}
+
 const liveIntervalSeconds = ref(60)
 const importForm = ref({
   datasetId: '',
@@ -466,7 +499,12 @@ async function refreshLiveStatus(sourceId?: string) {
 
 async function startLivePull() {
   if (pullForm.value.sourceId === '' || pullForm.value.datasetId === '') {
-    error.value = '请先选择接入通道'
+    error.value = '请先选择接入通道和目标数据集'
+    return
+  }
+  const src = sources.value.find((s) => String(s.id) === String(pullForm.value.sourceId))
+  if (src && String(src.status || '').toLowerCase() !== 'enabled') {
+    error.value = '请先启用数据源，再启动定时接入（当前状态：' + sourceStatusLabel(src.status) + '）'
     return
   }
   clearAlerts()
@@ -808,7 +846,7 @@ async function filterDataQualityOnMap(quality: string) {
             <td>{{ s.name }}</td>
             <td>{{ s.protocol }}</td>
             <td>{{ s.platformName || s.platformId || '-' }}</td>
-            <td>{{ s.status || '-' }}</td>
+            <td><span class="status-pill" :data-status="String(s.status||'')">{{ sourceStatusLabel(s.status) }}</span></td>
             <td>{{ s.lastTestStatus || '-' }}</td>
             <td class="clamp">{{ s.lastTestMessage || '-' }}</td>
             <td class="ops">
@@ -850,7 +888,21 @@ async function filterDataQualityOnMap(quality: string) {
         单次/定时拉取都会写入观测数据，来源追溯 <code>source:数据源编码</code>。
         定时接入按间隔反复从外部协议端点拉数，属于“活接入”；停用数据源会自动停止定时任务。
       </p>
-      <pre v-if="liveStatus" class="result-pre">定时接入状态：{{ JSON.stringify(liveStatus, null, 2) }}</pre>
+      <div v-if="liveStatus" class="live-status-card">
+        <div class="live-status-head">
+          <span :class="liveStatusClass(liveStatus.status)"></span>
+          <strong>{{ liveStatusLabel(liveStatus.status) }}</strong>
+          <span class="muted">源 #{{ liveStatus.sourceId || pullForm.sourceId }} · 间隔 {{ liveStatus.intervalSeconds || '-' }}s</span>
+        </div>
+        <div class="live-status-grid">
+          <div><span class="muted">拉取次数</span><strong>{{ liveStatus.pullCount ?? 0 }}</strong></div>
+          <div><span class="muted">成功</span><strong>{{ liveStatus.successCount ?? 0 }}</strong></div>
+          <div><span class="muted">失败</span><strong>{{ liveStatus.failureCount ?? 0 }}</strong></div>
+          <div><span class="muted">最近观测</span><strong>{{ liveStatus.lastObservationDataId || '-' }}</strong></div>
+          <div class="wide"><span class="muted">最近拉取</span><strong>{{ liveStatus.lastPullAt || '-' }}</strong></div>
+          <div class="wide" v-if="liveStatus.lastError"><span class="muted">错误</span><strong class="error">{{ liveStatus.lastError }}</strong></div>
+        </div>
+      </div>
 
       <h3>4. 接入审计 / 失败提示</h3>
       <div class="form-row">

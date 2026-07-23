@@ -1256,3 +1256,54 @@ tr.row-click.selected, .row-click.selected {
 .tree-row .dot.published { background: #22c55e; }
 .tree-row .dot.draft { background: #f59e0b; }
 .tree-row .dot.inactive { background: #94a3b8; }
+
+
+/* Data center live ingest status */
+.live-status-card {
+  margin: 0.6rem 0 0.9rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.92);
+}
+.live-status-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.55rem;
+}
+.live-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.45rem 0.7rem;
+}
+.live-status-grid .wide { grid-column: 1 / -1; }
+.live-status-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 12px;
+}
+.live-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #94a3b8;
+  flex: 0 0 auto;
+}
+.live-dot.running { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.18); }
+.live-dot.error { background: #ef4444; }
+.live-dot.stopped { background: #f59e0b; }
+.live-dot.idle { background: #94a3b8; }
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: #f3f4f6;
+  font-size: 12px;
+}
+.status-pill[data-status="enabled"] { background: rgba(34,197,94,0.14); color: #15803d; }
+.status-pill[data-status="disabled"] { background: #f3f4f6; color: #6b7280; }
+.status-pill[data-status="error"],
+.status-pill[data-status="failed"] { background: rgba(239,68,68,0.12); color: #b91c1c; }

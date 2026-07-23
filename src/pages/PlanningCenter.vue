@@ -366,6 +366,14 @@ async function basicAssociation() {
     advanceTo('optimize')
     message.value = '基础关联完成'
     await loadLists()
+    // 关联后同步最新方案匹配，便于地图连线与方案管理
+    const planRow = plans.value.find((pl) => String(pl.taskId) === String(taskId.value))
+    if (planRow?.id != null) {
+      try {
+        const res = await api.getAssociationResult(String(planRow.id))
+        planResult.value = res.data
+      } catch { /* optional */ }
+    }
     await showAssociationOnMap('basic')
     await loadCandidates(false)
   } catch (err) {
@@ -385,6 +393,13 @@ async function optimizeAssociation() {
     advanceTo('supplement')
     message.value = '优化关联完成'
     await loadLists()
+    const planRow = plans.value.find((pl) => String(pl.taskId) === String(taskId.value))
+    if (planRow?.id != null) {
+      try {
+        const res = await api.getAssociationResult(String(planRow.id))
+        planResult.value = res.data
+      } catch { /* optional */ }
+    }
     await showAssociationOnMap('optimized')
     await loadCandidates(false)
   } catch (err) {
@@ -404,6 +419,13 @@ async function supplementAssociation() {
     advanceTo('evaluate')
     message.value = '增补关联完成'
     await loadLists()
+    const planRow = plans.value.find((pl) => String(pl.taskId) === String(taskId.value))
+    if (planRow?.id != null) {
+      try {
+        const res = await api.getAssociationResult(String(planRow.id))
+        planResult.value = res.data
+      } catch { /* optional */ }
+    }
     await showAssociationOnMap('supplement')
   } catch (err) {
     error.value = errMessage(err, '增补关联失败')
@@ -821,8 +843,28 @@ async function bindSelectedIndicator() {
   }
 }
 
+function pickScores(c: Record<string, unknown>): Record<string, unknown> | null {
+  const direct = (c.scores || c.scoreDetail) as Record<string, unknown> | undefined
+  if (direct && typeof direct === 'object') return direct
+  const sensors = c.sensors as Record<string, unknown>[] | undefined
+  if (Array.isArray(sensors) && sensors[0]) {
+    const s = sensors[0].scores as Record<string, unknown> | undefined
+    if (s && typeof s === 'object') return s
+  }
+  return null
+}
+
+const DIM_LABELS: Record<string, string> = {
+  theme: '主题',
+  space: '空间',
+  time: '时间',
+  capability: '能力',
+  reliability: '可靠',
+  total: '综合',
+}
+
 function scoreOf(c: Record<string, unknown>) {
-  const scores = c.scores as Record<string, unknown> | undefined
+  const scores = pickScores(c)
   const v =
     c.score ??
     c.totalScore ??
@@ -833,15 +875,21 @@ function scoreOf(c: Record<string, unknown>) {
 }
 
 function explainOf(c: Record<string, unknown>) {
-  const scores = (c.scores || c.scoreDetail) as Record<string, unknown> | undefined
+  const scores = pickScores(c)
   const reasons = c.reasons || c.reason || c.explanation
   const parts: string[] = []
   if (scores && typeof scores === 'object') {
-    const exp = scores.explanations
+    const exp = scores.explanations as Record<string, unknown> | undefined
+    const weights = scores.weights as Record<string, unknown> | undefined
     if (exp && typeof exp === 'object') {
       parts.push(
-        Object.entries(exp as Record<string, unknown>)
-          .map(([k, v]) => k + ': ' + String(v))
+        Object.entries(exp)
+          .map(([k, v]) => {
+            const label = DIM_LABELS[k] || k
+            const w = weights && weights[k] != null ? ' 权重' + String(weights[k]) : ''
+            const sc = scores[k] != null ? ' 分值' + String(scores[k]) : ''
+            return label + sc + w + '：' + String(v)
+          })
           .join('；'),
       )
     }
@@ -852,27 +900,30 @@ function explainOf(c: Record<string, unknown>) {
     parts.push(reasons)
   }
   if (parts.length) return parts.join(' | ')
-  if (scores) {
-    try {
-      return JSON.stringify(scores)
-    } catch {
-      return String(scores)
-    }
-  }
   return '-'
 }
 
 function dimScore(c: Record<string, unknown>, key: string) {
-  const direct = (c.scores || c.scoreDetail) as Record<string, unknown> | undefined
-  if (direct && typeof direct === 'object' && direct[key] != null) return direct[key]
-  // 兼容 sensors[0].scores
-  const sensors = c.sensors as Record<string, unknown>[] | undefined
-  if (Array.isArray(sensors) && sensors[0]) {
-    const s = sensors[0].scores as Record<string, unknown> | undefined
-    if (s && s[key] != null) return s[key]
-  }
+  const direct = pickScores(c)
+  if (direct && direct[key] != null) return direct[key]
   return '-'
 }
+
+function planStatusLabel(status: unknown) {
+  const s = String(status || '').toLowerCase()
+  const map: Record<string, string> = {
+    draft: '草稿',
+    completed: '已完成',
+    approved: '已审核',
+    published: '已发布',
+    archived: '已归档',
+    supplement_incomplete: '增补未完成',
+    basic: '基础方案',
+    optimized: '优化方案',
+  }
+  return map[s] || String(status || '-')
+}
+
 
 async function ensureListsLoaded() {
   if (!user.value) return
@@ -958,39 +1009,65 @@ async function showAssociationOnMap(mode: 'basic' | 'optimized' | 'supplement') 
     return
   }
   let matches: Array<Record<string, unknown>> = []
-  const pr = planResult.value as Record<string, unknown> | null
-  if (pr) {
-    const planList = Array.isArray(pr.plans) ? (pr.plans as Record<string, unknown>[]) : [pr]
-    for (const pl of planList) {
-      const rm = pl.resourceMatches
-      if (Array.isArray(rm)) matches.push(...(rm as Record<string, unknown>[]))
-    }
-    if (Array.isArray(pr.resourceMatches)) {
-      matches.push(...(pr.resourceMatches as Record<string, unknown>[]))
+
+  const collectMatches = (rm: unknown) => {
+    if (!Array.isArray(rm)) return
+    for (const row of rm as Array<Record<string, unknown>>) {
+      // 仅绘制匹配成功的资源；排除硬约束失败项
+      if (row.matched === false) continue
+      matches.push(row)
     }
   }
+
+  const pr = planResult.value as Record<string, unknown> | null
+  if (pr) {
+    const planObj = (pr.plan || pr) as Record<string, unknown>
+    collectMatches(planObj.resourceMatches)
+    collectMatches(pr.resourceMatches)
+    const planList = Array.isArray(pr.plans) ? (pr.plans as Array<Record<string, unknown>>) : []
+    for (const pl of planList) collectMatches(pl.resourceMatches)
+  }
+
   if (!matches.length) {
     for (const pl of plans.value) {
       if (String(pl.taskId) !== String(taskId.value)) continue
-      const rm = pl.resourceMatches
-      if (Array.isArray(rm)) matches.push(...(rm as Record<string, unknown>[]))
+      collectMatches(pl.resourceMatches)
     }
   }
-  if (!matches.length && candidateRows.value.length) {
-    matches = candidateRows.value
+
+  // 列表无嵌套匹配时，拉取关联结果详情
+  if (!matches.length) {
+    const planRow = plans.value.find((pl) => String(pl.taskId) === String(taskId.value))
+    if (planRow?.id != null) {
+      try {
+        const res = await api.getAssociationResult(String(planRow.id))
+        planResult.value = res.data
+        const data = res.data as Record<string, unknown>
+        const planObj = (data.plan || data) as Record<string, unknown>
+        collectMatches(planObj.resourceMatches)
+        collectMatches(data.resourceMatches)
+      } catch {
+        /* optional */
+      }
+    }
   }
+
+  if (!matches.length && candidateRows.value.length && mode === 'basic') {
+    matches = candidateRows.value.filter((c) => c.matched !== false)
+  }
+
   const links = matches.map((c) => ({
     platformId: (c.platformId ?? c.id) as string | number,
-    score: Number(c.score ?? 0),
+    score: Number(c.score ?? scoreOf(c) ?? 0),
     mode,
     name: String(c.platformName || c.name || c.platformId || ''),
+    reason: explainOf(c) !== '-' ? explainOf(c) : undefined,
   }))
   const n = await drawAssociationLinks(taskId.value, links, { fit: true, ensureLayers: true })
   const label =
     mode === 'basic' ? '基础关联(蓝)' : mode === 'optimized' ? '优化关联(绿)' : '增补关联(橙)'
-  message.value = n ? `已绘制${label} 连线 ${n} 条` : `无${label}可展示`
+  message.value = n ? `已绘制${label} 连线 ${n} 条` : `无${label}可展示（请确认已完成关联并存在匹配资源）`
 }
-
 
 async function drawPlanningCoverageFromEval() {
   const er = evalResult.value as { overallCoverage?: Record<string, unknown> } | null
@@ -1249,7 +1326,7 @@ async function clearMapLinks() {
               <td>{{ p.name }}</td>
               <td>{{ p.taskId }}</td>
               <td>{{ p.planType || '-' }}</td>
-              <td>{{ p.status }}</td>
+              <td>{{ planStatusLabel(p.status) }}</td>
               <td class="ops">
                 <button class="btn ghost" type="button" @click.stop="loadPlanResult(p.id)">查看结果</button>
                 <button class="btn ghost" type="button" :disabled="pending" @click.stop="doCopyPlan(p.id)">复制</button>
@@ -1267,13 +1344,13 @@ async function clearMapLinks() {
           <label>左方案
             <select v-model="comparePlanLeft">
               <option value="">请选择</option>
-              <option v-for="p in plans" :key="'cl'+p.id" :value="String(p.id)">#{{ p.id }} {{ p.name }} [{{ p.status }}]</option>
+              <option v-for="p in plans" :key="'cl'+p.id" :value="String(p.id)">#{{ p.id }} {{ p.name }} [{{ planStatusLabel(p.status) }}]</option>
             </select>
           </label>
           <label>右方案
             <select v-model="comparePlanRight">
               <option value="">请选择</option>
-              <option v-for="p in plans" :key="'cr'+p.id" :value="String(p.id)">#{{ p.id }} {{ p.name }} [{{ p.status }}]</option>
+              <option v-for="p in plans" :key="'cr'+p.id" :value="String(p.id)">#{{ p.id }} {{ p.name }} [{{ planStatusLabel(p.status) }}]</option>
             </select>
           </label>
           <button class="btn" type="button" :disabled="pending" @click="runPlanCompare">开始对比</button>
