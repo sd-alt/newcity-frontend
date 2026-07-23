@@ -1307,3 +1307,34 @@ tr.row-click.selected, .row-click.selected {
 .status-pill[data-status="disabled"] { background: #f3f4f6; color: #6b7280; }
 .status-pill[data-status="error"],
 .status-pill[data-status="failed"] { background: rgba(239,68,68,0.12); color: #b91c1c; }
+
+
+/* Clickable stat cards and application layer tree */
+button.card.stat.clickable {
+  cursor: pointer;
+  text-align: left;
+  border: 1px solid #e5e7eb;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: rgba(255,255,255,0.94);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+button.card.stat.clickable:hover {
+  border-color: #1677ff;
+  box-shadow: 0 0 0 3px rgba(22,119,255,0.12);
+}
+.layer-tree {
+  margin-top: 0.85rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.94);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.layer-tree h3 {
+  margin: 0 0 0.25rem;
+  font-size: 14px;
+}

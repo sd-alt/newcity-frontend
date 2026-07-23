@@ -3,9 +3,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
 import {
-  showShellAndFit,
   reloadShellLayers,
-  setShellVisibility,
+  patchShellFilters,
   shellCounts,
   shellFilters,
   shellLoading,
@@ -176,46 +175,170 @@ watch(user, () => {
 })
 
 async function mapShowSensors() {
-  await showShellAndFit('sensors', route.path)
+  await patchShellFilters(
+    {
+      showSensors: true,
+      showData: false,
+      showTasks: false,
+      sensorType: '',
+      sensorStatus: '',
+      dataQuality: '',
+      taskStatus: '',
+      taskId: '',
+    },
+    { fit: true, rerender: true },
+  )
+  message.value = `统计联动：仅显示传感资源（${shellCounts.sensors}）`
 }
+
 async function mapShowData() {
-  await showShellAndFit('data', route.path)
+  await patchShellFilters(
+    {
+      showSensors: false,
+      showData: true,
+      showTasks: false,
+      sensorType: '',
+      sensorStatus: '',
+      dataQuality: '',
+      taskStatus: '',
+      taskId: '',
+    },
+    { fit: true, rerender: true },
+  )
+  message.value = `统计联动：仅显示监测数据（${shellCounts.data}）`
 }
+
 async function mapShowTasks() {
-  await showShellAndFit('tasks', route.path)
+  await patchShellFilters(
+    {
+      showSensors: false,
+      showData: false,
+      showTasks: true,
+      sensorType: '',
+      sensorStatus: '',
+      dataQuality: '',
+      taskStatus: '',
+      taskId: '',
+    },
+    { fit: true, rerender: true },
+  )
+  message.value = `统计联动：仅显示观测任务（${shellCounts.tasks}）`
 }
+
 async function mapShowAll() {
-  await showShellAndFit('all', route.path)
+  await patchShellFilters(
+    {
+      showSensors: true,
+      showData: true,
+      showTasks: true,
+      sensorType: '',
+      sensorStatus: '',
+      dataQuality: '',
+      taskStatus: '',
+      taskId: '',
+    },
+    { fit: true, rerender: true },
+  )
+  message.value = '统计联动：显示全部业务图层'
 }
 
 async function mapShowIndicators() {
   await reloadShellLayers('/applications', {})
-  setShellVisibility({ showSensors: false, showData: false, showTasks: false })
+  await patchShellFilters(
+    { showSensors: false, showData: false, showTasks: false },
+    { fit: true, rerender: false },
+  )
   message.value = `已切换：主显指标实例范围（${shellCounts.indicators} 个）`
 }
 
 async function mapRefresh() {
   await reloadShellLayers(route.path, route.query as Record<string, unknown>)
-}
-function toggleShellLayer(key: 'showSensors' | 'showData' | 'showTasks', ev: Event) {
-  const checked = (ev.target as HTMLInputElement).checked
-  setShellVisibility({ [key]: checked })
+  message.value = '图层已刷新'
 }
 
-async function filterMapByStat(kind: 'sensors' | 'data' | 'tasks' | 'all') {
+function toggleShellLayer(key: 'showSensors' | 'showData' | 'showTasks', ev: Event) {
+  const checked = (ev.target as HTMLInputElement).checked
+  void patchShellFilters({ [key]: checked }, { rerender: false })
+}
+
+async function filterMapByStat(kind: 'sensors' | 'data' | 'tasks' | 'all' | 'indicators') {
   if (kind === 'all') await mapShowAll()
   else if (kind === 'sensors') await mapShowSensors()
   else if (kind === 'data') await mapShowData()
-  else await mapShowTasks()
-  message.value =
-    kind === 'sensors'
-      ? '统计联动：仅显示传感资源'
-      : kind === 'data'
-        ? '统计联动：仅显示监测数据'
-        : kind === 'tasks'
-          ? '统计联动：仅显示观测任务'
-          : '统计联动：显示全部图层'
+  else if (kind === 'tasks') await mapShowTasks()
+  else await mapShowIndicators()
 }
+
+async function filterSensorsByType(typeCode: unknown) {
+  const code = String(typeCode || '').trim()
+  resourceFilter.value.typeCode = code
+  await patchShellFilters(
+    {
+      showSensors: true,
+      showData: false,
+      showTasks: false,
+      sensorType: code,
+      sensorStatus: '',
+    },
+    { fit: true, rerender: true },
+  )
+  message.value = code
+    ? `地图已按传感器类型过滤：${code}（${shellCounts.sensors}）`
+    : '已清除类型过滤'
+}
+
+async function filterSensorsByStatus(status: unknown) {
+  const st = String(status || '').trim()
+  resourceFilter.value.status = st
+  await patchShellFilters(
+    {
+      showSensors: true,
+      showData: false,
+      showTasks: false,
+      sensorStatus: st,
+      sensorType: resourceFilter.value.typeCode,
+    },
+    { fit: true, rerender: true },
+  )
+  message.value = st
+    ? `地图已按传感器状态过滤：${st}（${shellCounts.sensors}）`
+    : '已清除状态过滤'
+}
+
+async function filterDataByQuality(quality: unknown) {
+  const q = String(quality || '').trim()
+  dataFilter.value.qualityStatus = q
+  await patchShellFilters(
+    {
+      showSensors: false,
+      showData: true,
+      showTasks: false,
+      dataQuality: q,
+    },
+    { fit: true, rerender: true },
+  )
+  message.value = q
+    ? `地图已按数据质量过滤：${q}（${shellCounts.data}）`
+    : '已清除质量过滤'
+}
+
+async function filterTasksByStatus(status: unknown) {
+  const st = String(status || '').trim()
+  taskFilter.value.status = st
+  await patchShellFilters(
+    {
+      showSensors: false,
+      showData: false,
+      showTasks: true,
+      taskStatus: st,
+    },
+    { fit: true, rerender: true },
+  )
+  message.value = st
+    ? `地图已按任务状态过滤：${st}（${shellCounts.tasks}）`
+    : '已清除任务状态过滤'
+}
+
 </script>
 
 <template>
@@ -259,9 +382,9 @@ async function filterMapByStat(kind: 'sensors' | 'data' | 'tasks' | 'all') {
         <RouterLink class="btn ghost" to="/resources?tab=query">下钻查询</RouterLink>
       </div>
       <div class="cards">
-        <div class="card stat"><h3>资源总数</h3><p class="stat-num">{{ resourceStats?.total ?? '—' }}</p></div>
-        <div class="card stat"><h3>类型数</h3><p class="stat-num">{{ resourceByType.length }}</p></div>
-        <div class="card stat"><h3>状态类</h3><p class="stat-num">{{ resourceByStatus.length }}</p></div>
+        <button type="button" class="card stat clickable" @click="filterMapByStat('sensors')"><h3>资源总数</h3><p class="stat-num">{{ resourceStats?.total ?? '—' }}</p><span class="muted">点击仅显传感资源</span></button>
+        <button type="button" class="card stat clickable" @click="filterMapByStat('sensors')"><h3>类型数</h3><p class="stat-num">{{ resourceByType.length }}</p><span class="muted">联动地图图层</span></button>
+        <button type="button" class="card stat clickable" @click="filterMapByStat('sensors')"><h3>状态类</h3><p class="stat-num">{{ resourceByStatus.length }}</p><span class="muted">联动地图图层</span></button>
       </div>
       <div class="grid-2">
         <div>
@@ -269,7 +392,7 @@ async function filterMapByStat(kind: 'sensors' | 'data' | 'tasks' | 'all') {
           <table class="table">
             <thead><tr><th>类型</th><th>编码</th><th>数量</th></tr></thead>
             <tbody>
-              <tr v-for="(row, i) in resourceByType" :key="'rt'+i">
+              <tr v-for="(row, i) in resourceByType" :key="'rt'+i" class="row-click" @click="filterSensorsByType(row.typeCode || row.code)">
                 <td>{{ rowLabel(row, ['typeName', 'name', 'label']) }}</td>
                 <td>{{ rowLabel(row, ['typeCode', 'code']) }}</td>
                 <td>{{ rowCount(row) }}</td>
@@ -282,7 +405,7 @@ async function filterMapByStat(kind: 'sensors' | 'data' | 'tasks' | 'all') {
           <table class="table">
             <thead><tr><th>状态</th><th>数量</th></tr></thead>
             <tbody>
-              <tr v-for="(row, i) in resourceByStatus" :key="'rs'+i">
+              <tr v-for="(row, i) in resourceByStatus" :key="'rs'+i" class="row-click" @click="filterSensorsByStatus(row.status || row.label || row.name)">
                 <td>{{ rowLabel(row, ['status', 'label', 'name']) }}</td>
                 <td>{{ rowCount(row) }}</td>
               </tr>
@@ -317,9 +440,9 @@ async function filterMapByStat(kind: 'sensors' | 'data' | 'tasks' | 'all') {
         <RouterLink class="btn ghost" to="/data?tab=query">下钻查询</RouterLink>
       </div>
       <div class="cards">
-        <div class="card stat"><h3>数据总数</h3><p class="stat-num">{{ dataStats?.total ?? '—' }}</p></div>
-        <div class="card stat"><h3>隔离数</h3><p class="stat-num">{{ dataStats?.quarantinedCount ?? '—' }}</p></div>
-        <div class="card stat"><h3>质量类</h3><p class="stat-num">{{ dataByQuality.length }}</p></div>
+        <button type="button" class="card stat clickable" @click="filterMapByStat('data')"><h3>数据总数</h3><p class="stat-num">{{ dataStats?.total ?? '—' }}</p><span class="muted">点击仅显监测数据</span></button>
+        <button type="button" class="card stat clickable" @click="filterMapByStat('data')"><h3>隔离数</h3><p class="stat-num">{{ dataStats?.quarantinedCount ?? '—' }}</p><span class="muted">联动数据图层</span></button>
+        <button type="button" class="card stat clickable" @click="filterMapByStat('data')"><h3>质量类</h3><p class="stat-num">{{ dataByQuality.length }}</p><span class="muted">可点质量行过滤</span></button>
       </div>
       <div class="grid-2">
         <div>
@@ -339,7 +462,7 @@ async function filterMapByStat(kind: 'sensors' | 'data' | 'tasks' | 'all') {
           <table class="table">
             <thead><tr><th>质量</th><th>数量</th></tr></thead>
             <tbody>
-              <tr v-for="(row, i) in dataByQuality" :key="'dq'+i">
+              <tr v-for="(row, i) in dataByQuality" :key="'dq'+i" class="row-click" @click="filterDataByQuality(row.qualityStatus || row.label || row.name)">
                 <td>{{ rowLabel(row, ['qualityStatus', 'label', 'name']) }}</td>
                 <td>{{ rowCount(row) }}</td>
               </tr>
@@ -357,11 +480,13 @@ async function filterMapByStat(kind: 'sensors' | 'data' | 'tasks' | 'all') {
         <RouterLink class="btn ghost" to="/planning?tab=tasks">任务列表</RouterLink>
         <RouterLink class="btn ghost" to="/planning?tab=plans">方案管理</RouterLink>
       </div>
-      <div class="cards">
+      <div class="form-row" style="margin-bottom:0.5rem">
         <RouterLink class="btn ghost" to="/planning?tab=tasks">下钻任务管理</RouterLink>
-      <div class="card stat"><h3>任务总数</h3><p class="stat-num">{{ taskStats?.total ?? '—' }}</p></div>
-        <div class="card stat"><h3>已有方案</h3><p class="stat-num">{{ taskStats?.withPlanCount ?? '—' }}</p></div>
-        <div class="card stat"><h3>状态类</h3><p class="stat-num">{{ taskByStatus.length }}</p></div>
+      </div>
+      <div class="cards">
+        <button type="button" class="card stat clickable" @click="filterMapByStat('tasks')"><h3>任务总数</h3><p class="stat-num">{{ taskStats?.total ?? '—' }}</p><span class="muted">点击仅显观测任务</span></button>
+        <button type="button" class="card stat clickable" @click="filterMapByStat('tasks')"><h3>已有方案</h3><p class="stat-num">{{ taskStats?.withPlanCount ?? '—' }}</p><span class="muted">联动任务图层</span></button>
+        <button type="button" class="card stat clickable" @click="filterMapByStat('tasks')"><h3>状态类</h3><p class="stat-num">{{ taskByStatus.length }}</p><span class="muted">可点状态行过滤</span></button>
       </div>
       <div class="grid-2">
         <div>
@@ -369,7 +494,7 @@ async function filterMapByStat(kind: 'sensors' | 'data' | 'tasks' | 'all') {
           <table class="table">
             <thead><tr><th>状态</th><th>数量</th></tr></thead>
             <tbody>
-              <tr v-for="(row, i) in taskByStatus" :key="'ts'+i">
+              <tr v-for="(row, i) in taskByStatus" :key="'ts'+i" class="row-click" @click="filterTasksByStatus(row.status || row.label || row.name)">
                 <td>{{ rowLabel(row, ['status', 'label', 'name']) }}</td>
                 <td>{{ rowCount(row) }}</td>
               </tr>
@@ -420,11 +545,23 @@ async function filterMapByStat(kind: 'sensors' | 'data' | 'tasks' | 'all') {
         <label class="check"><input type="checkbox" :checked="shellFilters.showTasks" @change="toggleShellLayer('showTasks', $event)" /> 观测任务 <span class="badge">{{ shellCounts.tasks }}</span></label>
       </div>
       <div class="cards" style="margin-top:0.8rem">
-        <div class="card stat"><h3>传感器要素</h3><p class="stat-num">{{ shellCounts.sensors }}</p></div>
-        <div class="card stat"><h3>数据要素</h3><p class="stat-num">{{ shellCounts.data }}</p></div>
-        <div class="card stat"><h3>任务要素</h3><p class="stat-num">{{ shellCounts.tasks }}</p></div>
+        <button type="button" class="card stat clickable" @click="filterMapByStat('sensors')"><h3>传感器要素</h3><p class="stat-num">{{ shellCounts.sensors }}</p></button>
+        <button type="button" class="card stat clickable" @click="filterMapByStat('data')"><h3>数据要素</h3><p class="stat-num">{{ shellCounts.data }}</p></button>
+        <button type="button" class="card stat clickable" @click="filterMapByStat('tasks')"><h3>任务要素</h3><p class="stat-num">{{ shellCounts.tasks }}</p></button>
+        <button type="button" class="card stat clickable" @click="filterMapByStat('indicators')"><h3>指标实例</h3><p class="stat-num">{{ shellCounts.indicators }}</p></button>
       </div>
-      <p class="hint">点击底图要素可在右下角查看详情；顶栏工具可切换矢量/影像底图。</p>
+      <div class="layer-tree">
+        <h3>业务图层树</h3>
+        <label class="check"><input type="checkbox" :checked="shellFilters.showSensors" @change="toggleShellLayer('showSensors', $event)" /> 传感资源 <span class="badge">{{ shellCounts.sensors }}</span></label>
+        <label class="check"><input type="checkbox" :checked="shellFilters.showData" @change="toggleShellLayer('showData', $event)" /> 监测数据 <span class="badge">{{ shellCounts.data }}</span></label>
+        <label class="check"><input type="checkbox" :checked="shellFilters.showTasks" @change="toggleShellLayer('showTasks', $event)" /> 观测任务 <span class="badge">{{ shellCounts.tasks }}</span></label>
+        <div class="form-row" style="margin-top:0.45rem">
+          <button class="btn ghost tiny" type="button" @click="mapShowIndicators">仅指标范围</button>
+          <button class="btn ghost tiny" type="button" @click="mapShowAll">全部显示</button>
+          <button class="btn ghost tiny" type="button" @click="mapRefresh">刷新</button>
+        </div>
+      </div>
+      <p class="hint">点击统计卡片/表格行会过滤地图图层；点击底图要素打开气泡与右侧详情。</p>
     </section>
 
 <section v-show="tab === 'workbench'" class="panel">

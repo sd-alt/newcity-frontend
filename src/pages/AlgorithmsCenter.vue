@@ -150,6 +150,37 @@ const tabs = [
   { key: 'results', label: '结果管理' },
 ]
 
+function taskStatusLabel(status: unknown) {
+  const s = String(status || '').toLowerCase()
+  const map: Record<string, string> = {
+    pending: '待执行',
+    queued: '排队中',
+    running: '运行中',
+    paused: '已暂停',
+    succeeded: '已完成',
+    failed: '执行失败',
+    cancelled: '已终止',
+    canceled: '已终止',
+  }
+  return map[s] || String(status || '-')
+}
+
+function canRunTask(status: unknown) {
+  return canByStatus(status, ['pending', 'queued'])
+}
+function canPauseTask(status: unknown) {
+  return canByStatus(status, ['running'])
+}
+function canResumeTask(status: unknown) {
+  return canByStatus(status, ['paused'])
+}
+function canCancelTask(status: unknown) {
+  return canByStatus(status, ['pending', 'queued', 'running', 'paused'])
+}
+function canRequeueTask(status: unknown) {
+  return canByStatus(status, ['failed', 'succeeded', 'cancelled', 'canceled', 'paused'])
+}
+
 const activeVersions = computed(() =>
   versions.value.filter((v) => String(v.status) === 'active' || String(v.status) === 'draft'),
 )
@@ -381,6 +412,7 @@ async function runTask(id: unknown) {
     await api.runProcessingTask(String(id), { asyncMode: true })
     message.value = '任务已提交后台执行，监控页可查看进度'
     await load()
+    await inspectTask(id)
     startPolling()
     await setTab('monitor')
   } catch (err) {
@@ -861,7 +893,7 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
           <tr v-for="t in tasks" :key="String(t.id)" class="row-click" :class="{ selected: selectedTask && String(selectedTask.id) === String(t.id) }" @click="inspectTask(t.id)">
             <td>{{ t.id }}</td>
             <td>{{ t.code || t.name }}</td>
-            <td>{{ t.status || '-' }}</td>
+            <td>{{ taskStatusLabel(t.status) }}</td>
             <td>{{ t.algorithmVersionId || '-' }}</td>
             <td>{{ t.progress ?? '-' }}</td>
           </tr>
@@ -878,14 +910,14 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
           <tr v-for="t in tasks" :key="'r'+t.id" class="row-click" :class="{ selected: selectedTask && String(selectedTask.id) === String(t.id) }" @click="inspectTask(t.id)">
             <td>{{ t.id }}</td>
             <td>{{ t.code || t.name }}</td>
-            <td>{{ t.status || '-' }}</td>
+            <td>{{ taskStatusLabel(t.status) }}</td>
             <td>{{ t.progress ?? 0 }}%</td>
             <td class="ops">
-              <button class="btn" type="button" :disabled="canByStatus(t.status, ['pending']) === false" @click.stop="runTask(t.id)">执行</button>
-              <button class="btn ghost" type="button" :disabled="canByStatus(t.status, ['running']) === false" @click.stop="pauseTask(t.id)">暂停</button>
-              <button class="btn ghost" type="button" :disabled="canByStatus(t.status, ['paused']) === false" @click.stop="resumeTask(t.id)">恢复</button>
-              <button class="btn ghost" type="button" :disabled="canByStatus(t.status, ['pending', 'running', 'paused']) === false" @click.stop="cancelTask(t.id)">终止</button>
-              <button class="btn ghost" type="button" :disabled="canByStatus(t.status, ['failed', 'succeeded', 'cancelled', 'paused']) === false" @click.stop="requeueTask(t.id)">重新排队</button>
+              <button class="btn" type="button" :disabled="canRunTask(t.status) === false" @click.stop="runTask(t.id)">执行</button>
+              <button class="btn ghost" type="button" :disabled="canPauseTask(t.status) === false" @click.stop="pauseTask(t.id)">暂停</button>
+              <button class="btn ghost" type="button" :disabled="canResumeTask(t.status) === false" @click.stop="resumeTask(t.id)">恢复</button>
+              <button class="btn ghost" type="button" :disabled="canCancelTask(t.status) === false" @click.stop="cancelTask(t.id)">终止</button>
+              <button class="btn ghost" type="button" :disabled="canRequeueTask(t.status) === false" @click.stop="requeueTask(t.id)">重新排队</button>
             </td>
           </tr>
         </tbody>

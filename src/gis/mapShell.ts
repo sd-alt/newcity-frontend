@@ -949,6 +949,27 @@ export function setShellVisibility(partial: Partial<typeof shellFilters>) {
   applyVisibility()
 }
 
+/** Update layer visibility and/or attribute filters, then optionally re-render features. */
+export async function patchShellFilters(
+  partial: Partial<typeof shellFilters>,
+  options?: { fit?: boolean; rerender?: boolean },
+) {
+  Object.assign(shellFilters, partial)
+  const needRerender =
+    options?.rerender === true ||
+    partial.sensorType !== undefined ||
+    partial.sensorStatus !== undefined ||
+    partial.dataQuality !== undefined ||
+    partial.taskStatus !== undefined ||
+    partial.taskId !== undefined
+  if (needRerender) {
+    await rerenderShellLayers(options?.fit === true)
+  } else {
+    applyVisibility()
+  }
+  applyVisibility()
+}
+
 export function resetShellView() {
   const viewer = shellViewer.value
   if (viewer && !viewer.isDestroyed()) flyToChina(viewer)
