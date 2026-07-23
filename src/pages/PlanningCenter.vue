@@ -1246,22 +1246,30 @@ async function clearMapLinks() {
 
 <template>
   <section class="page">
-    <header class="page-head">
-      <div>
-        <p class="eyebrow">观测规划中心</p>
-        <h1>任务建模到方案输出的规划流程</h1>
-        <p class="muted">严格按任务清单分步：创建/提交 → 需求反算 → 候选与评分 → 基础/优化/增补关联 → 满足度评估 → 规划输出。无一键跑通。</p>
+    <header class="page-head plan-head">
+      <div class="plan-head-main">
+        <div>
+          <p class="eyebrow">观测规划中心</p>
+          <h1>任务建模到方案输出的规划流程</h1>
+          <p class="muted">按步骤推进：创建/提交 → 需求反算 → 候选评分 → 基础/优化/增补关联 → 满足度评估 → 规划输出。不提供一键跑通。</p>
+        </div>
+        <div class="plan-head-actions">
+          <button class="btn ghost" type="button" @click="resetForm">新建任务</button>
+          <button class="btn ghost" type="button" :disabled="taskId == null || shellLoading" @click="openOnMap">定位当前任务</button>
+        </div>
       </div>
-      <button class="btn ghost" type="button" @click="resetForm">新建任务</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading" @click="showTasksOnMap">任务资源上图</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showCandidatesOnMap">候选资源上图</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showAssociationOnMap('basic')">基础关联上图</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showAssociationOnMap('optimized')">优化关联上图</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showAssociationOnMap('supplement')">增补关联上图</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading" @click="clearMapLinks">清除关联线</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading || !evalResult" @click="drawPlanningCoverageFromEval">覆盖评估上图</button>
-      <button class="btn ghost" type="button" :disabled="shellLoading" @click="clearPlanningCoverageOnMap">清除覆盖</button>
-      <span class="muted">{{ shellStatus }}</span>
+      <div class="plan-map-actions panel soft" aria-label="地图联动">
+        <strong style="font-size:12px;margin-right:0.35rem">地图联动</strong>
+        <button class="btn ghost" type="button" :disabled="shellLoading" @click="showTasksOnMap">任务/资源上图</button>
+        <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showCandidatesOnMap">候选上图</button>
+        <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showAssociationOnMap('basic')">基础关联(蓝)</button>
+        <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showAssociationOnMap('optimized')">优化关联(绿)</button>
+        <button class="btn ghost" type="button" :disabled="shellLoading || taskId == null" @click="showAssociationOnMap('supplement')">增补关联(橙)</button>
+        <button class="btn ghost" type="button" :disabled="shellLoading || !evalResult" @click="drawPlanningCoverageFromEval">覆盖/缺口上图</button>
+        <button class="btn ghost" type="button" :disabled="shellLoading" @click="clearMapLinks">清关联线</button>
+        <button class="btn ghost" type="button" :disabled="shellLoading" @click="clearPlanningCoverageOnMap">清覆盖</button>
+        <span class="muted" style="font-size:12px">{{ shellStatus }}</span>
+      </div>
     </header>
 
     <template v-if="user == null">
@@ -1275,10 +1283,17 @@ async function clearMapLinks() {
       <p v-if="message" class="ok-text">{{ message }}</p>
       <p v-if="hasTask" class="hint">当前任务 #{{ taskId }} · 状态 {{ taskStatus || '—' }} · 当前步骤 {{ currentStep }}</p>
 
-      <div v-if="taskId && currentAction" class="current-action-bar panel soft sticky-action" data-testid="planning-primary-bar">
-        <div>
+      <div v-if="currentAction" class="current-action-bar panel soft sticky-action" data-testid="planning-primary-bar">
+        <div style="min-width:0;flex:1">
           <strong>当前应执行：{{ currentAction.label }}</strong>
-          <p class="muted" style="margin:0.2rem 0 0">{{ stepBlockedReason(currentAction.action) || '点击后推进流程并刷新地图关联结果' }}</p>
+          <p class="muted" style="margin:0.2rem 0 0">
+            <template v-if="taskId">任务 #{{ taskId }} · 状态 {{ taskStatus || '—' }} · 步骤 {{ currentStep }}</template>
+            <template v-else>尚未选择任务：请先填写下方表单并执行创建，或从任务列表选择</template>
+          </p>
+          <p v-if="stepBlockedReason(currentAction.action)" class="error" style="margin:0.25rem 0 0;font-size:12px">
+            {{ stepBlockedReason(currentAction.action) }}
+          </p>
+          <p v-else class="muted" style="margin:0.25rem 0 0;font-size:12px">执行后将更新左侧结果，并尽量同步地图关联/覆盖图层</p>
         </div>
         <button
           class="btn"

@@ -233,7 +233,7 @@ export function createViewer(container: HTMLElement, basemap?: BasemapKey): Cesi
     navigationHelpButton: false,
     fullscreenButton: false,
     infoBox: false,
-    selectionIndicator: true,
+    selectionIndicator: false,
     terrain: undefined,
   })
 

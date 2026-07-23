@@ -13,6 +13,7 @@ import {
   shellLoading,
   shellSelected,
 } from '../gis/mapShell'
+import { mapDrawGeometry } from '../gis/mapTools'
 import { errMessage, pickId } from '../utils/errors'
 
 const route = useRoute()
@@ -138,6 +139,43 @@ async function setTab(key: string) {
 function syncTab() {
   const q = route.query.tab
   if (typeof q === 'string' && tabs.some((t) => t.key === q)) tab.value = q
+}
+
+
+function applyMapDrawToPlatform() {
+  const g = mapDrawGeometry.value
+  if (!g || !g.wkt) {
+    error.value = '请先用地图工具绘点或绘面（绘点=位置，绘面=覆盖示意）'
+    return
+  }
+  if (g.type === 'point') {
+    platformForm.value.locationWkt = g.wkt
+    message.value = '已将地图绘点写入平台位置 WKT'
+  } else {
+    // polygon: use centroid-ish first ring point as location if empty, store full polygon in location if needed
+    platformForm.value.locationWkt = g.wkt
+    message.value = '已将地图绘面写入平台位置/范围 WKT'
+  }
+  error.value = null
+}
+
+function applyMapDrawToSensor() {
+  const g = mapDrawGeometry.value
+  if (!g || !g.wkt) {
+    error.value = '请先用地图工具绘面（覆盖范围）或绘点'
+    return
+  }
+  if (g.type === 'point' && g.lon != null && g.lat != null) {
+    const lon = g.lon
+    const lat = g.lat
+    const d = 0.05
+    sensorForm.value.coverageWkt = `POLYGON((${lon - d} ${lat - d},${lon + d} ${lat - d},${lon + d} ${lat + d},${lon - d} ${lat + d},${lon - d} ${lat - d}))`
+    message.value = '已将绘点扩展为小范围覆盖写入传感器覆盖 WKT'
+  } else {
+    sensorForm.value.coverageWkt = g.wkt
+    message.value = '已将地图绘面写入传感器覆盖 WKT'
+  }
+  error.value = null
 }
 
 async function load() {
@@ -360,6 +398,7 @@ async function showOnMap() {
         <label>名称<input v-model="platformForm.name" /></label>
         <label>标识<input v-model="platformForm.identifier" /></label>
         <label>位置WKT<input v-model="platformForm.locationWkt" /></label>
+        <button class="btn ghost" type="button" @click="applyMapDrawToPlatform">采用地图绘制→位置</button>
         <label>所属单位<input v-model="platformForm.owner" /></label>
         <label>状态<input v-model="platformForm.status" /></label>
         <button class="btn" type="button" :disabled="pending" @click="createPlatform">新增平台</button>
@@ -394,6 +433,7 @@ async function showOnMap() {
         </label>
         <label>精度%<input v-model.number="sensorForm.accuracyPercent" type="number" /></label>
         <label>覆盖WKT<input v-model="sensorForm.coverageWkt" /></label>
+        <button class="btn ghost" type="button" @click="applyMapDrawToSensor">采用地图绘制→覆盖</button>
         <button class="btn" type="button" :disabled="pending" @click="createSensor">新增传感器</button>
       </div>
       <table class="table">

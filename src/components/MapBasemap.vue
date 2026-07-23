@@ -57,14 +57,24 @@ const bubbleStyle = computed(() => {
   if (!p) return { display: 'none' as const }
   const box = host || (document.querySelector('.map-basemap') as HTMLDivElement | null)
   if (!box) return { display: 'none' as const }
-  // Anchor above the feature point; only clamp to keep bubble inside map host
+  // Keep bubble clear of right map tools and open detail drawer
   const padX = 12
   const padTop = 8
   const bubbleW = 240
+  const toolCol = 56 // toolbar width + gap
+  const shell = document.querySelector('.app-shell') as HTMLElement | null
+  const drawerOpen = !!shell?.classList.contains('right-open')
+  let drawerW = 0
+  if (drawerOpen && shell) {
+    const raw = getComputedStyle(shell).getPropertyValue('--drawer-w').trim()
+    const n = parseFloat(raw)
+    drawerW = Number.isFinite(n) ? n + 20 : 380
+  }
+  const rightReserve = toolCol + drawerW
   let x = p.x
   let y = p.y - 14 // sit just above the point / arrow tip
   const minX = padX + bubbleW / 2
-  const maxX = Math.max(minX, box.clientWidth - padX - bubbleW / 2)
+  const maxX = Math.max(minX, box.clientWidth - padX - bubbleW / 2 - rightReserve)
   const minY = padTop + 24
   const maxY = Math.max(minY, box.clientHeight - 24)
   x = Math.min(Math.max(x, minX), maxX)

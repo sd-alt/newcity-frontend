@@ -6,6 +6,7 @@ import MapBasemap from './MapBasemap.vue'
 import {
   reloadShellLayers,
   selectShellFeature,
+  updateShellBubbleScreen,
   setShellBasemap,
   shellBasemap,
   shellBubbleOpen,
@@ -205,6 +206,12 @@ watch(
 
 watch(shellSelected, (v) => {
   if (v) rightOpen.value = true
+})
+
+watch(rightOpen, () => {
+  // drawer open/close changes safe area for bubble and toolbar
+  requestAnimationFrame(() => updateShellBubbleScreen())
+  setTimeout(() => updateShellBubbleScreen(), 220)
 })
 
 function toggleLeft() {

@@ -1465,9 +1465,21 @@ export async function drawAssociationLinks(
   if (!viewer || viewer.isDestroyed()) return 0
 
   if (options?.ensureLayers !== false) {
-    if (!cacheSensors.length || !cacheTasks.length) {
-      await reloadShellLayers('/planning', {})
+    // Always refresh sensors/tasks so association lines can resolve platform coordinates.
+    try {
+      const [sRes, tRes] = await Promise.all([api.getSensorGis(), api.getTaskGis()])
+      cacheSensors = asList((sRes.data as { features?: unknown })?.features ?? sRes.data)
+      cacheTasks = asList((tRes.data as { features?: unknown })?.features ?? tRes.data)
+    } catch {
+      if (!cacheSensors.length || !cacheTasks.length) {
+        await reloadShellLayers('/planning', {})
+      }
     }
+    // Clear filters that may hide linked sensors on the map.
+    shellFilters.sensorType = ''
+    shellFilters.sensorStatus = ''
+    shellFilters.taskStatus = ''
+    shellFilters.taskId = ''
     setShellVisibility({ showSensors: true, showData: false, showTasks: true })
     await rerenderShellLayers(false)
   }
@@ -1493,7 +1505,18 @@ export async function drawAssociationLinks(
   }> = []
 
   for (const link of links) {
-    const to = sensorLonLat(link.platformId)
+    let to = sensorLonLat(link.platformId)
+    if (!to) {
+      // one more chance after soft ensure
+      try {
+        const res = await api.getSensorGis()
+        cacheSensors = asList((res.data as { features?: unknown })?.features ?? res.data)
+        await rerenderShellLayers(false)
+      } catch {
+        /* ignore */
+      }
+      to = sensorLonLat(link.platformId)
+    }
     if (!to) continue
     const mode = link.mode || 'candidate'
     drawn.push({

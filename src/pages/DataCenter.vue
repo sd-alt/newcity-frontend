@@ -16,6 +16,7 @@ import {
   getCachedDataTimeExtent,
   patchShellFilters,
 } from '../gis/mapShell'
+import { mapDrawGeometry } from '../gis/mapTools'
 import { canByStatus, errMessage, isoNow, pickId } from '../utils/errors'
 
 const route = useRoute()
@@ -323,6 +324,25 @@ async function setTab(key: string) {
 function syncTab() {
   const t = route.query.tab
   if (typeof t === 'string' && tabs.some((x) => x.key === t)) tab.value = t
+}
+
+
+function applyMapDrawSpatial(target: 'live' | 'pull' = 'live') {
+  const g = mapDrawGeometry.value
+  if (!g || !g.wkt) {
+    error.value = '请先用地图工具绘点/绘面，再写入接入空间条件'
+    return
+  }
+  let wkt = g.wkt
+  if (g.type === 'point' && g.lon != null && g.lat != null) {
+    const lon = g.lon
+    const lat = g.lat
+    const delta = 0.08
+    wkt = `POLYGON((${lon - delta} ${lat - delta},${lon + delta} ${lat - delta},${lon + delta} ${lat + delta},${lon - delta} ${lat + delta},${lon - delta} ${lat - delta}))`
+  }
+  pullForm.value.spatialWkt = wkt
+  message.value = '已将地图绘制范围写入接入空间条件'
+  error.value = null
 }
 
 async function load() {
@@ -649,7 +669,6 @@ async function startLivePull() {
     const res = await api.startLiveDataSource(pullForm.value.sourceId, body)
     liveStatus.value = (res.data as any)?.live || null
     startLivePolling(pullForm.value.sourceId)
-    try { await showDataOnMap() } catch { /* map optional */ }
     try { await showDataOnMap() } catch { /* map optional */ }
     message.value = '实时接入已启动，间隔 ' +
       String((res.data as any)?.live?.intervalSeconds || liveIntervalSeconds.value) +
@@ -1024,6 +1043,7 @@ onUnmounted(() => {
         <label>空间WKT（可选，默认用平台位置）<input v-model="pullForm.spatialWkt" placeholder="POINT(114.1 22.6)" /></label>
         <label>定时间隔秒<input v-model.number="liveIntervalSeconds" type="number" min="5" step="5" /></label>
         <button class="btn" type="button" :disabled="pending" @click="pullSource">立即拉取一次</button>
+        <button class="btn ghost" type="button" @click="applyMapDrawSpatial('live')">采用地图范围→接入</button>
         <button class="btn" type="button" :disabled="pending" @click="startLivePull">启动定时接入</button>
         <button class="btn ghost" type="button" :disabled="pending" @click="stopLivePull">停止定时接入</button>
         <button class="btn ghost" type="button" :disabled="pending" @click="refreshLiveStatus()">刷新接入状态</button>
