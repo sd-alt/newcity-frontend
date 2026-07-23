@@ -374,6 +374,12 @@ async function createTask() {
     advanceTo('submit')
     message.value = '任务已创建 #' + data.id + '，请提交任务'
     try { await showPlanningWorkspace('/planning') } catch { /* map refresh optional */ }
+    try {
+      await selectShellFeature('task', String(data.id), { openBubble: true, fly: true })
+      if (researchAreaWkt.value) {
+        await drawPlanningCoverageOverlay({ taskWkt: researchAreaWkt.value, fit: false })
+      }
+    } catch { /* map optional */ }
     await loadLists()
   } catch (err) {
     error.value = errMessage(err, '创建任务失败')

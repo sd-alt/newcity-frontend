@@ -469,8 +469,14 @@ tr.active td {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  max-width: calc(100% - 80px); /* keep clear of right toolbar */
+  max-width: calc(100% - 120px); /* clear right toolbar + bottom 详情按钮 */
   pointer-events: none;
+}
+.app-shell.right-open .map-hud-bottom {
+  max-width: calc(100% - var(--drawer-w) - 90px);
+}
+.app-shell.bottom-open .map-hud-bottom {
+  bottom: 12px; /* bottom tray is outside map-main; keep inside map host */
 }
 .map-hud-bottom .map-pill.action { pointer-events: auto; }
 .map-pill {

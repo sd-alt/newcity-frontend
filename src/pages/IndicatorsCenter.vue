@@ -273,7 +273,7 @@ async function createInst() {
   pending.value = true
   error.value = null
   try {
-    await api.createInstance({
+    const created = await api.createInstance({
       defId: Number(instForm.value.defId),
       instanceName: instForm.value.instanceName,
       scaleId: Number(instForm.value.scaleId),
@@ -284,8 +284,12 @@ async function createInst() {
       spatialWkt: instForm.value.spatialWkt,
       targetAccuracy: Number(instForm.value.targetAccuracy),
     })
-    message.value = '实例已生成'
+    const newId = pickId(created.data) || (created.data as { id?: string | number } | null)?.id
+    message.value = newId != null ? `实例已生成 #${newId}` : '实例已生成'
     try { await showIndicatorsWorkspace('/indicators') } catch { /* map refresh optional */ }
+    if (newId != null && String(instForm.value.spatialWkt || '').trim()) {
+      try { await selectShellFeature('indicator', String(newId), { openBubble: true, fly: true }) } catch { /* optional */ }
+    }
     instForm.value.instanceName = ''
     await loadBase()
   } catch (err) {
@@ -418,6 +422,8 @@ async function setInstanceStatus(id: unknown, status: string) {
     await api.updateInstance(String(id), { status })
     message.value = '实例状态已更新为 ' + status
     await loadBase()
+    try { await showIndicatorsWorkspace('/indicators') } catch { /* map refresh optional */ }
+    try { await selectShellFeature('indicator', String(id), { openBubble: true, fly: false }) } catch { /* optional */ }
     if (tab.value === 'versions') await loadInstanceVersions()
   } catch (err) {
     error.value = errMessage(err, '更新实例状态失败')

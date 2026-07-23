@@ -487,7 +487,15 @@ export async function loadAssociationLinksLayer(
     supplement: Cesium.Color.fromCssColorString('#F59E0B').withAlpha(0.95),
   }
   for (const link of links) {
-    const color = modeColor[link.mode || 'candidate'] || modeColor.candidate
+    let color = modeColor[link.mode || 'candidate'] || modeColor.candidate
+    // candidate mode: score gradient grey -> yellow -> green
+    if ((link.mode || 'candidate') === 'candidate' && link.score != null && Number.isFinite(Number(link.score))) {
+      const s = Math.max(0, Math.min(100, Number(link.score)))
+      if (s >= 80) color = Cesium.Color.fromCssColorString('#22C55E').withAlpha(0.95)
+      else if (s >= 60) color = Cesium.Color.fromCssColorString('#84CC16').withAlpha(0.92)
+      else if (s >= 40) color = Cesium.Color.fromCssColorString('#F59E0B').withAlpha(0.92)
+      else color = Cesium.Color.fromCssColorString('#94A3B8').withAlpha(0.85)
+    }
     const positions = Cesium.Cartesian3.fromDegreesArray([
       link.fromLon,
       link.fromLat,

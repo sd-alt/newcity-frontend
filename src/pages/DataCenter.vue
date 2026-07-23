@@ -619,6 +619,13 @@ async function pullSource() {
     message.value = '实时拉取成功，写入 ' + String(count ?? 0) + ' 条记录'
     await load()
     await loadSourceAudits(pullForm.value.sourceId)
+    try {
+      await showDataOnMap()
+      const payload = res.data as Record<string, unknown> | null
+      const rec = (payload?.record || payload?.data || payload) as Record<string, unknown> | null
+      const dataId = rec?.dataId ?? rec?.id ?? payload?.dataId ?? payload?.id
+      if (dataId != null) await selectShellFeature('data', String(dataId), { openBubble: true, fly: true })
+    } catch { /* map optional */ }
   } catch (err) {
     error.value = errMessage(err, '实时拉取失败')
   } finally {
