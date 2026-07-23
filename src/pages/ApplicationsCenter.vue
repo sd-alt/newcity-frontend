@@ -5,6 +5,7 @@ import * as api from '../api/endpoints'
 import {
   reloadShellLayers,
   patchShellFilters,
+  selectShellFeature,
   shellCounts,
   shellFilters,
   shellLoading,
@@ -29,6 +30,14 @@ const taskStats = ref<Record<string, unknown> | null>(null)
 const workbench = ref<Record<string, unknown> | null>(null)
 const layers = ref<Record<string, unknown>[]>([])
 const gisPreview = ref<Record<string, unknown> | null>(null)
+const previewIds = computed(() => {
+  const g = gisPreview.value as Record<string, { firstId?: string }> | null
+  return {
+    sensor: String(g?.sensors?.firstId || ''),
+    data: String(g?.data?.firstId || ''),
+    task: String(g?.tasks?.firstId || ''),
+  }
+})
 
 const resourceFilter = ref({ typeCode: '', status: '', owner: '', keyword: '' })
 const dataFilter = ref({ dataType: '', qualityStatus: '', accessLevel: '', isQuarantined: '' })
@@ -142,23 +151,43 @@ async function loadWorkbench() {
 async function loadGisPreview() {
   try {
     const [s, d, t] = await Promise.all([api.getSensorGis(), api.getDataGis(), api.getTaskGis()])
+    const sFeats = ((s.data as { features?: Array<Record<string, unknown>> }).features || [])
+    const dFeats = ((d.data as { features?: Array<Record<string, unknown>> }).features || [])
+    const tFeats = ((t.data as { features?: Array<Record<string, unknown>> }).features || [])
     gisPreview.value = {
       sensors: {
         total: (s.data as { total?: number }).total,
-        features: ((s.data as { features?: unknown[] }).features || []).length,
+        features: sFeats.length,
+        firstId: sFeats[0] ? String(sFeats[0].platformId ?? sFeats[0].id ?? '') : '',
       },
       data: {
         total: (d.data as { total?: number }).total,
-        features: ((d.data as { features?: unknown[] }).features || []).length,
+        features: dFeats.length,
+        firstId: dFeats[0] ? String(dFeats[0].id ?? '') : '',
       },
       tasks: {
         total: (t.data as { total?: number }).total,
-        features: ((t.data as { features?: unknown[] }).features || []).length,
+        features: tFeats.length,
+        firstId: tFeats[0] ? String(tFeats[0].id ?? '') : '',
       },
     }
   } catch (err) {
     error.value = errMessage(err, 'GIS 预览加载失败')
   }
+}
+
+async function locatePreview(kind: 'sensor' | 'data' | 'task') {
+  const prev = gisPreview.value as Record<string, { firstId?: string; features?: number }> | null
+  const bucket = prev?.[kind === 'sensor' ? 'sensors' : kind === 'data' ? 'data' : 'tasks']
+  const id = String(bucket?.firstId || '').trim()
+  if (!id) {
+    message.value = '当前没有可定位的' + (kind === 'sensor' ? '传感器' : kind === 'data' ? '数据' : '任务')
+    return
+  }
+  const ok = await selectShellFeature(kind, id, { openBubble: true, fly: true })
+  message.value = ok
+    ? '已在地图定位' + (kind === 'sensor' ? '传感器' : kind === 'data' ? '数据' : '任务') + ' #' + id
+    : '定位失败：未找到对应空间要素'
 }
 
 function kindLabel(kind: unknown) {
@@ -635,6 +664,11 @@ async function filterTasksByStatus(status: unknown) {
     <section v-if="tab === 'gis'" class="panel">
       <h2>GIS 综合展示</h2>
       <p class="muted">直接控制全屏底图上的业务图层（不再嵌套第二张地图）。{{ shellStatus }}</p>
+      <div class="form-row" style="margin-top:0.5rem;flex-wrap:wrap;gap:0.4rem">
+        <button class="btn ghost" type="button" :disabled="!previewIds.sensor" @click="locatePreview('sensor')">定位首个传感器</button>
+        <button class="btn ghost" type="button" :disabled="!previewIds.data" @click="locatePreview('data')">定位首条数据</button>
+        <button class="btn ghost" type="button" :disabled="!previewIds.task" @click="locatePreview('task')">定位首个任务</button>
+      </div>
       <div class="form-row">
         <button class="btn" type="button" :disabled="shellLoading" @click="filterMapByStat('sensors')">仅显示传感器</button>
         <button class="btn" type="button" :disabled="shellLoading" @click="filterMapByStat('data')">仅显示监测数据</button>
@@ -642,7 +676,6 @@ async function filterTasksByStatus(status: unknown) {
         <button class="btn ghost" type="button" :disabled="shellLoading" @click="filterMapByStat('all')">显示全部图层</button>
         <button class="btn ghost" type="button" :disabled="shellLoading" @click="mapShowIndicators">仅指标范围</button>
         <button class="btn ghost" type="button" :disabled="shellLoading" @click="mapRefresh">刷新图层</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading" @click="mapRefresh">刷新底图图层</button>
       </div>
       <div class="form-row" style="margin-top:0.6rem">
         <label class="check"><input type="checkbox" :checked="shellFilters.showSensors" @change="toggleShellLayer('showSensors', $event)" /> 传感器 <span class="badge">{{ shellCounts.sensors }}</span></label>

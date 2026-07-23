@@ -488,6 +488,63 @@ function bindPick(viewer: Viewer) {
 }
 
 
+/** Ensure target kind is loaded/visible on map. Always refresh on force. */
+async function ensureFeatureOnMap(kind: ShellFeatureKind, forceRefresh = false): Promise<void> {
+  if (kind === 'sensor') {
+    setShellVisibility({ showSensors: true })
+    // Locate from list should not be blocked by left-panel filters.
+    shellFilters.sensorType = ''
+    shellFilters.sensorStatus = ''
+    if (forceRefresh || !cacheSensors.length) {
+      try {
+        const res = await api.getSensorGis()
+        cacheSensors = asList((res.data as { features?: unknown })?.features ?? res.data)
+      } catch {
+        /* ignore */
+      }
+    }
+  } else if (kind === 'data') {
+    setShellVisibility({ showData: true })
+    shellFilters.dataQuality = ''
+    shellFilters.dataTimeStart = ''
+    shellFilters.dataTimeEnd = ''
+    if (forceRefresh || !cacheData.length) {
+      try {
+        const res = await api.getDataGis()
+        cacheData = asList((res.data as { features?: unknown })?.features ?? res.data)
+      } catch {
+        /* ignore */
+      }
+    }
+  } else if (kind === 'task') {
+    setShellVisibility({ showTasks: true })
+    shellFilters.taskStatus = ''
+    shellFilters.taskId = ''
+    if (forceRefresh || !cacheTasks.length) {
+      try {
+        const res = await api.getTaskGis()
+        cacheTasks = asList((res.data as { features?: unknown })?.features ?? res.data)
+      } catch {
+        /* ignore */
+      }
+    }
+  } else if (kind === 'indicator') {
+    if (forceRefresh || !cacheIndicators.length) {
+      try {
+        const res = await api.listInstances('?pageSize=100')
+        cacheIndicators = asList(res.data).filter((r) =>
+          String(r.spatialWkt || r.geometryWkt || '').trim(),
+        )
+      } catch {
+        /* ignore */
+      }
+    }
+  } else {
+    return
+  }
+  await rerenderShellLayers(false)
+}
+
 /** List/search -> map: fly, highlight, bubble, detail */
 export async function selectShellFeature(
   kind: ShellFeatureKind,
@@ -497,59 +554,24 @@ export async function selectShellFeature(
   const viewer = shellViewer.value
   if (!viewer || viewer.isDestroyed()) return false
   const sid = String(id)
+
+  // Always surface the target layer first so list/map selection is visible.
+  if (kind === 'sensor') setShellVisibility({ showSensors: true })
+  else if (kind === 'data') setShellVisibility({ showData: true })
+  else if (kind === 'task') setShellVisibility({ showTasks: true })
+
   let entity = findEntityByBiz(kind, sid)
 
-  if (!entity) {
-    if (kind === 'sensor') {
-      setShellVisibility({ showSensors: true })
-      if (!cacheSensors.length) {
-        try {
-          const res = await api.getSensorGis()
-          cacheSensors = asList((res.data as { features?: unknown })?.features ?? res.data)
-        } catch {
-          /* ignore */
-        }
-      }
-      await rerenderShellLayers(false)
-      entity = findEntityByBiz(kind, sid)
-    } else if (kind === 'data') {
-      setShellVisibility({ showData: true })
-      if (!cacheData.length) {
-        try {
-          const res = await api.getDataGis()
-          cacheData = asList((res.data as { features?: unknown })?.features ?? res.data)
-        } catch {
-          /* ignore */
-        }
-      }
-      await rerenderShellLayers(false)
-      entity = findEntityByBiz(kind, sid)
-    } else if (kind === 'task') {
-      setShellVisibility({ showTasks: true })
-      if (!cacheTasks.length) {
-        try {
-          const res = await api.getTaskGis()
-          cacheTasks = asList((res.data as { features?: unknown })?.features ?? res.data)
-        } catch {
-          /* ignore */
-        }
-      }
-      await rerenderShellLayers(false)
-      entity = findEntityByBiz(kind, sid)
-    } else if (kind === 'indicator') {
-      if (!cacheIndicators.length) {
-        try {
-          const res = await api.listInstances('?pageSize=100')
-          cacheIndicators = asList(res.data).filter((r) =>
-            String(r.spatialWkt || r.geometryWkt || '').trim(),
-          )
-        } catch {
-          /* ignore */
-        }
-      }
-      await rerenderShellLayers(false)
-      entity = findEntityByBiz(kind, sid)
-    }
+  // Soft ensure: show layer and render from existing cache first.
+  if (!entity && kind !== 'unknown') {
+    await ensureFeatureOnMap(kind, false)
+    entity = findEntityByBiz(kind, sid)
+  }
+
+  // Hard ensure: always re-fetch GIS when still missing (stale cache / wrong center).
+  if (!entity && kind !== 'unknown') {
+    await ensureFeatureOnMap(kind, true)
+    entity = findEntityByBiz(kind, sid)
   }
 
   if (!entity) {
