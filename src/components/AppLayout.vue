@@ -8,9 +8,12 @@ import {
   selectShellFeature,
   setShellBasemap,
   shellBasemap,
+  shellBubbleOpen,
   shellCounts,
   shellAlerts,
+  shellPickScreen,
   shellSelected,
+  shellViewer,
   type ShellFeatureKind,
 } from '../gis/mapShell'
 import type { BasemapKey } from '../gis/mapConfig'
@@ -244,7 +247,11 @@ function kindLabel(kind: ShellFeatureKind) {
   if (kind === 'data') return '监测数据'
   if (kind === 'task') return '观测任务'
   if (kind === 'indicator') return '指标实例'
-  if (kind === 'unknown') return '业务对象'
+  if (kind === 'unknown') {
+    const n = String(shellSelected.value?.name || '')
+    if (n.includes('算法')) return '算法任务'
+    return '业务对象'
+  }
   return kind
 }
 
@@ -261,7 +268,21 @@ async function jumpSelectedCenter() {
 function reflySelected() {
   const s = shellSelected.value
   if (!s) return
-  void selectShellFeature(s.kind, s.id)
+  if (s.kind === 'unknown') {
+    const viewer = shellViewer.value
+    if (viewer && !viewer.isDestroyed()) {
+      shellPickScreen.value = {
+        x: Math.round(viewer.scene.canvas.clientWidth * 0.5),
+        y: Math.round(viewer.scene.canvas.clientHeight * 0.35),
+      }
+    } else if (!shellPickScreen.value) {
+      shellPickScreen.value = { x: 320, y: 180 }
+    }
+    shellBubbleOpen.value = true
+    rightOpen.value = true
+    return
+  }
+  void selectShellFeature(s.kind, s.id, { openBubble: true, fly: true })
 }
 
 async function runSearch() {

@@ -533,8 +533,10 @@ function resultMeta(t: Record<string, unknown>) {
 
 async function inspectTask(id: unknown) {
   try {
+    error.value = null
     const res = await api.getProcessingTask(String(id))
     selectedTask.value = res.data as Record<string, unknown>
+    presentAlgoSelection(selectedTask.value || {}, '', '')
     await locateLinkedOnMap(selectedTask.value || {})
   } catch (err) {
     error.value = errMessage(err, '读取任务详情失败')
@@ -576,29 +578,32 @@ async function showAlgoMap() {
 
 
 function presentAlgoSelection(task: Record<string, unknown>, studyWkt: string, resultWkt: string) {
-  const id = String(task.id ?? "")
+  const id = String(task.id ?? '')
   const code = String(task.code || task.name || id)
-  const status = String(task.status || "-")
+  const status = String(task.status || '-')
   shellSelected.value = {
-    kind: "unknown",
+    kind: 'unknown',
     id,
-    name: `算法任务 ${code}`,
+    name: '算法任务 ' + code,
     description: [
-      `状态: ${status}`,
-      `进度: ${task.progress ?? "-"}`,
-      studyWkt ? "输入区域: 有" : "输入区域: 无",
-      resultWkt ? "结果区域: 有" : "结果区域: 无",
-      `ID: ${id}`,
-    ].join("\n"),
+      '状态: ' + status,
+      '进度: ' + String(task.progress ?? '-'),
+      studyWkt ? '输入区域: 有' : '输入区域: 无',
+      resultWkt ? '结果区域: 有' : '结果区域: 无',
+      'ID: ' + id,
+    ].join('\n'),
   }
   const viewer = shellViewer.value
   if (viewer && !viewer.isDestroyed()) {
+    const canvas = viewer.scene.canvas
     shellPickScreen.value = {
-      x: Math.round(viewer.scene.canvas.clientWidth * 0.5),
-      y: Math.round(viewer.scene.canvas.clientHeight * 0.35),
+      x: Math.round(canvas.clientWidth * 0.5),
+      y: Math.round(canvas.clientHeight * 0.35),
     }
-    shellBubbleOpen.value = true
+  } else {
+    shellPickScreen.value = { x: 320, y: 180 }
   }
+  shellBubbleOpen.value = true
 }
 
 async function locateLinkedOnMap(task: Record<string, unknown>) {
@@ -658,7 +663,8 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
 
   if (planList.length) {
     const id = String(planList[0])
-    const ok = await selectShellFeature('task', id, { openBubble: true, fly: !studyWkt })
+    const ok = await selectShellFeature('task', id, { openBubble: false, fly: !studyWkt })
+    presentAlgoSelection(task, studyWkt, resultWkt)
     try {
       const tres = await api.getTask(id)
       const twkt = String((tres.data as { researchAreaWkt?: string })?.researchAreaWkt || '')
@@ -676,7 +682,8 @@ async function locateLinkedOnMap(task: Record<string, unknown>) {
 
   if (dataList.length) {
     const id = String(dataList[0])
-    const ok = await selectShellFeature('data', id, { openBubble: true, fly: !studyWkt })
+    const ok = await selectShellFeature('data', id, { openBubble: false, fly: !studyWkt })
+    presentAlgoSelection(task, studyWkt, resultWkt)
     message.value = ok || studyWkt || resultWkt
       ? `已定位关联监测数据 #${id}`
       : `已上图；未找到关联数据 #${id}`
