@@ -30,8 +30,16 @@ export function errMessage(err: unknown, fallback = '操作失败') {
       const obj = body as Record<string, unknown>
       if (typeof obj.message === 'string' && obj.message && obj.message !== 'success') {
         const nested = obj.data != null ? flattenErrors(obj.data) : []
+        // 关联删除等业务冲突：直接展示业务文案，避免吓人的纯状态码
+        if (err.status === 409) {
+          if (nested.length) return obj.message + '：' + nested.slice(0, 4).join('；')
+          return obj.message
+        }
         if (nested.length) return obj.message + '：' + nested.slice(0, 4).join('；')
         return obj.message + ' (HTTP ' + err.status + ')'
+      }
+      if (err.status === 409) {
+        return '该记录已被其他数据引用，不能删除'
       }
       const parts = flattenErrors(obj).filter((x) => x && x !== 'success')
       if (parts.length) return parts.slice(0, 5).join('；') + ' (HTTP ' + err.status + ')'

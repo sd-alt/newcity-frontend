@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
 import {
@@ -72,6 +72,24 @@ const pullForm = ref({
 const sourceAudits = ref<Record<string, unknown>[]>([])
 const selectedAuditSourceId = ref('')
 const liveStatus = ref<Record<string, unknown> | null>(null)
+let livePollTimer: number | null = null
+
+function stopLivePolling() {
+  if (livePollTimer != null) {
+    window.clearInterval(livePollTimer)
+    livePollTimer = null
+  }
+}
+
+function startLivePolling(sourceId?: string) {
+  stopLivePolling()
+  const id = sourceId || pullForm.value.sourceId
+  if (!id) return
+  livePollTimer = window.setInterval(() => {
+    void refreshLiveStatus(String(id))
+  }, 4000)
+}
+
 
 function sourceStatusLabel(status: unknown) {
   const s = String(status || '').toLowerCase()
@@ -487,11 +505,18 @@ async function refreshLiveStatus(sourceId?: string) {
   const id = sourceId || pullForm.value.sourceId || selectedAuditSourceId.value
   if (!id) {
     liveStatus.value = null
+    stopLivePolling()
     return
   }
   try {
     const res = await api.getLiveDataSourceStatus(id)
     liveStatus.value = (res.data as any)?.live || (res.data as any) || null
+    const st = String((liveStatus.value as any)?.status || '').toLowerCase()
+    if (st === 'running' || st === 'active' || st === 'pulling') {
+      if (livePollTimer == null) startLivePolling(String(id))
+    } else if (st === 'stopped' || st === 'idle' || st === 'error' || st === 'failed') {
+      stopLivePolling()
+    }
   } catch {
     liveStatus.value = null
   }
@@ -518,6 +543,7 @@ async function startLivePull() {
     if (pullForm.value.spatialWkt) body.spatialWkt = pullForm.value.spatialWkt
     const res = await api.startLiveDataSource(pullForm.value.sourceId, body)
     liveStatus.value = (res.data as any)?.live || null
+    startLivePolling(pullForm.value.sourceId)
     message.value = '实时接入已启动，间隔 ' +
       String((res.data as any)?.live?.intervalSeconds || liveIntervalSeconds.value) +
       ' 秒'
@@ -540,6 +566,7 @@ async function stopLivePull() {
   try {
     const res = await api.stopLiveDataSource(pullForm.value.sourceId)
     liveStatus.value = (res.data as any)?.live || null
+    stopLivePolling()
     message.value = '实时接入已停止'
     await loadSourceAudits(pullForm.value.sourceId)
   } catch (err) {
@@ -707,6 +734,10 @@ async function filterDataQualityOnMap(quality: string) {
     : `已清除质量筛选，显示全部数据 ${shellCounts.data} 个`
 }
 
+
+onUnmounted(() => {
+  stopLivePolling()
+})
 </script>
 
 <template>

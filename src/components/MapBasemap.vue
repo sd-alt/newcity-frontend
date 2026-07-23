@@ -357,7 +357,7 @@ function setHost(el: unknown) {
 </script>
 
 <template>
-  <div class="map-basemap" :class="{ 'is-loading': shellLoading }">
+  <div class="map-basemap" :class="{ 'is-loading': shellLoading, 'tool-active': mapToolMode !== 'none' }">
     <div class="map-basemap-host" :ref="setHost"></div>
 
     <div class="map-toolbar" aria-label="地图工具">

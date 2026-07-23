@@ -1110,11 +1110,15 @@ html, body, #app {
   background: #fff;
 }
 .step-item.done { border-color: #86EFAC; background: #F0FDF4; }
+.step-item { cursor: pointer; transition: border-color .15s, background .15s; }
+.step-item:hover { border-color: #93C5FD; }
 .step-item.current {
   border-color: #1677FF;
   background: rgba(22, 119, 255, 0.08);
   box-shadow: inset 3px 0 0 #1677FF;
 }
+.step-item.blocked { opacity: 0.72; cursor: not-allowed; background: #F9FAFB; }
+.step-lock { margin-top: 0.2rem; font-size: 11px; color: #B45309; line-height: 1.3; }
 .step-title { font-size: 13px; font-weight: 600; color: #0F3D66; }
 .step-desc { font-size: 11px; color: #6B7280; margin-top: 0.1rem; }
 tr.row-click.selected, .row-click.selected {
@@ -1337,4 +1341,11 @@ button.card.stat.clickable:hover {
 .layer-tree h3 {
   margin: 0 0 0.25rem;
   font-size: 14px;
+}
+
+
+/* 测量/绘制工具激活时，地图区域使用十字光标 */
+.map-basemap.tool-active .map-basemap-host,
+.map-basemap.tool-active canvas {
+  cursor: crosshair !important;
 }

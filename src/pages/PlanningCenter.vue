@@ -169,10 +169,50 @@ function canRun(step: StepKey) {
   if (user.value == null) return false
   if (step === 'create') return currentStep.value === 'create' && taskId.value == null
   if (taskId.value == null) return false
-  // 科学交互：当前步可执行；已完成步骤可重跑；不可跳过未完成步骤
+  // 当前步可执行；已完成步骤可重跑；不可跳过未完成步骤
   if (currentStep.value === step) return true
   if (doneSteps.value.has(step)) return true
   return false
+}
+
+function stepBlockedReason(step: StepKey): string {
+  if (pending.value) return '请等待当前操作完成'
+  if (user.value == null) return '请先登录'
+  if (step === 'create') {
+    if (taskId.value != null) return '当前已有任务，请点“新建任务”后再创建'
+    if (currentStep.value !== 'create') return '当前不在创建步骤'
+    return ''
+  }
+  if (taskId.value == null) return '请先创建并选中任务'
+  if (currentStep.value === step || doneSteps.value.has(step)) return ''
+  const curIdx = STEP_ORDER.indexOf(currentStep.value)
+  const stepIdx = STEP_ORDER.indexOf(step)
+  if (stepIdx > curIdx) {
+    const prev = STEP_ORDER[stepIdx - 1]
+    const prevTitle = STEPS.find((s) => s.key === prev)?.title || String(prev)
+    return '请先完成：' + prevTitle
+  }
+  return '该步骤当前不可执行'
+}
+
+function onStepClick(step: StepKey) {
+  if (step === currentStep.value) return
+  if (doneSteps.value.has(step) || step === 'create' && taskId.value == null) {
+    currentStep.value = step
+    message.value = '已切换到步骤：' + (STEPS.find((s) => s.key === step)?.title || step)
+    error.value = null
+    return
+  }
+  // 允许查看当前之前已完成链路中的任一步
+  const curIdx = STEP_ORDER.indexOf(currentStep.value)
+  const stepIdx = STEP_ORDER.indexOf(step)
+  if (stepIdx < curIdx) {
+    currentStep.value = step
+    message.value = '已回看步骤：' + (STEPS.find((s) => s.key === step)?.title || step) + '（可重跑该步）'
+    error.value = null
+    return
+  }
+  error.value = stepBlockedReason(step) || '步骤未解锁'
 }
 
 function applyStepProgress(next: StepKey, options: { rewindAfter?: boolean } = {}) {
@@ -271,7 +311,7 @@ async function createTask() {
   pending.value = true
   error.value = null
   message.value = null
-    try { await showPlanningWorkspace('/planning') } catch { /* map refresh optional */ }
+  try { await showPlanningWorkspace('/planning') } catch { /* map refresh optional */ }
   try {
     const inst = instances.value.find((i) => String(i.id) === instanceId.value)
     const created = await api.createTask({
@@ -1203,12 +1243,26 @@ async function clearMapLinks() {
             v-for="(s, i) in STEPS"
             :key="s.key"
             class="step-item"
-            :class="{ current: currentStep === s.key, done: doneSteps.has(s.key) || stepIndex > i }"
+            :class="{
+              current: currentStep === s.key,
+              done: doneSteps.has(s.key) || stepIndex > i,
+              blocked: !doneSteps.has(s.key) && currentStep !== s.key && stepIndex < i && !(s.key === 'create' && taskId == null),
+            }"
+            role="button"
+            tabindex="0"
+            :title="stepBlockedReason(s.key) || s.desc"
+            @click="onStepClick(s.key)"
+            @keydown.enter.prevent="onStepClick(s.key)"
           >
             <div class="step-title">{{ s.title }}</div>
             <div class="step-desc">{{ s.desc }}</div>
+            <div v-if="stepBlockedReason(s.key)" class="step-lock">{{ stepBlockedReason(s.key) }}</div>
           </div>
         </div>
+        <p v-if="taskId" class="muted" style="margin: 0.35rem 0 0.6rem">
+          当前步骤：{{ STEPS.find((x) => x.key === currentStep)?.title || currentStep }}；
+          已完成 {{ doneSteps.size }} 步。点击已完成步骤可回看/重跑。
+        </p>
 
         <div class="grid-2">
           <section class="panel">
@@ -1262,16 +1316,16 @@ async function clearMapLinks() {
           <section class="panel">
             <h2>分步业务操作</h2>
             <div class="action-stack">
-              <button class="btn" type="button" :disabled="canRun('create') === false" @click="createTask">创建任务</button>
+              <button class="btn" type="button" :disabled="canRun('create') === false" :title="stepBlockedReason('create') || '创建观测任务'" @click="createTask">创建任务</button>
               <button class="btn ghost" type="button" :disabled="taskId == null || pending || (taskStatus !== '' && taskStatus !== 'draft')" @click="bindSelectedIndicator">追加当前指标到任务（仅草稿）</button>
-              <button class="btn" type="button" :disabled="canRun('submit') === false" @click="submitTask">提交任务</button>
-              <button class="btn" type="button" :disabled="canRun('reverse') === false" @click="requirementReverse">需求反算</button>
-              <button class="btn" type="button" :disabled="canRun('candidates') === false" @click="confirmCandidates">确认候选评分</button>
-              <button class="btn" type="button" :disabled="canRun('basic') === false" @click="basicAssociation">基础关联</button>
-              <button class="btn" type="button" :disabled="canRun('optimize') === false" @click="optimizeAssociation">优化关联</button>
-              <button class="btn" type="button" :disabled="canRun('supplement') === false" @click="supplementAssociation">增补关联</button>
-              <button class="btn" type="button" :disabled="canRun('evaluate') === false" @click="requirementEvaluation">满足度评估</button>
-              <button class="btn" type="button" :disabled="canRun('output') === false" @click="planningOutput">规划输出</button>
+              <button class="btn" type="button" :disabled="canRun('submit') === false" :title="stepBlockedReason('submit') || '提交任务'" @click="submitTask">提交任务</button>
+              <button class="btn" type="button" :disabled="canRun('reverse') === false" :title="stepBlockedReason('reverse') || '需求反算'" @click="requirementReverse">需求反算</button>
+              <button class="btn" type="button" :disabled="canRun('candidates') === false" :title="stepBlockedReason('candidates') || '确认候选评分'" @click="confirmCandidates">确认候选评分</button>
+              <button class="btn" type="button" :disabled="canRun('basic') === false" :title="stepBlockedReason('basic') || '基础关联'" @click="basicAssociation">基础关联</button>
+              <button class="btn" type="button" :disabled="canRun('optimize') === false" :title="stepBlockedReason('optimize') || '优化关联'" @click="optimizeAssociation">优化关联</button>
+              <button class="btn" type="button" :disabled="canRun('supplement') === false" :title="stepBlockedReason('supplement') || '增补关联'" @click="supplementAssociation">增补关联</button>
+              <button class="btn" type="button" :disabled="canRun('evaluate') === false" :title="stepBlockedReason('evaluate') || '满足度评估'" @click="requirementEvaluation">满足度评估</button>
+              <button class="btn" type="button" :disabled="canRun('output') === false" :title="stepBlockedReason('output') || '规划输出'" @click="planningOutput">规划输出</button>
               <button class="btn ghost" type="button" :disabled="taskId == null" @click="loadCandidates(true)">查看候选与评分</button>
             </div>
             <p v-if="pending" class="hint">处理中，请勿重复点击…</p>
