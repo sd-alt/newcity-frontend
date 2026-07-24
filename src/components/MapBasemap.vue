@@ -393,21 +393,61 @@ function setHost(el: unknown) {
 
     <div class="map-tool-rail" aria-label="地图工具栏">
       <div class="map-toolbar" aria-label="地图工具">
-        <button type="button" class="map-tool" title="放大" @click="zoomIn">+</button>
-        <button type="button" class="map-tool" title="缩小" @click="zoomOut">-</button>
-        <button type="button" class="map-tool" title="复位" @click="resetShellView">复</button>
-        <button type="button" class="map-tool" title="适应" @click="fitShellView">适</button>
-        <button type="button" class="map-tool" :class="{ active: panel === 'basemap' }" title="底图" @click="togglePanel('basemap')">图</button>
-        <button type="button" class="map-tool" :class="{ active: panel === 'layers' }" title="图层" @click="togglePanel('layers')">层</button>
-        <button type="button" class="map-tool" :class="{ active: panel === 'legend' }" title="图例" @click="togglePanel('legend')">例</button>
-        <button type="button" class="map-tool" :class="{ active: mapToolMode === 'measure-line' }" title="测距" @click="activateTool('measure-line')">距</button>
-        <button type="button" class="map-tool" :class="{ active: mapToolMode === 'measure-area' }" title="测面" @click="activateTool('measure-area')">面</button>
-        <button type="button" class="map-tool" :class="{ active: mapToolMode === 'draw-point' }" title="绘点" @click="activateTool('draw-point')">点</button>
-        <button type="button" class="map-tool" :class="{ active: mapToolMode === 'draw-polygon' }" title="绘面" @click="activateTool('draw-polygon')">绘</button>
-        <button type="button" class="map-tool" :class="{ active: mapToolMode === 'box-select' }" title="框选" @click="activateTool('box-select')">框</button>
-        <button type="button" class="map-tool" title="清除" @click="clearAll">清</button>
-        <button type="button" class="map-tool" title="刷新" :disabled="shellLoading" @click="retryLayers">刷</button>
-        <button type="button" class="map-tool" title="全屏" @click="goFullscreen">全</button>
+        <div class="map-tool-group" aria-label="视图控制">
+          <button type="button" class="map-tool" title="放大" aria-label="放大" @click="zoomIn">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21M10.5 7v7M7 10.5h7"/></svg>
+          </button>
+          <button type="button" class="map-tool" title="缩小" aria-label="缩小" @click="zoomOut">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21M7 10.5h7"/></svg>
+          </button>
+          <button type="button" class="map-tool" title="复位到默认视角" aria-label="复位到默认视角" @click="resetShellView">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11a8 8 0 1 1 2.3 5.7"/><path d="M4 5v6h6"/></svg>
+          </button>
+          <button type="button" class="map-tool" title="适应当前图层" aria-label="适应当前图层" @click="fitShellView">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
+          </button>
+        </div>
+        <div class="map-tool-group" aria-label="地图内容">
+          <button type="button" class="map-tool" :class="{ active: panel === 'basemap' }" title="切换底图" aria-label="切换底图" @click="togglePanel('basemap')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3Z"/><path d="M9 3v15M15 6v15"/></svg>
+          </button>
+          <button type="button" class="map-tool" :class="{ active: panel === 'layers' }" title="业务图层" aria-label="业务图层" @click="togglePanel('layers')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></svg>
+          </button>
+          <button type="button" class="map-tool" :class="{ active: panel === 'legend' }" title="查看图例" aria-label="查看图例" @click="togglePanel('legend')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="6" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="5" cy="18" r="1.5"/><path d="M9 6h11M9 12h11M9 18h11"/></svg>
+          </button>
+        </div>
+        <div class="map-tool-group" aria-label="测量">
+          <button type="button" class="map-tool" :class="{ active: mapToolMode === 'measure-line' }" title="测量距离" aria-label="测量距离" @click="activateTool('measure-line')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16 12-12 4 4L8 20H4Z"/><path d="m13 7 4 4M10 10l2 2M7 13l2 2"/></svg>
+          </button>
+          <button type="button" class="map-tool" :class="{ active: mapToolMode === 'measure-area' }" title="测量面积" aria-label="测量面积" @click="activateTool('measure-area')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 19 3-13 11 4-4 10Z"/><circle cx="8" cy="6" r="1"/><circle cx="19" cy="10" r="1"/><circle cx="15" cy="20" r="1"/><circle cx="5" cy="19" r="1"/></svg>
+          </button>
+        </div>
+        <div class="map-tool-group" aria-label="绘制与选择">
+          <button type="button" class="map-tool" :class="{ active: mapToolMode === 'draw-point' }" title="绘制点位" aria-label="绘制点位" @click="activateTool('draw-point')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s6-5.4 6-11a6 6 0 1 0-12 0c0 5.6 6 11 6 11Z"/><circle cx="12" cy="10" r="2"/></svg>
+          </button>
+          <button type="button" class="map-tool" :class="{ active: mapToolMode === 'draw-polygon' }" title="绘制区域" aria-label="绘制区域" @click="activateTool('draw-polygon')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 18 3-12 11 3-3 11Z"/><circle cx="8" cy="6" r="1.5"/><circle cx="19" cy="9" r="1.5"/><circle cx="16" cy="20" r="1.5"/><circle cx="5" cy="18" r="1.5"/></svg>
+          </button>
+          <button type="button" class="map-tool" :class="{ active: mapToolMode === 'box-select' }" title="框选地图对象" aria-label="框选地图对象" @click="activateTool('box-select')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"/><path d="M9 9h6v6H9z"/></svg>
+          </button>
+        </div>
+        <div class="map-tool-group" aria-label="地图操作">
+          <button type="button" class="map-tool" title="清除绘制和测量" aria-label="清除绘制和测量" @click="clearAll">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
+          </button>
+          <button type="button" class="map-tool" title="刷新地图图层" aria-label="刷新地图图层" :disabled="shellLoading" @click="retryLayers">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18.5 10A7 7 0 0 0 6 7.5L4 11M5.5 14A7 7 0 0 0 18 16.5l2-3.5"/></svg>
+          </button>
+          <button type="button" class="map-tool" title="全屏地图" aria-label="全屏地图" @click="goFullscreen">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
+          </button>
+        </div>
       </div>
     </div>
     <button
@@ -417,7 +457,9 @@ function setHost(el: unknown) {
       title="详情面板"
       aria-label="详情"
       @click="toggleShellRight"
-    >详</button>
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM14 4v16"/><path d="M17 9h.01M17 12h.01M17 15h.01"/></svg>
+    </button>
 
     <div v-if="panel === 'basemap'" class="map-float-panel">
       <div class="map-float-title">底图切换</div>
@@ -450,7 +492,6 @@ function setHost(el: unknown) {
           <input type="checkbox" :checked="shellFilters.showIndicators" @change="toggleLayer('showIndicators', ($event.target as HTMLInputElement).checked)" />
           指标实例 <span class="muted">{{ shellCounts.indicators }}</span>
         </label>
-      <div class="map-float-item static">指标实例：{{ shellCounts.indicators }}</div>
     </div>
     <div v-if="panel === 'legend'" class="map-float-panel">
       <div class="map-float-title">图例</div>

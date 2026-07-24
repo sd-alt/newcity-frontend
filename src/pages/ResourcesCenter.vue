@@ -15,6 +15,7 @@ import {
 } from '../gis/mapShell'
 import { mapDrawGeometry } from '../gis/mapTools'
 import { errMessage, pickId } from '../utils/errors'
+import type { SimpleGeometry } from '../gis/wkt'
 
 const route = useRoute()
 const router = useRouter()
@@ -27,6 +28,7 @@ const platformTypes = ref<Record<string, unknown>[]>([])
 const sensorTypes = ref<Record<string, unknown>[]>([])
 const platforms = ref<Record<string, unknown>[]>([])
 const sensors = ref<Record<string, unknown>[]>([])
+const positionSources = ref<Record<string, unknown>[]>([])
 const viz = ref<unknown>(null)
 const vizFilter = ref({ typeCode: '', status: '', keyword: '' })
 const qName = ref('')
@@ -39,8 +41,41 @@ const queryPage = ref(1)
 const queryPageSize = ref(20)
 const queryTotal = ref(0)
 
-const platformForm = ref({ platformTypeId: '', name: '', identifier: '', locationWkt: 'POINT(114.05 22.55)', owner: '演示单位', status: 'active' })
-const sensorForm = ref({ platformId: '', sensorName: '', sensorTypeId: '', accuracyPercent: 90, coverageWkt: '' })
+const platformForm = ref({
+  platformTypeId: '',
+  name: '',
+  identifier: '',
+  locationGeoJson: { type: 'Point', coordinates: [114.05, 22.55] } as SimpleGeometry | null,
+  owner: '演示单位',
+  status: 'active',
+})
+const sensorForm = ref({
+  platformId: '',
+  sensorName: '',
+  sensorTypeId: '',
+  accuracyPercent: 90,
+  coverageGeoJson: null as SimpleGeometry | null,
+})
+const satelliteAccessForm = ref({
+  name: '',
+  noradNumber: '',
+  orbitType: 'LEO',
+  updateIntervalHours: 1,
+  sensorName: '',
+  sensorTypeId: '',
+  swathKm: null as number | null,
+  spatialResolutionM: null as number | null,
+})
+const positionSourceForm = ref({
+  platformId: '',
+  protocol: 'https-json',
+  endpointAddress: '',
+  ingestionMode: 'push',
+  authMethod: 'none',
+  credentialReference: '',
+  samplingIntervalSeconds: 5,
+  status: 'enabled',
+})
 
 const tabs = [
   { key: 'types', label: '传感器类型维护' },
@@ -147,24 +182,18 @@ function syncTab() {
 
 function applyMapDrawToPlatform() {
   const g = mapDrawGeometry.value
-  if (!g || !g.wkt) {
+  if (!g || !g.geojson) {
     error.value = '请先用地图工具绘点或绘面（绘点=位置，绘面=覆盖示意）'
     return
   }
-  if (g.type === 'point') {
-    platformForm.value.locationWkt = g.wkt
-    message.value = '已将地图绘点写入平台位置 WKT'
-  } else {
-    // polygon: use centroid-ish first ring point as location if empty, store full polygon in location if needed
-    platformForm.value.locationWkt = g.wkt
-    message.value = '已将地图绘面写入平台位置/范围 WKT'
-  }
+  platformForm.value.locationGeoJson = g.geojson
+  message.value = g.type === 'point' ? '已采用地图点位作为平台位置' : '已采用地图范围作为平台空间位置'
   error.value = null
 }
 
 function applyMapDrawToSensor() {
   const g = mapDrawGeometry.value
-  if (!g || !g.wkt) {
+  if (!g || !g.geojson) {
     error.value = '请先用地图工具绘面（覆盖范围）或绘点'
     return
   }
@@ -172,11 +201,20 @@ function applyMapDrawToSensor() {
     const lon = g.lon
     const lat = g.lat
     const d = 0.05
-    sensorForm.value.coverageWkt = `POLYGON((${lon - d} ${lat - d},${lon + d} ${lat - d},${lon + d} ${lat + d},${lon - d} ${lat + d},${lon - d} ${lat - d}))`
-    message.value = '已将绘点扩展为小范围覆盖写入传感器覆盖 WKT'
+    sensorForm.value.coverageGeoJson = {
+      type: 'Polygon',
+      coordinates: [[
+        [lon - d, lat - d],
+        [lon + d, lat - d],
+        [lon + d, lat + d],
+        [lon - d, lat + d],
+        [lon - d, lat - d],
+      ]],
+    }
+    message.value = '已将地图点位扩展为小范围覆盖区域'
   } else {
-    sensorForm.value.coverageWkt = g.wkt
-    message.value = '已将地图绘面写入传感器覆盖 WKT'
+    sensorForm.value.coverageGeoJson = g.geojson
+    message.value = '已采用地图绘制范围作为传感器覆盖区域'
   }
   error.value = null
 }
@@ -184,24 +222,33 @@ function applyMapDrawToSensor() {
 async function load() {
   error.value = null
   try {
-    const [pt, st, p, s] = await Promise.all([
+    const [pt, st, p, s, ps] = await Promise.all([
       api.listPlatformTypes(),
       api.listSensorTypes(),
       api.listPlatforms(),
       api.listSensors(),
+      api.listPositionSources(),
     ])
     platformTypes.value = pt.data
     sensorTypes.value = st.data
     platforms.value = p.data
     sensors.value = s.data
+    positionSources.value = ps.data
     if (platformForm.value.platformTypeId === '' && platformTypes.value[0]) {
       platformForm.value.platformTypeId = pickId(platformTypes.value[0])
     }
     if (sensorForm.value.sensorTypeId === '' && sensorTypes.value[0]) {
       sensorForm.value.sensorTypeId = pickId(sensorTypes.value[0])
     }
+    if (satelliteAccessForm.value.sensorTypeId === '' && sensorTypes.value[0]) {
+      satelliteAccessForm.value.sensorTypeId = pickId(sensorTypes.value[0])
+    }
     if (sensorForm.value.platformId === '' && platforms.value[0]) {
       sensorForm.value.platformId = pickId(platforms.value[0])
+    }
+    if (positionSourceForm.value.platformId === '' && platforms.value[0]) {
+      positionSourceForm.value.platformId = pickId(platforms.value[0])
+      applyExistingPositionSource()
     }
   } catch (err) {
     error.value = errMessage(err, '加载失败')
@@ -213,8 +260,8 @@ async function createPlatform() {
     error.value = '请选择平台类型并填写名称（表单内容已保留）'
     return
   }
-  if (!String(platformForm.value.locationWkt || '').trim()) {
-    error.value = '请填写位置 WKT，或先地图绘点后写入位置，否则无法在底图定位'
+  if (!platformForm.value.locationGeoJson) {
+    error.value = '请先在地图绘制平台位置或范围'
     return
   }
   pending.value = true
@@ -224,7 +271,7 @@ async function createPlatform() {
       platformTypeId: Number(platformForm.value.platformTypeId),
       name: platformForm.value.name,
       identifier: platformForm.value.identifier || undefined,
-      locationWkt: platformForm.value.locationWkt || undefined,
+      locationGeoJson: platformForm.value.locationGeoJson || undefined,
       owner: platformForm.value.owner || undefined,
       status: platformForm.value.status || 'active',
     })
@@ -287,7 +334,7 @@ async function createSensor() {
       sensorName: sensorForm.value.sensorName,
       sensorTypeId: sensorForm.value.sensorTypeId ? Number(sensorForm.value.sensorTypeId) : undefined,
       accuracyPercent: Number(sensorForm.value.accuracyPercent) || undefined,
-      coverageWkt: sensorForm.value.coverageWkt || undefined,
+      coverageGeoJson: sensorForm.value.coverageGeoJson || undefined,
     })
     message.value = '传感器已创建'
     try { await reloadShellLayers('/resources', {}) } catch { /* map refresh optional */ }
@@ -322,6 +369,144 @@ async function loadViz() {
   }
 }
 
+function trajectoryStatus(row: Record<string, unknown>) {
+  const trajectory = (row.trajectory || {}) as {
+    available?: boolean
+    source?: string
+    generatedAt?: string
+    points?: unknown[]
+  }
+  if (!trajectory.available) {
+    return String(row.typeCode || '') === 'satellite' ? '未同步真实轨迹' : '-'
+  }
+  const generated = trajectory.generatedAt
+    ? new Date(trajectory.generatedAt).toLocaleString('zh-CN')
+    : '时间未知'
+  const count = Array.isArray(trajectory.points) ? trajectory.points.length : 0
+  const label = String(row.typeCode || '') === 'satellite' ? '真实轨道' : '实际位置轨迹'
+  return `${label} · ${trajectory.source || '位置接口'} · ${count} 点 · ${generated}`
+}
+
+async function syncSatellite(row: Record<string, unknown>) {
+  const platformId = row.platformId || row.id
+  if (platformId == null) return
+  pending.value = true
+  error.value = null
+  try {
+    const res = await api.syncSatelliteOnline(String(platformId))
+    const count = Number((res.data as any)?.track?.pointCount || 0)
+    await loadViz()
+    await reloadShellLayers('/resources', {})
+    await locateOnMap('sensor', String(platformId))
+    message.value = `真实卫星轨迹已更新，共 ${count} 个三维时序点`
+  } catch (err) {
+    error.value = errMessage(err, '真实卫星轨迹同步失败')
+  } finally {
+    pending.value = false
+  }
+}
+
+async function accessSatellite() {
+  const name = satelliteAccessForm.value.name.trim()
+  const noradNumber = satelliteAccessForm.value.noradNumber.trim()
+  const sensorName = satelliteAccessForm.value.sensorName.trim()
+  if (!name || !/^\d{1,20}$/.test(noradNumber) || !sensorName || !satelliteAccessForm.value.sensorTypeId) {
+    error.value = '请填写卫星、NORAD 编号和星载传感器信息'
+    return
+  }
+  pending.value = true
+  error.value = null
+  try {
+    const res = await api.accessSatelliteOnline({
+      name,
+      noradNumber,
+      orbitType: satelliteAccessForm.value.orbitType,
+      updateIntervalHours: Number(satelliteAccessForm.value.updateIntervalHours),
+      sensorName,
+      sensorTypeId: Number(satelliteAccessForm.value.sensorTypeId),
+      swathKm: satelliteAccessForm.value.swathKm,
+      spatialResolutionM: satelliteAccessForm.value.spatialResolutionM,
+    })
+    const platformId = (res.data as any)?.platform?.id
+    const pointCount = Number((res.data as any)?.track?.pointCount || 0)
+    satelliteAccessForm.value.name = ''
+    satelliteAccessForm.value.noradNumber = ''
+    satelliteAccessForm.value.sensorName = ''
+    await load()
+    await loadViz()
+    await reloadShellLayers('/resources', {})
+    if (platformId != null) await locateOnMap('sensor', String(platformId))
+    message.value = `卫星已接入 CelesTrak，真实轨迹 ${pointCount} 个时序点；服务器将按策略定时更新`
+  } catch (err) {
+    error.value = errMessage(err, '卫星接入失败，请核对 NORAD 编号或网络状态')
+  } finally {
+    pending.value = false
+  }
+}
+
+function applyExistingPositionSource() {
+  const existing = positionSources.value.find(
+    (item) => String(item.platformId) === String(positionSourceForm.value.platformId),
+  )
+  if (!existing) {
+    positionSourceForm.value.protocol = 'https-json'
+    positionSourceForm.value.endpointAddress = ''
+    positionSourceForm.value.ingestionMode = 'push'
+    positionSourceForm.value.authMethod = 'none'
+    positionSourceForm.value.credentialReference = ''
+    positionSourceForm.value.samplingIntervalSeconds = 5
+    positionSourceForm.value.status = 'enabled'
+    return
+  }
+  positionSourceForm.value.protocol = String(existing.protocol || 'https-json')
+  positionSourceForm.value.endpointAddress = String(existing.endpointAddress || '')
+  positionSourceForm.value.ingestionMode = String(existing.ingestionMode || 'push')
+  positionSourceForm.value.authMethod = String(existing.authMethod || 'none')
+  positionSourceForm.value.credentialReference = String(existing.credentialReference || '')
+  positionSourceForm.value.samplingIntervalSeconds = Number(existing.samplingIntervalSeconds || 5)
+  positionSourceForm.value.status = String(existing.status || 'enabled')
+}
+
+async function savePositionSource() {
+  if (!positionSourceForm.value.platformId || !positionSourceForm.value.endpointAddress.trim()) {
+    error.value = '请选择移动平台并填写位置接口地址'
+    return
+  }
+  pending.value = true
+  error.value = null
+  const body = {
+    platformId: Number(positionSourceForm.value.platformId),
+    protocol: positionSourceForm.value.protocol,
+    endpointAddress: positionSourceForm.value.endpointAddress.trim(),
+    ingestionMode: positionSourceForm.value.ingestionMode,
+    authMethod: positionSourceForm.value.authMethod,
+    credentialReference: positionSourceForm.value.credentialReference.trim(),
+    messageMapping: {
+      time: 'time',
+      longitude: 'longitude',
+      latitude: 'latitude',
+      altitudeM: 'altitudeM',
+      speedMps: 'speedMps',
+      headingDegrees: 'headingDegrees',
+    },
+    samplingIntervalSeconds: Number(positionSourceForm.value.samplingIntervalSeconds),
+    status: positionSourceForm.value.status,
+  }
+  try {
+    const existing = positionSources.value.find(
+      (item) => String(item.platformId) === String(positionSourceForm.value.platformId),
+    )
+    if (existing) await api.updatePositionSource(positionSourceForm.value.platformId, body)
+    else await api.createPositionSource(body)
+    message.value = '位置轨迹源已保存；平台实际轨迹与传感器观测数据将分别管理'
+    await load()
+  } catch (err) {
+    error.value = errMessage(err, '位置轨迹源保存失败')
+  } finally {
+    pending.value = false
+  }
+}
+
 onMounted(async () => {
   syncTab()
   await load()
@@ -338,8 +523,8 @@ function applyRouteLocationHint() {
   const lon = Number(Array.isArray(route.query.lon) ? route.query.lon[0] : route.query.lon)
   const lat = Number(Array.isArray(route.query.lat) ? route.query.lat[0] : route.query.lat)
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) return
-  platformForm.value.locationWkt = `POINT(${lon} ${lat})`
-  message.value = `已根据地图位置预填坐标 POINT(${lon.toFixed(5)} ${lat.toFixed(5)})`
+  platformForm.value.locationGeoJson = { type: 'Point', coordinates: [lon, lat] }
+  message.value = `已根据地图位置预填平台点位（${lon.toFixed(5)}, ${lat.toFixed(5)}）`
 }
 watch(tab, async (v) => { if (v === 'viz') await loadViz() })
 
@@ -418,6 +603,97 @@ async function showOnMap() {
 
     <section v-if="tab === 'crud'" class="panel">
       <h2>平台与传感器增删改查</h2>
+      <div class="panel soft" style="margin-bottom:1rem">
+        <div class="section-head">
+          <div>
+            <h3>卫星在线接入</h3>
+            <p class="muted">卫星作为动态平台接入，位置由 TLE/SGP4 实时计算；星载传感器作为观测能力登记，不填写固定坐标。</p>
+          </div>
+          <span class="badge">真实在线数据</span>
+        </div>
+        <div class="form-row">
+          <label>卫星名称<input v-model="satelliteAccessForm.name" placeholder="例如 Sentinel-2B" /></label>
+          <label>NORAD 编号<input v-model="satelliteAccessForm.noradNumber" inputmode="numeric" placeholder="例如 42063" /></label>
+          <label>轨道类型
+            <select v-model="satelliteAccessForm.orbitType">
+              <option value="LEO">低地球轨道 LEO</option>
+              <option value="MEO">中地球轨道 MEO</option>
+              <option value="GEO">地球同步轨道 GEO</option>
+              <option value="HEO">高椭圆轨道 HEO</option>
+            </select>
+          </label>
+          <label>同步周期
+            <select v-model.number="satelliteAccessForm.updateIntervalHours">
+              <option :value="1">每 1 小时</option>
+              <option :value="3">每 3 小时</option>
+              <option :value="6">每 6 小时</option>
+              <option :value="12">每 12 小时</option>
+              <option :value="24">每 24 小时</option>
+            </select>
+          </label>
+          <label>星载传感器名称<input v-model="satelliteAccessForm.sensorName" placeholder="例如 MSI 多光谱成像仪" /></label>
+          <label>传感器类型
+            <select v-model="satelliteAccessForm.sensorTypeId">
+              <option value="">请选择</option>
+              <option v-for="t in sensorTypes" :key="'sat-st'+t.id" :value="String(t.id)">{{ t.name }}</option>
+            </select>
+          </label>
+          <label>观测幅宽 km<input v-model.number="satelliteAccessForm.swathKm" type="number" min="0.001" placeholder="可选" /></label>
+          <label>空间分辨率 m<input v-model.number="satelliteAccessForm.spatialResolutionM" type="number" min="0.001" placeholder="可选" /></label>
+          <button class="btn" type="button" :disabled="pending" @click="accessSatellite">验证并接入</button>
+        </div>
+        <p class="muted">轨道协议：HTTPS / CelesTrak TLE / SGP4。遥感影像及其覆盖面属于观测数据，需由真实产品元数据或文件导入，不会用卫星当前位置代替。</p>
+      </div>
+      <div class="panel soft" style="margin-bottom:1rem">
+        <div class="section-head">
+          <div>
+            <h3>移动平台位置 / 轨迹接入</h3>
+            <p class="muted">用于无人机、走航车和船舶的实时位置。设备私有协议先由网关转换成结构化时间、经纬度和高度，再写入统一轨迹接口。</p>
+          </div>
+          <span class="badge">实际运行轨迹</span>
+        </div>
+        <div class="form-row">
+          <label>移动平台
+            <select v-model="positionSourceForm.platformId" @change="applyExistingPositionSource">
+              <option value="">请选择</option>
+              <option v-for="p in platforms" :key="'pos-p'+p.id" :value="String(p.id)">#{{ p.id }} {{ p.name }}</option>
+            </select>
+          </label>
+          <label>位置协议
+            <select v-model="positionSourceForm.protocol">
+              <option value="https-json">HTTP/HTTPS JSON</option>
+              <option value="mqtt">MQTT 网关</option>
+              <option value="mavlink-gateway">MAVLink 网关</option>
+              <option value="ais-gateway">AIS 网关</option>
+              <option value="jt808-gateway">JT/T 808 网关</option>
+            </select>
+          </label>
+          <label>接口地址<input v-model="positionSourceForm.endpointAddress" placeholder="https://gateway.example/positions" /></label>
+          <label>接入方式
+            <select v-model="positionSourceForm.ingestionMode">
+              <option value="push">网关推送</option>
+              <option value="pull">服务端拉取</option>
+            </select>
+          </label>
+          <label>认证方式
+            <select v-model="positionSourceForm.authMethod">
+              <option value="none">无需认证</option>
+              <option value="bearer">Bearer（仅保存凭据引用）</option>
+              <option value="api-key">API Key（仅保存凭据引用）</option>
+            </select>
+          </label>
+          <label>凭据引用<input v-model="positionSourceForm.credentialReference" placeholder="例如 env:UAV_POSITION_TOKEN" /></label>
+          <label>采样间隔 秒<input v-model.number="positionSourceForm.samplingIntervalSeconds" type="number" min="1" max="86400" /></label>
+          <label>状态
+            <select v-model="positionSourceForm.status">
+              <option value="enabled">启用</option>
+              <option value="disabled">停用</option>
+            </select>
+          </label>
+          <button class="btn" type="button" :disabled="pending" @click="savePositionSource">保存位置源</button>
+        </div>
+        <p class="muted">统一写入接口：<code>/api/v1/observations/platform-tracks/ingest</code>。地图展示的是实际位置轨迹；规划航线和观测覆盖范围使用独立图层。</p>
+      </div>
       <h3>平台</h3>
       <div class="form-row">
         <label>平台类型
@@ -427,8 +703,10 @@ async function showOnMap() {
         </label>
         <label>名称<input v-model="platformForm.name" /></label>
         <label>标识<input v-model="platformForm.identifier" /></label>
-        <label>位置WKT<input v-model="platformForm.locationWkt" /></label>
-        <button class="btn ghost" type="button" @click="applyMapDrawToPlatform">采用地图绘制→位置</button>
+        <div class="spatial-pick" :class="{ ready: platformForm.locationGeoJson }">
+          <span>{{ platformForm.locationGeoJson ? '平台位置已设置' : '平台位置未设置' }}</span>
+          <button class="btn ghost" type="button" @click="applyMapDrawToPlatform">采用地图绘制位置</button>
+        </div>
         <label>所属单位<input v-model="platformForm.owner" /></label>
         <label>状态<input v-model="platformForm.status" /></label>
         <button class="btn" type="button" :disabled="pending" @click="createPlatform">新增平台</button>
@@ -463,8 +741,10 @@ async function showOnMap() {
           </select>
         </label>
         <label>精度%<input v-model.number="sensorForm.accuracyPercent" type="number" /></label>
-        <label>覆盖WKT<input v-model="sensorForm.coverageWkt" /></label>
-        <button class="btn ghost" type="button" @click="applyMapDrawToSensor">采用地图绘制→覆盖</button>
+        <div class="spatial-pick" :class="{ ready: sensorForm.coverageGeoJson }">
+          <span>{{ sensorForm.coverageGeoJson ? '覆盖区域已设置' : '覆盖区域未设置' }}</span>
+          <button class="btn ghost" type="button" @click="applyMapDrawToSensor">采用地图绘制覆盖</button>
+        </div>
         <button class="btn" type="button" :disabled="pending" @click="createSensor">新增传感器</button>
       </div>
       <table class="table">
@@ -525,7 +805,7 @@ async function showOnMap() {
             <td>{{ p.platformTypeName || p.platformTypeId || p.platformType || '-' }}</td>
             <td>{{ p.identifier }}</td>
             <td>{{ p.owner || '-' }}</td>
-            <td><code>{{ p.locationWkt || '-' }}</code></td>
+            <td>{{ p.locationGeoJson || p.locationWkt ? '已定位' : '未定位' }}</td>
             <td>{{ p.status }}</td>
           </tr>
         </tbody>
@@ -547,19 +827,23 @@ async function showOnMap() {
       <table class="table" v-if="vizRows.length">
         <thead>
           <tr>
-            <th>ID</th><th>名称</th><th>类型</th><th>状态</th><th>单位</th><th>位置</th><th>能力摘要</th>
+            <th>ID</th><th>名称</th><th>类型</th><th>状态</th><th>单位</th><th>位置</th><th>轨迹数据</th><th>能力摘要</th><th></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-if="!vizRows.length"><td colspan="6" class="muted">暂无可视化资源，请先上图或调整筛选</td></tr>
+          <tr v-if="!vizRows.length"><td colspan="9" class="muted">暂无可视化资源，请先上图或调整筛选</td></tr>
           <tr v-for="row in vizRows" :key="String(row.platformId || row.id)" class="row-click" @click="locateOnMap('sensor', String(row.platformId || row.id))">
             <td>{{ row.platformId || row.id }}</td>
             <td>{{ row.platformName || row.name }}</td>
             <td>{{ row.typeName || row.typeCode }}</td>
             <td>{{ row.status || '-' }}</td>
             <td>{{ row.owner || '-' }}</td>
-            <td class="clamp">{{ row.locationWkt || (row.spatial as any)?.positionWkt || '-' }}</td>
+            <td>{{ (row.trajectory as any)?.available ? (String(row.typeCode || '') === 'satellite' ? '轨道定位' : '动态定位') : (row.locationGeoJson || row.locationWkt || (row.spatial as any)?.positionWkt ? '固定位置' : '未定位') }}</td>
+            <td class="clamp">{{ trajectoryStatus(row) }}</td>
             <td class="clamp">{{ JSON.stringify(row.capabilitySummary || row.typeSummary || {}).slice(0, 80) }}</td>
+            <td class="ops">
+              <button v-if="String(row.typeCode || '') === 'satellite'" class="btn ghost" type="button" :disabled="pending" @click.stop="syncSatellite(row)">同步真实轨迹</button>
+            </td>
           </tr>
         </tbody>
       </table>

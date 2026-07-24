@@ -25,7 +25,17 @@ const router = createRouter({
         { path: 'planning', name: 'planning', component: PlanningCenter, meta: { requiresAuth: true } },
         { path: 'algorithms', name: 'algorithms', component: AlgorithmsCenter, meta: { requiresAuth: true } },
         { path: 'applications', name: 'applications', component: ApplicationsCenter, meta: { requiresAuth: true } },
-        { path: 'gis', name: 'gis', redirect: { name: 'applications', query: { tab: 'gis' } } },
+        {
+          path: 'gis',
+          name: 'gis',
+          redirect: (to) => ({
+            name: 'applications',
+            query: {
+              ...to.query,
+              tab: typeof to.query.tab === 'string' ? to.query.tab : 'gis',
+            },
+          }),
+        },
       ],
     },
   ],

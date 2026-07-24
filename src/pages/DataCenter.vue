@@ -18,6 +18,7 @@ import {
   setDataLayerStyle,
 } from '../gis/mapShell'
 import { mapDrawGeometry } from '../gis/mapTools'
+import { wktToGeoJson, type SimpleGeometry } from '../gis/wkt'
 import { canByStatus, errMessage, isoNow, pickId } from '../utils/errors'
 
 const route = useRoute()
@@ -52,7 +53,7 @@ const dataForm = ref({
   dataType: 'observation',
   sourceName: 'demo-source',
   dataFormat: 'json',
-  spatialWkt: 'POINT(114.1 22.6)',
+  spatialGeoJson: null as SimpleGeometry | null,
   version: 1,
 })
 const sourceForm = ref({
@@ -73,7 +74,7 @@ const pullForm = ref({
   datasetId: '',
   dataName: '',
   dataType: 'timeseries',
-  spatialWkt: '',
+  spatialGeoJson: null as SimpleGeometry | null,
 })
 const sourceAudits = ref<Record<string, unknown>[]>([])
 const selectedAuditSourceId = ref('')
@@ -254,7 +255,7 @@ const importForm = ref({
   dataName: '',
   dataType: 'observation',
   sourceName: 'file-import',
-  spatialWkt: 'POINT(114.1 22.6)',
+  spatialGeoJson: null as SimpleGeometry | null,
   version: 1,
   duplicateStrategy: 'reject',
   executeNow: true,
@@ -348,21 +349,61 @@ function syncTab() {
 }
 
 
-function applyMapDrawSpatial(_target: 'live' | 'pull' = 'live') {
+function platformGeometry(platformId: unknown): SimpleGeometry | null {
+  const platform = platforms.value.find((item) => String(item.id) === String(platformId))
+  if (!platform) return null
+  if (String(platform.platformTypeCode || '') === 'satellite') return null
+  const geojson = platform.locationGeoJson
+  if (geojson && typeof geojson === 'object') return geojson as SimpleGeometry
+  return wktToGeoJson(
+    String(platform.locationWkt || (platform.spatial as { positionWkt?: string } | undefined)?.positionWkt || ''),
+  )
+}
+
+function isSatellitePlatform(platformId: unknown) {
+  const platform = platforms.value.find((item) => String(item.id) === String(platformId))
+  return String(platform?.platformTypeCode || '') === 'satellite'
+}
+
+function isFootprintGeometry(geometry: SimpleGeometry | null) {
+  return geometry?.type === 'Polygon' || geometry?.type === 'MultiPolygon'
+}
+
+function applyMapDrawSpatial(target: 'data' | 'live' | 'import') {
   const g = mapDrawGeometry.value
-  if (!g || !g.wkt) {
+  if (!g || !g.geojson) {
     error.value = '请先用地图工具绘点/绘面，再写入接入空间条件'
     return
   }
-  let wkt = g.wkt
-  if (g.type === 'point' && g.lon != null && g.lat != null) {
+  let geometry = g.geojson as SimpleGeometry
+  const platformId = target === 'data'
+    ? dataForm.value.platformId
+    : target === 'import'
+      ? importForm.value.platformId
+      : ''
+  if (platformId && isSatellitePlatform(platformId) && !isFootprintGeometry(geometry)) {
+    error.value = '卫星遥感观测必须绘制影像覆盖面，不能用卫星点位代替'
+    return
+  }
+  if (target === 'live' && g.type === 'point' && g.lon != null && g.lat != null) {
     const lon = g.lon
     const lat = g.lat
     const delta = 0.08
-    wkt = `POLYGON((${lon - delta} ${lat - delta},${lon + delta} ${lat - delta},${lon + delta} ${lat + delta},${lon - delta} ${lat + delta},${lon - delta} ${lat - delta}))`
+    geometry = {
+      type: 'Polygon',
+      coordinates: [[
+        [lon - delta, lat - delta],
+        [lon + delta, lat - delta],
+        [lon + delta, lat + delta],
+        [lon - delta, lat + delta],
+        [lon - delta, lat - delta],
+      ]],
+    }
   }
-  pullForm.value.spatialWkt = wkt
-  message.value = '已将地图绘制范围写入接入空间条件'
+  if (target === 'data') dataForm.value.spatialGeoJson = geometry
+  else if (target === 'import') importForm.value.spatialGeoJson = geometry
+  else pullForm.value.spatialGeoJson = geometry
+  message.value = '已采用地图绘制的空间位置'
   error.value = null
 }
 
@@ -439,6 +480,18 @@ async function createData() {
   pending.value = true
   clearAlerts()
   try {
+    const spatialGeoJson =
+      dataForm.value.spatialGeoJson || platformGeometry(dataForm.value.platformId)
+    if (!spatialGeoJson) {
+      error.value = isSatellitePlatform(dataForm.value.platformId)
+        ? '请绘制或接入遥感影像的真实覆盖面'
+        : '请先在地图设置数据位置，或为关联平台维护位置'
+      return
+    }
+    if (isSatellitePlatform(dataForm.value.platformId) && !isFootprintGeometry(spatialGeoJson)) {
+      error.value = '卫星遥感观测范围必须是 Polygon 或 MultiPolygon'
+      return
+    }
     await api.createObservationData({
       datasetId: Number(dataForm.value.datasetId),
       platformId: Number(dataForm.value.platformId),
@@ -446,7 +499,7 @@ async function createData() {
       dataType: dataForm.value.dataType,
       sourceName: dataForm.value.sourceName,
       dataFormat: dataForm.value.dataFormat,
-      spatialWkt: dataForm.value.spatialWkt,
+      spatialGeoJson,
       timeStart: isoNow(-7200_000),
       timeEnd: isoNow(),
       version: Number(dataForm.value.version) || 1,
@@ -647,7 +700,7 @@ async function pullSource() {
       dataType: pullForm.value.dataType || 'timeseries',
     }
     if (pullForm.value.dataName) body.dataName = pullForm.value.dataName
-    if (pullForm.value.spatialWkt) body.spatialWkt = pullForm.value.spatialWkt
+    if (pullForm.value.spatialGeoJson) body.spatialGeoJson = pullForm.value.spatialGeoJson
     const res = await api.pullDataSource(pullForm.value.sourceId, body)
     detail.value = res.data
     const count = (res.data as any)?.recordCount
@@ -727,7 +780,7 @@ async function startLivePull() {
       dataType: pullForm.value.dataType || 'timeseries',
       intervalSeconds: Number(liveIntervalSeconds.value) || 60,
     }
-    if (pullForm.value.spatialWkt) body.spatialWkt = pullForm.value.spatialWkt
+    if (pullForm.value.spatialGeoJson) body.spatialGeoJson = pullForm.value.spatialGeoJson
     const res = await api.startLiveDataSource(pullForm.value.sourceId, body)
     liveStatus.value = (res.data as any)?.live || null
     lastLivePullCount = Number((res.data as any)?.live?.pullCount ?? (res.data as any)?.live?.recordCount ?? 0) || 0
@@ -825,6 +878,18 @@ async function submitImport() {
   pending.value = true
   clearAlerts()
   try {
+    const spatialGeoJson =
+      importForm.value.spatialGeoJson || platformGeometry(importForm.value.platformId)
+    if (!spatialGeoJson) {
+      error.value = isSatellitePlatform(importForm.value.platformId)
+        ? '请提供遥感影像产品的真实覆盖面'
+        : '请先在地图设置导入位置，或为关联平台维护位置'
+      return
+    }
+    if (isSatellitePlatform(importForm.value.platformId) && !isFootprintGeometry(spatialGeoJson)) {
+      error.value = '卫星遥感影像覆盖范围必须是 Polygon 或 MultiPolygon'
+      return
+    }
     const form = new FormData()
     form.append('file', importFile.value)
     form.append('datasetId', importForm.value.datasetId)
@@ -833,7 +898,7 @@ async function submitImport() {
     form.append('dataName', importForm.value.dataName)
     form.append('dataType', importForm.value.dataType)
     form.append('sourceName', importForm.value.sourceName)
-    form.append('spatialWkt', importForm.value.spatialWkt)
+    form.append('spatialGeoJson', JSON.stringify(spatialGeoJson))
     form.append('timeStart', isoNow(-7200_000))
     form.append('timeEnd', isoNow())
     form.append('version', String(importForm.value.version || 1))
@@ -1033,7 +1098,10 @@ onUnmounted(() => {
         <label>类型<input v-model="dataForm.dataType" /></label>
         <label>格式<input v-model="dataForm.dataFormat" /></label>
         <label>来源<input v-model="dataForm.sourceName" /></label>
-        <label>空间WKT<input v-model="dataForm.spatialWkt" /></label>
+        <div class="spatial-pick" :class="{ ready: dataForm.spatialGeoJson || platformGeometry(dataForm.platformId) }">
+          <span>{{ dataForm.spatialGeoJson ? (isSatellitePlatform(dataForm.platformId) ? '影像覆盖范围已设置' : '数据空间位置已设置') : (isSatellitePlatform(dataForm.platformId) ? '需提供真实影像覆盖范围' : '默认采用关联平台位置') }}</span>
+          <button class="btn ghost" type="button" @click="applyMapDrawSpatial('data')">{{ isSatellitePlatform(dataForm.platformId) ? '采用地图绘制覆盖面' : '采用地图位置' }}</button>
+        </div>
         <button class="btn" type="button" :disabled="pending" @click="createData">新增监测数据</button>
       </div>
       <table class="table">
@@ -1160,7 +1228,9 @@ onUnmounted(() => {
         </label>
         <label>数据名称（仅单次拉取）<input v-model="pullForm.dataName" placeholder="可空，默认源码+时间戳" /></label>
         <label>类型<input v-model="pullForm.dataType" /></label>
-        <label>空间WKT（可选，默认用平台位置）<input v-model="pullForm.spatialWkt" placeholder="POINT(114.1 22.6)" /></label>
+        <div class="spatial-pick" :class="{ ready: pullForm.spatialGeoJson }">
+          <span>{{ pullForm.spatialGeoJson ? '接入范围已设置' : '默认采用平台位置' }}</span>
+        </div>
         <label>定时间隔秒<input v-model.number="liveIntervalSeconds" type="number" min="5" step="5" /></label>
         <button class="btn" type="button" :disabled="pending" @click="pullSource">立即拉取一次</button>
         <button class="btn ghost" type="button" @click="applyMapDrawSpatial('live')">采用地图范围→接入</button>
@@ -1243,7 +1313,10 @@ onUnmounted(() => {
         </label>
         <label>数据名称<input v-model="importForm.dataName" /></label>
         <label>类型<input v-model="importForm.dataType" /></label>
-        <label>空间WKT<input v-model="importForm.spatialWkt" /></label>
+        <div class="spatial-pick" :class="{ ready: importForm.spatialGeoJson || platformGeometry(importForm.platformId) }">
+          <span>{{ importForm.spatialGeoJson ? (isSatellitePlatform(importForm.platformId) ? '影像覆盖范围已设置' : '导入空间位置已设置') : (isSatellitePlatform(importForm.platformId) ? '需从产品元数据或地图提供覆盖面' : '导入后默认采用平台位置') }}</span>
+          <button class="btn ghost" type="button" @click="applyMapDrawSpatial('import')">{{ isSatellitePlatform(importForm.platformId) ? '采用地图绘制覆盖面' : '采用地图位置' }}</button>
+        </div>
         <label>重复策略
           <select v-model="importForm.duplicateStrategy">
             <option value="reject">reject</option>
@@ -1330,7 +1403,7 @@ onUnmounted(() => {
             <td>{{ d.dataType }}</td>
             <td>{{ d.qualityStatus || '-' }}</td>
             <td>{{ d.timeStart }} ~ {{ d.timeEnd }}</td>
-            <td><code>{{ String(d.spatialWkt || '-').slice(0, 48) }}</code></td>
+            <td>{{ d.spatialGeoJson || d.spatialWkt ? '已定位' : '未定位' }}</td>
             <td class="ops">
               <button class="btn ghost" type="button" @click.stop="locateOnMap(String(d.id))">定位</button>
               <button class="btn ghost" type="button" @click.stop="showDataOnMap">数据上图</button>

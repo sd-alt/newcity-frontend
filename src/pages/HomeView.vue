@@ -15,20 +15,10 @@ import {
 } from '../gis/mapShell'
 
 const { user } = useAuthStore()
-const health = ref('检测中…')
 const error = ref<string | null>(null)
 const mapHint = ref<string | null>(null)
 const runningTasks = ref<Array<Record<string, unknown>>>([])
 const offlineRows = ref<Array<Record<string, unknown>>>([])
-
-const entries = [
-  { to: '/indicators', tab: 'instances', label: '感知指标中心', desc: '样例 / 实例 / 查询 / 版本' },
-  { to: '/resources', tab: 'crud', label: '传感资源中心', desc: '类型 / 建模 / 查询 / 上图' },
-  { to: '/data', tab: 'sources', label: '观测数据中心', desc: '建模 / 多源接入 / 查询' },
-  { to: '/planning', tab: 'tasks', label: '观测规划中心', desc: '任务→候选→关联→方案' },
-  { to: '/algorithms', tab: 'tasks', label: '算法处理中心', desc: '模型 / 任务 / 调度 / 结果' },
-  { to: '/applications', tab: 'gis', label: '综合应用中心', desc: 'GIS 展示 / 综合统计' },
-]
 
 const alertTotal = computed(
   () =>
@@ -49,12 +39,6 @@ function asList(payload: unknown): Array<Record<string, unknown>> {
 }
 
 onMounted(async () => {
-  try {
-    const res = await api.getHealth()
-    health.value = (res.service || 'newcity') + ' · ' + (res.status || 'ok')
-  } catch {
-    health.value = '后端未连通'
-  }
   try {
     await focusShellMode('all', '/')
   } catch (e) {
@@ -132,14 +116,12 @@ async function filterMap(mode: 'sensors' | 'data' | 'tasks' | 'all' | 'alerts' |
     <header class="page-head">
       <div>
         <p class="eyebrow">综合首页</p>
-        <h1>地图工作台</h1>
-        <p class="muted">中间永久底图；左侧切换六个中心，不销毁地图。点击下方指标卡可过滤底图。</p>
+        <h1>综合态势</h1>
       </div>
     </header>
 
     <p class="hint">{{ shellLoading ? '图层加载中…' : shellStatus }}</p>
     <p v-if="mapHint" class="ok-text">{{ mapHint }}</p>
-    <p class="muted">服务状态：{{ health }}</p>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="!user" class="error">业务图层需登录。请先 <RouterLink to="/login">登录</RouterLink>。</p>
 
@@ -197,18 +179,6 @@ async function filterMap(mode: 'sensors' | 'data' | 'tasks' | 'all' | 'alerts' |
       </ul>
     </div>
 
-    <h3 class="home-sec">进入中心</h3>
-    <div class="home-links">
-      <RouterLink
-        v-for="e in entries"
-        :key="e.to"
-        :to="{ path: e.to, query: { tab: e.tab } }"
-        class="home-link"
-      >
-        <strong>{{ e.label }}</strong>
-        <span>{{ e.desc }}</span>
-      </RouterLink>
-    </div>
   </section>
 </template>
 
@@ -230,14 +200,5 @@ async function filterMap(mode: 'sensors' | 'data' | 'tasks' | 'all' | 'alerts' |
   border: 0; background: transparent; color: #1677FF; cursor: pointer; padding: 0; text-align: left; font: inherit;
 }
 .linkish:hover { text-decoration: underline; }
-.home-sec { margin: 0.75rem 0 0.4rem; font-size: 13px; color: #0F3D66; }
-.home-links { display: grid; gap: 0.35rem; }
-.home-link {
-  display: grid; gap: 0.1rem; padding: 0.5rem 0.6rem; border: 1px solid #E5E7EB; border-radius: 8px;
-  background: #fff; color: inherit; text-decoration: none;
-}
-.home-link:hover { border-color: #93C5FD; background: rgba(22,119,255,0.04); }
-.home-link strong { font-size: 13px; color: #0F3D66; }
-.home-link span { font-size: 12px; color: #6B7280; }
 .ok-text { color: #027a48; font-size: 12px; }
 </style>

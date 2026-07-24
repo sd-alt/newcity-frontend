@@ -1,7 +1,7 @@
 import { reactive, ref, shallowRef } from 'vue'
 import * as Cesium from 'cesium'
 import { mapToolMode } from './mapTools'
-import type { CustomDataSource, Viewer } from 'cesium'
+import type { DataSource, Viewer } from 'cesium'
 import * as api from '../api/endpoints'
 import {
   applyBasemap,
@@ -104,7 +104,7 @@ export function closeShellContextMenu() {
 }
 
 
-const dataSources: CustomDataSource[] = []
+const dataSources: DataSource[] = []
 let pickHandler: Cesium.ScreenSpaceEventHandler | null = null
 let cacheSensors: Array<Record<string, unknown>> = []
 let cacheData: Array<Record<string, unknown>> = []
@@ -232,6 +232,13 @@ function applyHighlight(entity: Cesium.Entity) {
       entity.point!.pixelSize = prev
       entity.point!.outlineWidth = prevOutline
       entity.point!.outlineColor = prevColor
+    })
+  }
+  if (entity.label) {
+    const prev = entity.label.show
+    entity.label.show = new Cesium.ConstantProperty(true)
+    restores.push(() => {
+      entity.label!.show = prev
     })
   }
   if (entity.polyline) {
@@ -402,7 +409,7 @@ function selectFromEntity(
   shellBubbleEntity = entity
   const descLines = description.split('\n').map((s) => s.trim()).filter(Boolean)
   const statusLine = descLines.find((l) => /状态|status|质量/i.test(l))
-  const spatialLine = descLines.find((l) => /WKT|POINT|POLYGON|LINESTRING|位置|研究区|覆盖/i.test(l))
+  const spatialLine = descLines.find((l) => /位置|任务区域|研究区|覆盖|空间范围/i.test(l))
   const relationLines = descLines.filter((l) => /ID|平台|任务|指标|传感器|标识|关联|platform|task|instance|sensor/i.test(l))
   const stripLabel = (line: string) => line.replace(/^[^:：]*[:：]\s*/, '').trim()
   shellSelected.value = {
@@ -1050,9 +1057,7 @@ export async function reloadShellLayers(path: string, query: Record<string, unkn
             `定义: ${item.definitionCode || item.definitionName || '-'}`,
             `实例ID: ${item.id}`,
             item.definitionId != null ? `定义ID: ${item.definitionId}` : '',
-            String(item.spatialWkt || item.geometryWkt || '').trim()
-              ? `范围WKT: ${String(item.spatialWkt || item.geometryWkt)}`
-              : '',
+            String(item.spatialWkt || item.geometryWkt || '').trim() ? '空间范围: 已加载' : '',
           ]
             .filter(Boolean)
             .join('<br/>'),
@@ -1496,8 +1501,43 @@ async function pushWktOverlay(
   return 1
 }
 
+async function pushGeoJsonOverlay(
+  name: string,
+  geometry: Record<string, unknown> | null | undefined,
+  label: string,
+  colorCss: string,
+  alpha = 0.35,
+) {
+  const viewer = shellViewer.value
+  if (!viewer || viewer.isDestroyed() || !geometry) return 0
+  await removeDataSourceByName(name)
+  try {
+    const color = Cesium.Color.fromCssColorString(colorCss)
+    const ds = await Cesium.GeoJsonDataSource.load(
+      {
+        type: 'Feature',
+        properties: { name: label, description: label },
+        geometry,
+      },
+      {
+        stroke: color,
+        fill: color.withAlpha(alpha),
+        strokeWidth: 2,
+        clampToGround: true,
+      },
+    )
+    ds.name = name
+    await viewer.dataSources.add(ds)
+    dataSources.push(ds)
+    return 1
+  } catch {
+    return 0
+  }
+}
+
 /** 规划覆盖表达：任务区(蓝) + 已覆盖(绿) + 缺口(红) */
 export async function drawPlanningCoverageOverlay(input: {
+  taskGeoJson?: Record<string, unknown> | null
   taskWkt?: string
   coverageWkt?: string
   gapWkt?: string
@@ -1506,14 +1546,22 @@ export async function drawPlanningCoverageOverlay(input: {
   const viewer = shellViewer.value
   if (!viewer || viewer.isDestroyed()) return { task: 0, coverage: 0, gap: 0 }
 
-  const task = await pushWktOverlay(
-    'planning-task-area',
-    'plan-task',
-    String(input.taskWkt || ''),
-    '任务目标区域',
-    '#1677FF',
-    0.22,
-  )
+  const task = input.taskGeoJson
+    ? await pushGeoJsonOverlay(
+        'planning-task-area',
+        input.taskGeoJson,
+        '任务目标区域',
+        '#1677FF',
+        0.22,
+      )
+    : await pushWktOverlay(
+        'planning-task-area',
+        'plan-task',
+        String(input.taskWkt || ''),
+        '任务目标区域',
+        '#1677FF',
+        0.22,
+      )
   const coverage = await pushWktOverlay(
     'planning-coverage',
     'plan-cover',
@@ -1551,6 +1599,8 @@ export async function clearPlanningCoverageOverlay() {
 
 /** 算法输入/结果区域上图 */
 export async function drawAlgoRegionOverlay(input: {
+  inputGeoJson?: Record<string, unknown> | null
+  resultGeoJson?: Record<string, unknown> | null
   inputWkt?: string
   resultWkt?: string
   fit?: boolean
@@ -1559,23 +1609,41 @@ export async function drawAlgoRegionOverlay(input: {
 }): Promise<number> {
   const viewer = shellViewer.value
   if (!viewer || viewer.isDestroyed()) return 0
+  await removeDataSourceByName('algo-input-area')
+  await removeDataSourceByName('algo-result-area')
   let n = 0
-  n += await pushWktOverlay(
-    'algo-input-area',
-    'algo-in',
-    String(input.inputWkt || ''),
-    input.inputLabel || '算法输入区域',
-    '#7C3AED',
-    0.3,
-  )
-  n += await pushWktOverlay(
-    'algo-result-area',
-    'algo-out',
-    String(input.resultWkt || ''),
-    input.resultLabel || '算法结果区域',
-    '#F59E0B',
-    0.35,
-  )
+  n += input.inputGeoJson
+    ? await pushGeoJsonOverlay(
+        'algo-input-area',
+        input.inputGeoJson,
+        input.inputLabel || '算法输入区域',
+        '#7C3AED',
+        0.3,
+      )
+    : await pushWktOverlay(
+        'algo-input-area',
+        'algo-in',
+        String(input.inputWkt || ''),
+        input.inputLabel || '算法输入区域',
+        '#7C3AED',
+        0.3,
+      )
+  n += input.resultGeoJson
+    ? await pushGeoJsonOverlay(
+        'algo-result-area',
+        input.resultGeoJson,
+        input.resultLabel || '算法结果区域',
+        '#F59E0B',
+        0.35,
+      )
+    : await pushWktOverlay(
+        'algo-result-area',
+        'algo-out',
+        String(input.resultWkt || ''),
+        input.resultLabel || '算法结果区域',
+        '#F59E0B',
+        0.35,
+      )
   applyVisibility()
   if (input.fit !== false && n > 0) await fitShellView()
   shellStatus.value = n ? `算法区域上图 ${n} 层` : '无可绘制的算法区域'

@@ -250,6 +250,132 @@ export function createViewer(container: HTMLElement, basemap?: BasemapKey): Cesi
   return viewer
 }
 
+type SatelliteTrajectoryPoint = {
+  time: string
+  longitude: number
+  latitude: number
+  altitudeKm?: number
+  altitudeM?: number
+}
+
+function addDynamicTrajectory(
+  dataSource: Cesium.CustomDataSource,
+  id: string,
+  name: string,
+  item: Record<string, unknown>,
+  color: Cesium.Color,
+  description: string,
+) {
+  const trajectory = (item.trajectory || {}) as {
+    available?: boolean
+    source?: string
+    tleVersion?: number
+    generatedAt?: string
+    points?: SatelliteTrajectoryPoint[]
+  }
+  const points = (trajectory.points || []).filter((point) =>
+    Number.isFinite(Number(point.longitude)) &&
+    Number.isFinite(Number(point.latitude)) &&
+    Number.isFinite(Date.parse(String(point.time))),
+  )
+  if (!trajectory.available || points.length < 1) return false
+  const altitudeMeters = (point: SatelliteTrajectoryPoint) =>
+    Number.isFinite(Number(point.altitudeKm))
+      ? Number(point.altitudeKm) * 1000
+      : Number(point.altitudeM || 0)
+
+  const segments: SatelliteTrajectoryPoint[][] = [[]]
+  for (const point of points) {
+    const currentSegment = segments[segments.length - 1]!
+    const previous = currentSegment[currentSegment.length - 1]
+    if (previous && Math.abs(Number(point.longitude) - Number(previous.longitude)) > 180) {
+      segments.push([])
+    }
+    segments[segments.length - 1]!.push(point)
+  }
+  for (const [index, segment] of segments.entries()) {
+    if (segment.length < 2) continue
+    dataSource.entities.add({
+      id: `sensor-track-${id}-${index}`,
+      name: `${name} 真实轨道`,
+      description,
+      polyline: {
+        positions: segment.map((point) =>
+          Cesium.Cartesian3.fromDegrees(
+            Number(point.longitude),
+            Number(point.latitude),
+            altitudeMeters(point),
+          ),
+        ),
+        width: 3,
+        material: new Cesium.PolylineGlowMaterialProperty({
+          color: Cesium.Color.fromCssColorString('#38BDF8').withAlpha(0.9),
+          glowPower: 0.18,
+        }),
+        clampToGround: false,
+        arcType: Cesium.ArcType.NONE,
+      },
+    })
+  }
+
+  const now = Date.now()
+  const current = points.reduce((best, point) =>
+    Math.abs(Date.parse(point.time) - now) < Math.abs(Date.parse(best.time) - now)
+      ? point
+      : best,
+  )
+  const currentDescription = [
+    description,
+    `位置来源: ${trajectory.source || '位置轨迹接口'}`,
+    trajectory.tleVersion != null ? `TLE版本: ${trajectory.tleVersion}` : '',
+    Number.isFinite(Number(current.altitudeKm))
+      ? `轨道高度: ${Number(current.altitudeKm).toFixed(1)} km`
+      : Number.isFinite(Number(current.altitudeM))
+        ? `当前高度: ${Number(current.altitudeM).toFixed(1)} m`
+        : '',
+    `位置时刻: ${new Date(current.time).toLocaleString('zh-CN')}`,
+    trajectory.generatedAt
+      ? `轨迹生成: ${new Date(trajectory.generatedAt).toLocaleString('zh-CN')}`
+      : '',
+  ].filter(Boolean).join('<br/>')
+  dataSource.entities.add({
+    id: `sensor-${id}`,
+    name,
+    description: currentDescription,
+    position: Cesium.Cartesian3.fromDegrees(
+      Number(current.longitude),
+      Number(current.latitude),
+      altitudeMeters(current),
+    ),
+    point: {
+      pixelSize: 13,
+      color: Cesium.Color.fromCssColorString('#F8FAFC'),
+      outlineColor: color,
+      outlineWidth: 4,
+      heightReference: Cesium.HeightReference.NONE,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+    label: {
+      show: false,
+      text: Number.isFinite(Number(current.altitudeKm))
+        ? `${name} · ${Number(current.altitudeKm).toFixed(0)} km`
+        : name,
+      font: '12px "Microsoft YaHei", "PingFang SC", sans-serif',
+      fillColor: Cesium.Color.WHITE,
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 3,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      pixelOffset: new Cesium.Cartesian2(0, -16),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      showBackground: true,
+      backgroundColor: Cesium.Color.fromCssColorString('#082F49').withAlpha(0.78),
+      backgroundPadding: new Cesium.Cartesian2(7, 4),
+    },
+  })
+  return true
+}
+
 export async function loadSensorLayer(
   viewer: Cesium.Viewer,
   features: Array<Record<string, unknown>>,
@@ -258,17 +384,24 @@ export async function loadSensorLayer(
   for (const item of features) {
     const id = String(item.platformId ?? item.id ?? Math.random())
     const name = String(item.platformName || item.name || id)
+    const typeCode = String(item.typeCode || '')
+    const spatial = (item.spatial || {}) as {
+      positionWkt?: string
+      trackWkt?: string
+      coverageWkt?: string
+    }
     const wkt = String(
       item.locationWkt ||
-        (item.spatial as { positionWkt?: string } | undefined)?.positionWkt ||
+        spatial.positionWkt ||
         '',
     )
+    const track = String(spatial.trackWkt || '')
     const cap = (item.capabilitySummary || item.capability || {}) as {
       coverageWkts?: string[]
       coverageWkt?: string
     }
     const coverage = String(
-      (item.spatial as { coverageWkt?: string } | undefined)?.coverageWkt ||
+      spatial.coverageWkt ||
         cap.coverageWkt ||
         (Array.isArray(cap.coverageWkts) ? cap.coverageWkts[0] : '') ||
         '',
@@ -280,12 +413,18 @@ export async function loadSensorLayer(
       `状态: ${status || '-'}`,
       `标识: ${item.platformIdentifier || '-'}`,
       `平台ID: ${id}`,
-      wkt ? `位置WKT: ${wkt}` : '',
-      coverage ? `覆盖WKT: ${coverage}` : '',
+      wkt ? '位置: 已加载' : '',
+      coverage ? '覆盖范围: 已加载' : '',
     ]
       .filter(Boolean)
       .join('<br/>')
-    if (wkt) addGeometryEntity(ds, `sensor-${id}`, name, wkt, color, desc)
+    if (typeCode === 'satellite') {
+      addDynamicTrajectory(ds, id, name, item, color, desc)
+      continue
+    }
+    const dynamicTrack = addDynamicTrajectory(ds, id, name, item, color, desc)
+    if (!dynamicTrack && wkt) addGeometryEntity(ds, `sensor-${id}`, name, wkt, color, desc)
+    if (track) addGeometryEntity(ds, `sensor-track-${id}`, `${name}-档案轨迹`, track, color, desc)
     if (coverage) {
       addGeometryEntity(ds, `sensor-cov-${id}`, `${name}-覆盖`, coverage, color.withAlpha(0.22), desc)
     }
@@ -317,7 +456,7 @@ export async function loadDataLayer(
       props.platformId != null ? `平台ID: ${props.platformId}` : '',
       props.taskId != null ? `任务ID: ${props.taskId}` : '',
       props.instanceId != null ? `指标实例ID: ${props.instanceId}` : '',
-      wkt ? `位置WKT: ${wkt}` : '',
+      wkt ? '空间位置: 已加载' : '',
     ]
       .filter(Boolean)
       .join('<br/>')
@@ -386,7 +525,7 @@ export async function loadTaskLayer(
       Array.isArray(props.indicatorInstanceIds)
         ? `关联指标: ${(props.indicatorInstanceIds as unknown[]).join(',')}`
         : '',
-      wkt ? `研究区WKT: ${wkt}` : '',
+      wkt ? '任务区域: 已加载' : '',
     ]
       .filter(Boolean)
       .join('<br/>')
