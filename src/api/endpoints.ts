@@ -135,6 +135,18 @@ export const createSensor = (body: Record<string, unknown>) => createAny('/api/v
 export const updateSensor = (id: number | string, body: Record<string, unknown>) => updateAny('/api/v1/observations/sensors/' + id, body)
 export const deleteSensor = (id: number | string) => deleteAny('/api/v1/observations/sensors/' + id)
 export const getResourceVisualization = (query = '') => getAny('/api/v1/observations/visualization' + query)
+export const syncSatelliteOnline = (platformId: number | string) =>
+  postAction('/api/v1/observations/tle/sync-online', { platformId: Number(platformId) })
+export const accessSatelliteOnline = (body: Record<string, unknown>) =>
+  postAction('/api/v1/observations/satellites/access-online', body)
+export const listPositionSources = (query = '') =>
+  listAny('/api/v1/observations/position-sources' + query)
+export const createPositionSource = (body: Record<string, unknown>) =>
+  createAny('/api/v1/observations/position-sources', body)
+export const updatePositionSource = (platformId: number | string, body: Record<string, unknown>) =>
+  updateAny('/api/v1/observations/position-sources/' + platformId, body)
+export const ingestPlatformTrack = (body: Record<string, unknown>) =>
+  postAction('/api/v1/observations/platform-tracks/ingest', body)
 
 // data
 export const listDatasets = () => listAny('/api/v1/observations/datasets')
@@ -172,7 +184,9 @@ export const deleteTask = (id: number | string) => deleteAny('/api/v1/planning/t
 export const submitTask = (id: number | string) => postAction('/api/v1/planning/tasks/' + id + '/submit')
 export const cancelTask = (id: number | string) => postAction('/api/v1/planning/tasks/' + id + '/cancel')
 export const addTaskIndicators = (id: number | string, instanceIds: number[]) =>
-  postAction('/api/v1/planning/tasks/' + id + '/add-indicators', { instanceIds })
+  postAction('/api/v1/planning/tasks/' + id + '/add-indicators', { indicatorInstanceIds: instanceIds })
+export const screenTaskCandidates = (id: number | string) =>
+  postAction('/api/v1/planning/tasks/' + id + '/candidate-screening')
 export const basicAssociation = (id: number | string) => postAction('/api/v1/planning/tasks/' + id + '/basic-association')
 export const optimizeAssociation = (id: number | string) => postAction('/api/v1/planning/tasks/' + id + '/optimize-association')
 export const supplementAssociation = (id: number | string) =>

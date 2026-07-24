@@ -7,8 +7,6 @@ import {
   reloadShellLayers,
   selectShellFeature,
   updateShellBubbleScreen,
-  setShellBasemap,
-  shellBasemap,
   shellBubbleOpen,
   shellCounts,
   shellAlerts,
@@ -21,7 +19,6 @@ import {
   type ShellFeatureKind,
 } from '../gis/mapShell'
 import { mapToolMessage, setMapToolMode, mapDrawGeometry } from '../gis/mapTools'
-import type { BasemapKey } from '../gis/mapConfig'
 import * as api from '../api/endpoints'
 
 const { user, loading, logout } = useAuthStore()
@@ -32,8 +29,8 @@ const leftOpen = ref(true)
 // right panel state lives in mapShell (shared with map toolbar)
 const rightOpen = shellRightOpen
 const bottomOpen = ref(false)
-const leftWidth = ref(320)
-const basemapOpen = ref(false)
+const leftWidth = ref(340)
+const userMenuOpen = ref(false)
 const searchQ = ref('')
 const searchOpen = ref(false)
 const searchLoading = ref(false)
@@ -143,13 +140,6 @@ const centers: CenterItem[] = [
   },
 ]
 
-const basemaps: Array<{ key: BasemapKey; label: string }> = [
-  { key: 'vector', label: '标准地图' },
-  { key: 'imagery', label: '卫星影像' },
-  { key: 'terrain', label: '地形地图' },
-  { key: 'admin', label: '行政区划' },
-]
-
 const activeCenter = computed(() => {
   if (route.path === '/' || route.name === 'home') return null
   return centers.find((c) => route.path === c.to || route.path.startsWith(c.to + '/')) || null
@@ -161,7 +151,7 @@ const currentCenterLabel = computed(() => {
 })
 
 const pageLabel = computed(() => {
-  if (!activeCenter.value) return '页面'
+  if (!activeCenter.value) return '运行态势'
   const tab = String(route.query.tab || activeCenter.value.defaultTab)
   return activeCenter.value.children.find((c) => c.key === tab)?.label || '概览'
 })
@@ -189,7 +179,7 @@ watch(
   () => route.fullPath,
   () => {
     searchOpen.value = false
-    basemapOpen.value = false
+    userMenuOpen.value = false
     if (activeCenter.value && activeSubKey.value) {
       lastTabByCenter.value[activeCenter.value.key] = activeSubKey.value
     }
@@ -275,11 +265,6 @@ async function goCenter(c: CenterItem) {
 async function goSub(key: string) {
   if (!activeCenter.value) return
   await router.push({ path: activeCenter.value.to, query: { ...route.query, tab: key } })
-}
-
-function chooseBasemap(key: BasemapKey) {
-  setShellBasemap(key)
-  basemapOpen.value = false
 }
 
 function kindLabel(kind: ShellFeatureKind) {
@@ -459,10 +444,11 @@ async function doLogout() {
   >
     <header class="topbar">
       <div class="topbar-left">
+        <span class="brand-mark" aria-hidden="true"></span>
         <button type="button" class="sys-name" title="返回首页" @click="goHome">地学传感网智能感知服务系统</button>
         <span class="topbar-sep">/</span>
         <span class="topbar-center-label">{{ currentCenterLabel }}</span>
-        <span class="topbar-sep">/</span>
+        <span class="topbar-sep topbar-page-sep">/</span>
         <span class="topbar-page">{{ pageLabel }}</span>
       </div>
 
@@ -496,23 +482,22 @@ async function doLogout() {
       </div>
 
       <div class="topbar-right">
-        <div class="basemap-wrap">
-          <button type="button" class="btn ghost tiny" @click="basemapOpen = !basemapOpen">底图</button>
-          <div v-if="basemapOpen" class="basemap-menu">
-            <button
-              v-for="b in basemaps"
-              :key="b.key"
-              type="button"
-              class="basemap-item"
-              :class="{ active: shellBasemap === b.key }"
-              @click="chooseBasemap(b.key)"
-            >
-              {{ b.label }}
-            </button>
+        <div v-if="user" class="user-menu-wrap">
+          <button
+            type="button"
+            class="btn ghost tiny user-menu-trigger"
+            aria-haspopup="menu"
+            :aria-expanded="userMenuOpen"
+            @click="userMenuOpen = !userMenuOpen"
+          >
+            {{ user.username }}
+            <span aria-hidden="true">▾</span>
+          </button>
+          <div v-if="userMenuOpen" class="user-menu" role="menu">
+            <button type="button" class="user-menu-item" role="menuitem" @click="doLogout">退出登录</button>
           </div>
         </div>
-        <span class="user-chip">{{ user?.username || (loading ? '加载中' : '未登录') }}</span>
-        <button v-if="user" type="button" class="btn ghost tiny" @click="doLogout">退出</button>
+        <span v-else-if="loading" class="user-chip">加载中</span>
         <RouterLink v-else to="/login" class="btn ghost tiny">登录</RouterLink>
       </div>
     </header>
@@ -525,6 +510,7 @@ async function doLogout() {
         type="button"
         class="rail-item"
         :class="{ active: activeCenter?.key === c.key }"
+        :aria-current="activeCenter?.key === c.key ? 'page' : undefined"
         :title="c.label"
         @click="goCenter(c)"
       >
@@ -586,7 +572,9 @@ async function doLogout() {
           <div class="drawer-meta">{{ kindLabel(shellSelected.kind) }} · ID {{ shellSelected.id }}</div>
           <h3>{{ shellSelected.name }}</h3>
           <pre v-if="drawerTab === 'basic'" class="drawer-pre">{{ shellSelected.description || '暂无描述' }}</pre>
-          <pre v-else-if="drawerTab === 'spatial'" class="drawer-pre">{{ shellSelected.spatial || '暂无空间信息（可在业务中心维护 WKT / 坐标）' }}</pre>
+          <div v-else-if="drawerTab === 'spatial'" class="drawer-pre">
+            {{ shellSelected.spatial ? '空间位置已加载，可通过地图定位、缩放和图层查看。' : '暂无空间信息，请在对应业务中心使用地图绘制补充。' }}
+          </div>
           <pre v-else-if="drawerTab === 'relations'" class="drawer-pre">{{ shellSelected.relations || '暂无关联关系' }}</pre>
           <pre v-else class="drawer-pre">{{ shellSelected.status || '状态未知' }}
 
@@ -608,7 +596,7 @@ async function doLogout() {
     <!-- section -->
     <footer class="bottom-tray" :class="{ open: bottomOpen }">
       <button type="button" class="bottom-toggle" @click="toggleBottom">
-        <span>{{ bottomOpen ? '收起托盘' : '展开托盘' }}</span>
+        <span>{{ bottomOpen ? '收起运行摘要' : '展开运行摘要' }}</span>
         <span class="muted">{{ bottomSummary }}</span>
       </button>
       <div v-if="bottomOpen" class="bottom-body">

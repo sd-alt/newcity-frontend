@@ -17,6 +17,7 @@ import {
 import { canByStatus, errMessage, isoNow, pickId } from '../utils/errors'
 import { useAuthStore } from '../stores/auth'
 import { mapDrawGeometry } from '../gis/mapTools'
+import { wktToGeoJson, type SimpleGeometry } from '../gis/wkt'
 
 type StepKey =
   | 'create'
@@ -101,15 +102,36 @@ const comparePlanLeft = ref('')
 const comparePlanRight = ref('')
 const compareResult = ref<unknown>(null)
 
+function businessResultText(value: unknown, limit = 2500) {
+  const clean = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(clean)
+    if (!input || typeof input !== 'object') return input
+    return Object.fromEntries(
+      Object.entries(input as Record<string, unknown>)
+        .filter(([key]) => !key.toLowerCase().includes('wkt'))
+        .map(([key, item]) => [key, clean(item)]),
+    )
+  }
+  return JSON.stringify(clean(value), null, 2).slice(0, limit)
+}
+
 const instanceId = ref('')
 const scaleId = ref('')
 const taskCode = ref('')
 const taskName = ref('暴雨观测任务')
-const researchAreaWkt = ref('')
+const observationTarget = ref('面向目标区域开展连续观测并形成可追溯规划方案')
+const priority = ref('normal')
+const taskTimeStart = ref(isoNow(-30 * 60_000).slice(0, 16))
+const taskTimeEnd = ref(isoNow(5 * 3600_000).slice(0, 16))
+const researchAreaGeoJson = ref<SimpleGeometry | null>(null)
+const researchAreaStatus = computed(() => {
+  if (!researchAreaGeoJson.value) return '尚未设置任务区域'
+  return researchAreaGeoJson.value.type === 'MultiPolygon' ? '已设置多个任务区域' : '已设置任务区域'
+})
 
-function applyMapDrawWkt() {
+function applyMapDrawGeometry() {
   const g = mapDrawGeometry.value
-  if (!g || !g.wkt) {
+  if (!g || !g.geojson) {
     error.value = '请先用地图工具绘面，双击结束'
     return
   }
@@ -117,11 +139,20 @@ function applyMapDrawWkt() {
     const lon = g.lon
     const lat = g.lat
     const d = 0.08
-    researchAreaWkt.value = `POLYGON((${lon - d} ${lat - d},${lon + d} ${lat - d},${lon + d} ${lat + d},${lon - d} ${lat + d},${lon - d} ${lat - d}))`
+    researchAreaGeoJson.value = {
+      type: 'Polygon',
+      coordinates: [[
+        [lon - d, lat - d],
+        [lon + d, lat - d],
+        [lon + d, lat + d],
+        [lon - d, lat + d],
+        [lon - d, lat - d],
+      ]],
+    }
   } else {
-    researchAreaWkt.value = g.wkt
+    researchAreaGeoJson.value = g.geojson
   }
-  message.value = '已将地图绘制范围写入研究区'
+  message.value = '已采用地图绘制范围作为任务区域'
   error.value = null
 }
 
@@ -162,6 +193,9 @@ const reverseSummary = computed(() => {
 })
 
 const hasTask = computed(() => taskId.value != null)
+const canEditDraft = computed(
+  () => taskId.value != null && (taskStatus.value === '' || taskStatus.value === 'draft' || taskStatus.value === 'created'),
+)
 
 function inferStepFromStatus(status: string): StepKey {
   const s = (status || '').toLowerCase()
@@ -337,14 +371,14 @@ const selectedInstanceWindow = computed(() => {
 })
 
 function syncFromSelectedInstance() {
-  if (hasTask.value) return
   const row = instances.value.find((i) => String(i.id) === instanceId.value)
   if (!row) return
-  if (row.spatialWkt) researchAreaWkt.value = String(row.spatialWkt)
   if (row.scaleId) scaleId.value = String(row.scaleId)
   if (row.resolution != null) resolution.value = Number(row.resolution)
   if (row.temporalRes) temporalRes.value = String(row.temporalRes)
   if (row.targetAccuracy != null) targetAccuracy.value = Number(row.targetAccuracy)
+  if (!hasTask.value && row.timeStart) taskTimeStart.value = String(row.timeStart).slice(0, 16)
+  if (!hasTask.value && row.timeEnd) taskTimeEnd.value = String(row.timeEnd).slice(0, 16)
 }
 
 
@@ -390,13 +424,14 @@ async function loadLists() {
 
 async function createTask() {
   if (canRun('create') === false) return
-  if (instanceId.value === '' || scaleId.value === '' || taskName.value === '') {
-    error.value = '请选择指标实例、尺度，并填写任务名称（表单内容已保留）'
+  if (taskName.value.trim() === '' || observationTarget.value.trim() === '') {
+    error.value = '请填写任务名称和观测目标'
     return
   }
-  syncFromSelectedInstance()
-  if (!researchAreaWkt.value) {
-    error.value = '研究区 WKT 不能为空：请选择带空间范围的指标实例，或地图绘面后点“写入地图绘制范围”'
+  const start = new Date(taskTimeStart.value)
+  const end = new Date(taskTimeEnd.value)
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start >= end) {
+    error.value = '任务结束时间必须晚于开始时间'
     return
   }
   pending.value = true
@@ -404,17 +439,56 @@ async function createTask() {
   message.value = null
   try { await showPlanningWorkspace('/planning') } catch { /* map refresh optional */ }
   try {
-    const inst = instances.value.find((i) => String(i.id) === instanceId.value)
     const created = await api.createTask({
-      code: taskCode.value || ('TASK-' + Date.now()),
       name: taskName.value,
+      observationTarget: observationTarget.value,
+      priority: priority.value,
       description: '观测规划业务任务',
       taskType: 'manual',
+      timeStart: start.toISOString(),
+      timeEnd: end.toISOString(),
+    })
+    const data = created.data as { id: number; code?: string; status?: string }
+    taskId.value = data.id
+    taskCode.value = data.code || ''
+    taskStatus.value = data.status || 'draft'
+    setLastTaskId(data.id)
+    markDone('create')
+    advanceTo('submit')
+    message.value = '任务草稿已保存，请绘制任务区域并完成观测配置'
+    await setTab('flow')
+    try { await showPlanningWorkspace('/planning') } catch { /* map refresh optional */ }
+    try {
+      await selectShellFeature('task', String(data.id), { openBubble: true, fly: true })
+    } catch { /* map optional */ }
+    await loadLists()
+  } catch (err) {
+    error.value = errMessage(err, '创建任务失败')
+  } finally {
+    pending.value = false
+  }
+}
+
+async function saveTaskConfiguration() {
+  if (!canEditDraft.value || taskId.value == null) return false
+  if (!instanceId.value || !scaleId.value) {
+    error.value = '请选择指标实例和观测尺度'
+    return false
+  }
+  if (!researchAreaGeoJson.value) {
+    error.value = '请先在地图绘制任务区域，再采用绘制结果'
+    return false
+  }
+  pending.value = true
+  error.value = null
+  try {
+    const res = await api.updateTask(taskId.value, {
+      name: taskName.value,
+      observationTarget: observationTarget.value,
+      priority: priority.value,
       scaleId: Number(scaleId.value),
       indicatorInstanceIds: [Number(instanceId.value)],
-      researchAreaWkt: researchAreaWkt.value,
-      timeStart: (inst && inst.timeStart) ? String(inst.timeStart) : isoNow(-30 * 60_000),
-      timeEnd: (inst && inst.timeEnd) ? String(inst.timeEnd) : isoNow(5 * 3600_000),
+      researchAreaGeoJson: researchAreaGeoJson.value,
       resolution: Number(resolution.value),
       temporalRes: temporalRes.value,
       targetAccuracy: Number(targetAccuracy.value),
@@ -426,24 +500,14 @@ async function createTask() {
       wCapability: Number(wCapability.value),
       wReliability: Number(wReliability.value),
     })
-    const data = created.data as { id: number; status?: string }
-    taskId.value = data.id
-    taskStatus.value = data.status || 'created'
-    setLastTaskId(data.id)
-    markDone('create')
-    advanceTo('submit')
-    message.value = '任务已创建 #' + data.id + '，请提交任务'
-    await setTab('flow')
-    try { await showPlanningWorkspace('/planning') } catch { /* map refresh optional */ }
-    try {
-      await selectShellFeature('task', String(data.id), { openBubble: true, fly: true })
-      if (researchAreaWkt.value) {
-        await drawPlanningCoverageOverlay({ taskWkt: researchAreaWkt.value, fit: false })
-      }
-    } catch { /* map optional */ }
+    taskStatus.value = String((res.data as { status?: string }).status || 'draft')
+    await drawPlanningCoverageOverlay({ taskGeoJson: researchAreaGeoJson.value, fit: true })
+    message.value = '任务区域和观测约束已保存'
     await loadLists()
+    return true
   } catch (err) {
-    error.value = errMessage(err, '创建任务失败')
+    error.value = errMessage(err, '保存任务配置失败')
+    return false
   } finally {
     pending.value = false
   }
@@ -451,6 +515,7 @@ async function createTask() {
 
 async function submitTask() {
   if (canRun('submit') === false || taskId.value == null) return
+  if (canEditDraft.value && !(await saveTaskConfiguration())) return
   pending.value = true
   error.value = null
   try {
@@ -527,8 +592,11 @@ async function confirmCandidates() {
   pending.value = true
   error.value = null
   try {
-    // stay on flow tab so primary CTA remains available for the next step
-    await loadCandidates(false, true)
+    const screened = await api.screenTaskCandidates(taskId.value)
+    const data = screened.data as Record<string, unknown>
+    candidateMeta.value = data
+    candidateRows.value = Array.isArray(data.candidates) ? data.candidates as Record<string, unknown>[] : []
+    excludedRows.value = Array.isArray(data.excluded) ? data.excluded as Record<string, unknown>[] : []
     markDone('candidates')
     if (STEP_ORDER.indexOf(currentStep.value) <= STEP_ORDER.indexOf('candidates')) {
       advanceTo('basic')
@@ -674,7 +742,7 @@ async function requirementEvaluation() {
     const oc = (res.data as { overallCoverage?: Record<string, unknown> })?.overallCoverage || {}
     try {
       await drawPlanningCoverageOverlay({
-        taskWkt: researchAreaWkt.value || String((res.data as { task?: { researchAreaWkt?: string } })?.task?.researchAreaWkt || ''),
+        taskGeoJson: researchAreaGeoJson.value,
         coverageWkt: String(oc.coverageWkt || ''),
         gapWkt: String(oc.gapWkt || ''),
         fit: true,
@@ -699,12 +767,13 @@ async function planningOutput() {
     const res = await api.planningOutput(taskId.value)
     outputResult.value = res.data
     const data = res.data as {
-      task?: { researchAreaWkt?: string }
+      task?: { researchAreaGeoJson?: SimpleGeometry | null; researchAreaWkt?: string }
       summary?: { overall?: { coverageWkt?: string; gapWkt?: string } }
     }
     try {
       await drawPlanningCoverageOverlay({
-        taskWkt: String(data.task?.researchAreaWkt || researchAreaWkt.value || ''),
+        taskGeoJson: data.task?.researchAreaGeoJson || researchAreaGeoJson.value,
+        taskWkt: data.task?.researchAreaGeoJson ? '' : String(data.task?.researchAreaWkt || ''),
         coverageWkt: String(data.summary?.overall?.coverageWkt || ''),
         gapWkt: String(data.summary?.overall?.gapWkt || ''),
         fit: true,
@@ -802,6 +871,11 @@ async function selectTask(id: unknown) {
       indicatorInstanceIds?: number[]
       name?: string
       code?: string
+      observationTarget?: string
+      priority?: string
+      timeStart?: string
+      timeEnd?: string
+      researchAreaGeoJson?: SimpleGeometry | null
       researchAreaWkt?: string
       resolution?: number
       temporalRes?: string
@@ -818,7 +892,11 @@ async function selectTask(id: unknown) {
     if (data.indicatorInstanceIds && data.indicatorInstanceIds[0]) instanceId.value = String(data.indicatorInstanceIds[0])
     if (data.name) taskName.value = String(data.name)
     if (data.code) taskCode.value = String(data.code)
-    if (data.researchAreaWkt) researchAreaWkt.value = String(data.researchAreaWkt)
+    observationTarget.value = String(data.observationTarget || '')
+    priority.value = String(data.priority || 'normal')
+    if (data.timeStart) taskTimeStart.value = String(data.timeStart).slice(0, 16)
+    if (data.timeEnd) taskTimeEnd.value = String(data.timeEnd).slice(0, 16)
+    researchAreaGeoJson.value = data.researchAreaGeoJson || wktToGeoJson(data.researchAreaWkt)
     if (data.resolution != null) resolution.value = Number(data.resolution)
     if (data.temporalRes) temporalRes.value = String(data.temporalRes)
     if (data.targetAccuracy != null) targetAccuracy.value = Number(data.targetAccuracy)
@@ -960,7 +1038,8 @@ async function resetForm() {
   excludedRows.value = []
   candidateMeta.value = null
   planResult.value = null
-  taskCode.value = 'TASK-' + Date.now()
+  taskCode.value = ''
+  researchAreaGeoJson.value = null
   // clear taskId from URL so map jump / watch does not re-select
   const q: Record<string, string> = {}
   for (const [k, v] of Object.entries(route.query)) {
@@ -1311,12 +1390,11 @@ async function ensureListsLoaded() {
 
 onMounted(async () => {
   syncTab()
-  taskCode.value = 'TASK-' + Date.now()
   await ensureListsLoaded()
   await applyRouteTaskQuery()
   applyRouteCoordHint()
   // 无路由指定任务时，优先载入演示故事线任务，便于直接走规划
-  if (taskId.value == null && user.value && tasks.value.length) {
+  if (tab.value === 'flow' && taskId.value == null && user.value && tasks.value.length) {
     const demo =
       tasks.value.find((t) => String(t.code || '').toUpperCase().includes('DEMO') || String(t.name || '').includes('演示')) ||
       tasks.value.find((t) => String(t.status || '') === 'submitted') ||
@@ -1348,9 +1426,18 @@ function applyRouteCoordHint() {
   const lat = Number(Array.isArray(route.query.lat) ? route.query.lat[0] : route.query.lat)
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) return
   // seed a small study area if empty so user can create task near map click
-  if (!researchAreaWkt.value) {
+  if (!researchAreaGeoJson.value) {
     const d = 0.08
-    researchAreaWkt.value = `POLYGON((${lon - d} ${lat - d},${lon + d} ${lat - d},${lon + d} ${lat + d},${lon - d} ${lat + d},${lon - d} ${lat - d}))`
+    researchAreaGeoJson.value = {
+      type: 'Polygon',
+      coordinates: [[
+        [lon - d, lat - d],
+        [lon + d, lat - d],
+        [lon + d, lat + d],
+        [lon - d, lat + d],
+        [lon - d, lat - d],
+      ]],
+    }
     message.value = `已根据地图点击预填研究区（${lon.toFixed(4)}, ${lat.toFixed(4)} 附近）`
   }
 }
@@ -1371,7 +1458,12 @@ watch(
   },
 )
 
-watch(() => route.query.tab, syncTab)
+watch(() => route.query.tab, () => {
+  syncTab()
+  if (tab.value === 'candidates' && taskId.value != null) {
+    void loadCandidates(false, false)
+  }
+})
 watch(() => route.query.taskId, () => { void applyRouteTaskQuery() })
 watch(instanceId, () => { syncFromSelectedInstance() })
 
@@ -1675,11 +1767,11 @@ async function drawPlanningCoverageFromEval() {
   }
   const er = evalResult.value as {
     overallCoverage?: Record<string, unknown>
-    task?: { researchAreaWkt?: string }
+    task?: { researchAreaGeoJson?: SimpleGeometry | null }
   } | null
   const oc = er?.overallCoverage || {}
   const r = await drawPlanningCoverageOverlay({
-    taskWkt: researchAreaWkt.value || String(er?.task?.researchAreaWkt || ''),
+    taskGeoJson: researchAreaGeoJson.value || er?.task?.researchAreaGeoJson,
     coverageWkt: String(oc.coverageWkt || ''),
     gapWkt: String(oc.gapWkt || ''),
     fit: true,
@@ -1687,7 +1779,7 @@ async function drawPlanningCoverageFromEval() {
   message.value =
     r.task + r.coverage + r.gap > 0
       ? `已上图：任务区${r.task} / 覆盖${r.coverage} / 缺口${r.gap}`
-      : '评估结果中无有效覆盖几何（可能后端未返回 coverageWkt/gapWkt）'
+      : '评估结果中暂无可展示的覆盖或缺口范围'
   error.value = null
 }
 
@@ -1854,34 +1946,52 @@ async function clearMapLinks() {
 
         <div class="grid-2">
           <section class="panel">
-            <h2>任务建模 / 指标实例选择</h2>
+            <h2>观测任务草稿与空间配置</h2>
             <div class="form">
-              <label>任务编码<input v-model="taskCode" :disabled="hasTask" /></label>
-              <label>任务名称<input v-model="taskName" :disabled="hasTask" /></label>
+              <p v-if="taskCode" class="task-code">任务编号 {{ taskCode }}</p>
+              <label>任务名称<input v-model="taskName" :disabled="hasTask && !canEditDraft" /></label>
+              <label>观测目标<textarea v-model="observationTarget" :disabled="hasTask && !canEditDraft" rows="3" /></label>
+              <div class="form-row">
+                <label>优先级
+                  <select v-model="priority" :disabled="hasTask && !canEditDraft">
+                    <option value="high">高</option>
+                    <option value="normal">常规</option>
+                    <option value="low">低</option>
+                  </select>
+                </label>
+                <label>开始时间<input v-model="taskTimeStart" type="datetime-local" :disabled="hasTask" /></label>
+                <label>结束时间<input v-model="taskTimeEnd" type="datetime-local" :disabled="hasTask" /></label>
+              </div>
+              <p class="muted">先保存草稿即可获得系统任务编号；任务区域和指标可随后补充。</p>
               <label>指标实例
-                <select v-model="instanceId" :disabled="hasTask">
+                <select v-model="instanceId" :disabled="hasTask && !canEditDraft" @change="syncFromSelectedInstance">
                   <option disabled value="">请选择</option>
                   <option v-for="item in instances" :key="String(item.id)" :value="String(item.id)">#{{ item.id }} {{ item.instanceName }}</option>
                 </select>
               </label>
               <p class="muted">实例时间窗：{{ selectedInstanceWindow || '—' }}（创建任务将自动采用）</p>
               <label>尺度
-                <select v-model="scaleId" :disabled="hasTask">
+                <select v-model="scaleId" :disabled="hasTask && !canEditDraft">
                   <option disabled value="">请选择</option>
                   <option v-for="s in scales" :key="'sc'+s.id" :value="String(s.id)">{{ s.name }}</option>
                 </select>
               </label>
-              <label>研究区 WKT
-                <input v-model="researchAreaWkt" :disabled="hasTask" />
-                <button class="btn ghost" type="button" :disabled="hasTask" @click="applyMapDrawWkt">写入地图绘制范围</button>
-              </label>
-              <div class="form-row">
-                <label>空间分辨率<input v-model.number="resolution" type="number" :disabled="hasTask" /></label>
-                <label>时间分辨率<input v-model="temporalRes" :disabled="hasTask" /></label>
+              <div class="area-control" :class="{ ready: researchAreaGeoJson }">
+                <div>
+                  <strong>任务区域</strong>
+                  <p>{{ researchAreaStatus }}。使用地图工具绘制多边形，双击结束。</p>
+                </div>
+                <button class="btn ghost" type="button" :disabled="hasTask && !canEditDraft" @click="applyMapDrawGeometry">
+                  {{ researchAreaGeoJson ? '采用新的绘制范围' : '采用地图绘制范围' }}
+                </button>
               </div>
               <div class="form-row">
-                <label>目标精度<input v-model.number="targetAccuracy" type="number" :disabled="hasTask" /></label>
-                <label>最低覆盖率<input v-model.number="minCoverageRatio" type="number" step="0.01" :disabled="hasTask" /></label>
+                <label>空间分辨率<input v-model.number="resolution" type="number" :disabled="hasTask && !canEditDraft" /></label>
+                <label>时间分辨率<input v-model="temporalRes" :disabled="hasTask && !canEditDraft" /></label>
+              </div>
+              <div class="form-row">
+                <label>目标精度<input v-model.number="targetAccuracy" type="number" :disabled="hasTask && !canEditDraft" /></label>
+                <label>最低覆盖率<input v-model.number="minCoverageRatio" type="number" step="0.01" :disabled="hasTask && !canEditDraft" /></label>
               </div>
               <p class="muted">评分权重（五维之和须为 1，影响候选排序与评分解释）。可先选预设再保存。</p>
               <div class="form-row">
@@ -1896,8 +2006,9 @@ async function clearMapLinks() {
                 <label>时间<input v-model.number="wTime" type="number" step="0.05" min="0" max="1" /></label>
                 <label>能力<input v-model.number="wCapability" type="number" step="0.05" min="0" max="1" /></label>
                 <label>可靠<input v-model.number="wReliability" type="number" step="0.05" min="0" max="1" /></label>
-                <button class="btn ghost" type="button" :disabled="!hasTask || pending" @click="saveWeights">保存权重</button>
+                <button class="btn ghost" type="button" :disabled="!canEditDraft || pending" @click="saveWeights">保存权重</button>
               </div>
+              <button class="btn" type="button" :disabled="!canEditDraft || pending" @click="saveTaskConfiguration">保存任务配置</button>
             </div>
           </section>
 
@@ -1905,6 +2016,7 @@ async function clearMapLinks() {
             <h2>步骤重跑（高级）</h2>
             <div class="action-stack">
               <button class="btn" type="button" :disabled="canRun('create') === false" :title="stepBlockedReason('create') || '创建观测任务'" data-action="create" @click="createTask">执行创建任务</button>
+              <button class="btn ghost" type="button" :disabled="!canEditDraft || pending" @click="saveTaskConfiguration">保存区域与约束</button>
               <button class="btn ghost" type="button" :disabled="taskId == null || pending || (taskStatus !== '' && taskStatus !== 'draft')" @click="bindSelectedIndicator">追加当前指标到任务（仅草稿）</button>
               <button class="btn" type="button" :disabled="canRun('submit') === false" :title="stepBlockedReason('submit') || '提交任务'" data-action="submit" @click="submitTask">执行提交任务</button>
               <button class="btn" type="button" :disabled="canRun('reverse') === false" :title="stepBlockedReason('reverse') || '需求反算'" data-action="reverse" @click="requirementReverse">执行需求反算</button>
@@ -1941,16 +2053,16 @@ async function clearMapLinks() {
               </table>
               <details>
                 <summary>原始 JSON</summary>
-                <pre class="result-pre">{{ JSON.stringify(reverseResult, null, 2).slice(0, 3000) }}</pre>
+                <pre class="result-pre">{{ businessResultText(reverseResult, 3000) }}</pre>
               </details>
             </div>
             <div v-if="evalResult" class="panel soft" style="margin-top:0.8rem">
               <h3>满足度评估摘要（关联后）</h3>
-              <pre class="result-pre">{{ JSON.stringify(evalResult, null, 2).slice(0, 2500) }}</pre>
+              <pre class="result-pre">{{ businessResultText(evalResult) }}</pre>
             </div>
             <div v-if="outputResult" class="panel soft" style="margin-top:0.8rem">
               <h3>规划输出摘要</h3>
-              <pre class="result-pre">{{ JSON.stringify(outputResult, null, 2).slice(0, 2500) }}</pre>
+              <pre class="result-pre">{{ businessResultText(outputResult) }}</pre>
             </div>
           </section>
         </div>
@@ -2131,7 +2243,7 @@ async function clearMapLinks() {
           <h4>当前方案结果摘要</h4>
           <p>方案 #{{ asCompareObj(planResult).id || asCompareObj(planResult).planId || '-' }} · 状态 {{ planStatusLabel(asCompareObj(planResult).status) }}</p>
           <p class="muted">完整 JSON 已折叠展示，便于核对：</p>
-          <pre class="result-pre">{{ JSON.stringify(planResult, null, 2).slice(0, 2500) }}</pre>
+          <pre class="result-pre">{{ businessResultText(planResult) }}</pre>
         </div>
       </section>
     </template>
@@ -2162,6 +2274,31 @@ async function clearMapLinks() {
 
 .plan-head h1 { font-size: 16px; margin: 0.15rem 0; }
 .plan-map-actions.panel { padding: 0.45rem 0.55rem; }
+.task-code {
+  width: fit-content;
+  margin: 0;
+  padding: 0.35rem 0.65rem;
+  border-left: 3px solid #39c6b3;
+  background: color-mix(in srgb, #39c6b3 12%, transparent);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.04em;
+}
+.area-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem;
+  border: 1px dashed color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, #1677ff 6%, transparent);
+}
+.area-control.ready {
+  border-style: solid;
+  border-color: color-mix(in srgb, #39c6b3 55%, transparent);
+  background: color-mix(in srgb, #39c6b3 9%, transparent);
+}
+.area-control p { margin: 0.25rem 0 0; }
 .stepper {
   display: grid;
   grid-template-columns: 1fr;
@@ -2176,5 +2313,8 @@ async function clearMapLinks() {
   justify-content: space-between;
   gap: 0.5rem;
   margin-top: 0.6rem;
+}
+@media (max-width: 760px) {
+  .area-control { align-items: stretch; flex-direction: column; }
 }
 </style>

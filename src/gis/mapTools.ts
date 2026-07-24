@@ -7,7 +7,12 @@ export type MapToolMode = 'none' | 'measure-line' | 'measure-area' | 'draw-point
 export const mapToolMode = ref<MapToolMode>('none')
 export const mapToolMessage = ref('')
 export const mapBoxSelectResult = ref<{ count: number; entityIds: string[] } | null>(null)
-export const mapDrawGeometry = ref<{ type: 'point' | 'polygon'; wkt: string; lon?: number; lat?: number } | null>(null)
+export const mapDrawGeometry = ref<{
+  type: 'point' | 'polygon'
+  geojson: { type: 'Point' | 'Polygon'; coordinates: unknown }
+  lon?: number
+  lat?: number
+} | null>(null)
 
 let handler: Cesium.ScreenSpaceEventHandler | null = null
 let activeDs: Cesium.CustomDataSource | null = null
@@ -78,17 +83,6 @@ function cartesianToLonLat(c: Cesium.Cartesian3): { lon: number; lat: number } {
   }
 }
 
-function ringToWkt(points: Array<{ lon: number; lat: number }>): string {
-  if (!points.length) return ''
-  const ring = points.slice()
-  const first = ring[0]
-  const last = ring[ring.length - 1]
-  if (first && last && (first.lon !== last.lon || first.lat !== last.lat)) {
-    ring.push({ lon: first.lon, lat: first.lat })
-  }
-  return 'POLYGON((' + ring.map((p) => p.lon.toFixed(6) + ' ' + p.lat.toFixed(6)).join(', ') + '))'
-}
-
 export function clearMapDrawings(viewer: Viewer | null) {
   positions.length = 0
   if (activeDs && viewer && !viewer.isDestroyed()) {
@@ -130,7 +124,7 @@ export function setMapToolMode(viewer: Viewer | null, mode: MapToolMode) {
         const ll = cartesianToLonLat(cartesian)
         mapDrawGeometry.value = {
           type: 'point',
-          wkt: 'POINT(' + ll.lon.toFixed(6) + ' ' + ll.lat.toFixed(6) + ')',
+          geojson: { type: 'Point', coordinates: [ll.lon, ll.lat] },
           lon: ll.lon,
           lat: ll.lat,
         }
@@ -250,21 +244,36 @@ export function setMapToolMode(viewer: Viewer | null, mode: MapToolMode) {
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
 
   handler.setInputAction(() => {
-    if (positions.length >= 3) {
+    const cleanPositions: Cesium.Cartesian3[] = []
+    for (const position of positions) {
+      const previous = cleanPositions[cleanPositions.length - 1]
+      if (!previous || Cesium.Cartesian3.distance(previous, position) > 1) {
+        cleanPositions.push(position)
+      }
+    }
+    if (cleanPositions.length >= 3) {
       ds.entities.add({
         polygon: {
-          hierarchy: positions.slice(),
+          hierarchy: cleanPositions,
           material: Cesium.Color.LIME.withAlpha(0.25),
           outline: true,
           outlineColor: Cesium.Color.LIME,
         },
       })
       if (mode === 'measure-area') {
-        mapToolMessage.value = `面积 ${formatArea(polygonArea(positions))}`
+        mapToolMessage.value = `面积 ${formatArea(polygonArea(cleanPositions))}`
       } else {
-        const pts = positions.map((c) => cartesianToLonLat(c))
-        const wkt = ringToWkt(pts)
-        mapDrawGeometry.value = { type: 'polygon', wkt }
+        const pts = cleanPositions.map((c) => cartesianToLonLat(c))
+        const ring = pts.map((point) => [point.lon, point.lat])
+        const first = ring[0]
+        const last = ring[ring.length - 1]
+        if (first && last && (first[0] !== last[0] || first[1] !== last[1])) {
+          ring.push([...first])
+        }
+        mapDrawGeometry.value = {
+          type: 'polygon',
+          geojson: { type: 'Polygon', coordinates: [ring] },
+        }
         mapToolMessage.value = '多边形已绘制，可写入业务表单'
       }
     }

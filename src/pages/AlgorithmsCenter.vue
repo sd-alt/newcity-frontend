@@ -31,6 +31,22 @@ const mappedCompletedIds = ref<Set<string>>(new Set())
 const pollTimer = ref<number | null>(null)
 const autoRefresh = ref(true)
 
+function isGeoJsonGeometry(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const geometry = value as Record<string, unknown>
+  return typeof geometry.type === 'string' && Array.isArray(geometry.coordinates)
+}
+
+function withoutWktFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutWktFields)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !key.toLowerCase().includes('wkt'))
+      .map(([key, item]) => [key, withoutWktFields(item)]),
+  )
+}
+
 function parseLogs(task: Record<string, unknown> | null): string[] {
   if (!task) return []
   const logs = task.logs ?? task.log ?? task.executionLogs
@@ -41,7 +57,7 @@ function parseLogs(task: Record<string, unknown> | null): string[] {
         const row = x as Record<string, unknown>
         const time = String(row.time || row.at || '')
         const level = String(row.level || 'info')
-        const msg = String(row.message || JSON.stringify(x))
+        const msg = String(row.message || JSON.stringify(withoutWktFields(x)))
         return [time, level, msg].filter(Boolean).join(' | ')
       }
       return String(x)
@@ -159,7 +175,7 @@ const versionForm = ref({
 const taskForm = ref({
   code: '',
   algorithmVersionId: '',
-  inputDataText: '{"platformId":50,"studyAreaWkt":"POLYGON((114 22,115 22,115 23,114 23,114 22))"}',
+  inputDataText: '{"platformId":50,"studyAreaGeoJson":{"type":"Polygon","coordinates":[[[114,22],[115,22],[115,23],[114,23],[114,22]]]}}',
   parametersText: '{}',
 })
 
@@ -218,7 +234,7 @@ function statusActionTitle(action: string, status: unknown): string {
 
 function applyMapDrawToAlgoInput() {
   const g = mapDrawGeometry.value
-  if (!g || !g.wkt) {
+  if (!g || !g.geojson) {
     error.value = '请先用地图工具绘点/绘面，再写入算法输入区域'
     return
   }
@@ -229,17 +245,29 @@ function applyMapDrawToAlgoInput() {
     error.value = '当前输入 JSON 非法，请先修正后再写入范围'
     return
   }
-  let wkt = g.wkt
+  let geojson = g.geojson
   if (g.type === 'point') {
     const lon = Number(g.lon ?? 0)
     const lat = Number(g.lat ?? 0)
     const d = 0.05
-    wkt = `POLYGON((${lon - d} ${lat - d},${lon + d} ${lat - d},${lon + d} ${lat + d},${lon - d} ${lat + d},${lon - d} ${lat - d}))`
+    geojson = {
+      type: 'Polygon',
+      coordinates: [[
+        [lon - d, lat - d],
+        [lon + d, lat - d],
+        [lon + d, lat + d],
+        [lon - d, lat + d],
+        [lon - d, lat - d],
+      ]],
+    }
   }
-  obj.studyAreaWkt = wkt
-  obj.spatialWkt = wkt
+  delete obj.studyAreaWkt
+  delete obj.spatialWkt
+  delete obj.geometryWkt
+  delete obj.researchAreaWkt
+  obj.studyAreaGeoJson = geojson
   taskForm.value.inputDataText = JSON.stringify(obj, null, 2)
-  message.value = '已将地图绘制范围写入算法输入 JSON（studyAreaWkt）'
+  message.value = '已将地图绘制范围写入算法输入'
   error.value = null
 }
 
@@ -272,7 +300,7 @@ async function load() {
         const st = String(x.status || '')
         const out = (x.outputData || x.output_data || {}) as Record<string, unknown>
         const inp = (x.inputData || x.input_data || {}) as Record<string, unknown>
-        const hasGeo = Boolean(out.coverageWkt || out.resultWkt || inp.studyAreaWkt)
+        const hasGeo = Boolean(out.coverageWkt || out.resultWkt || inp.studyAreaWkt || inp.studyAreaGeoJson)
         if (st === 'succeeded' && hasGeo) return 0
         if (st === 'succeeded') return 1
         if (st === 'running') return 2
@@ -451,10 +479,14 @@ async function createTask() {
     error.value = '输入数据/参数必须是合法 JSON（表单内容已保留）'
     return
   }
-  if (!inputData.studyAreaWkt && !inputData.spatialWkt && !inputData.geometryWkt) {
-    error.value = '请在输入 JSON 中提供 studyAreaWkt，或先地图绘面后点“写入绘制范围”'
+  if (!isGeoJsonGeometry(inputData.studyAreaGeoJson)) {
+    error.value = '请先在地图绘制算法输入区域，并采用绘制范围'
     return
   }
+  delete inputData.studyAreaWkt
+  delete inputData.spatialWkt
+  delete inputData.geometryWkt
+  delete inputData.researchAreaWkt
   pending.value = true
   clearAlerts()
   try {
@@ -666,7 +698,7 @@ async function inspectTask(id: unknown) {
     error.value = null
     const res = await api.getProcessingTask(String(id))
     selectedTask.value = res.data as Record<string, unknown>
-    presentAlgoSelection(selectedTask.value || {}, '', '')
+    presentAlgoSelection(selectedTask.value || {}, false, false)
     await locateLinkedOnMap(selectedTask.value || {})
   } catch (err) {
     error.value = errMessage(err, '读取任务详情失败')
@@ -709,7 +741,7 @@ async function showAlgoMap() {
 }
 
 
-function presentAlgoSelection(task: Record<string, unknown>, studyWkt: string, resultWkt: string) {
+function presentAlgoSelection(task: Record<string, unknown>, hasStudyArea: boolean, hasResultArea: boolean) {
   const id = String(task.id ?? '')
   const code = String(task.code || task.name || id)
   const status = String(task.status || '-')
@@ -721,15 +753,15 @@ function presentAlgoSelection(task: Record<string, unknown>, studyWkt: string, r
     description: [
       '状态: ' + status,
       '进度: ' + String(task.progress ?? '-'),
-      studyWkt ? '输入区域: 有' : '输入区域: 无',
-      resultWkt ? '结果区域: 有' : '结果区域: 无',
+      hasStudyArea ? '输入区域: 有' : '输入区域: 无',
+      hasResultArea ? '结果区域: 有' : '结果区域: 无',
       'ID: ' + id,
     ].join('\n'),
     status,
-    spatial: studyWkt || resultWkt || '',
+    spatial: hasStudyArea || hasResultArea ? '已在地图加载' : '',
     relations: [
-      studyWkt ? '输入WKT: ' + studyWkt : '',
-      resultWkt ? '结果WKT: ' + resultWkt : '',
+      hasStudyArea ? '输入区域已记录' : '',
+      hasResultArea ? '结果区域已记录' : '',
       task.algorithmModelId != null ? '算法模型ID: ' + String(task.algorithmModelId) : '',
       task.planningTaskId != null ? '规划任务ID: ' + String(task.planningTaskId) : '',
     ]
@@ -757,6 +789,16 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
   const ctx = (task.context || task.linkContext || task) as Record<string, unknown>
   const input = (task.inputData || task.input_data || ctx.inputData || {}) as Record<string, unknown>
   const output = (task.outputData || task.output_data || ctx.outputData || {}) as Record<string, unknown>
+  const routeOutput = (output.route || {}) as Record<string, unknown>
+  const trackOutput = (output.track || {}) as Record<string, unknown>
+  const inputGeoJson = isGeoJsonGeometry(input.studyAreaGeoJson) ? input.studyAreaGeoJson : null
+  const resultGeoJson = isGeoJsonGeometry(output.coverageGeometry)
+    ? output.coverageGeometry
+    : isGeoJsonGeometry(routeOutput.geometry)
+      ? routeOutput.geometry
+      : isGeoJsonGeometry(trackOutput.geometry)
+        ? trackOutput.geometry
+        : null
   const studyWkt = String(
     input.studyAreaWkt || input.spatialWkt || input.researchAreaWkt || input.geometryWkt || '',
   ).trim()
@@ -768,25 +810,29 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
       output.studyAreaWkt ||
       '',
   ).trim()
+  const hasStudyArea = Boolean(inputGeoJson || studyWkt)
+  const hasResultArea = Boolean(resultGeoJson || resultWkt)
 
   await showShellAndFit('all', '/algorithms')
 
   // 1) 输入/结果几何优先上图
-  if (studyWkt || resultWkt) {
+  if (hasStudyArea || hasResultArea) {
     try {
       await drawAlgoRegionOverlay({
+        inputGeoJson,
+        resultGeoJson,
         inputWkt: studyWkt,
         resultWkt: resultWkt,
         fit: true,
         inputLabel: `算法输入 #${task.id || ''}`,
         resultLabel: `算法结果 #${task.id || ''}`,
       })
-      presentAlgoSelection(task, studyWkt, resultWkt)
+      presentAlgoSelection(task, hasStudyArea, hasResultArea)
     } catch {
       /* optional */
     }
   } else {
-    presentAlgoSelection(task, studyWkt, resultWkt)
+    presentAlgoSelection(task, hasStudyArea, hasResultArea)
   }
 
   const planRaw = ctx.planningTaskIds ?? ctx.planning_task_ids ?? input.planningTaskIds ?? ''
@@ -806,28 +852,28 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
 
   if (planList.length) {
     const id = String(planList[0])
-    const ok = await selectShellFeature('task', id, { openBubble: false, fly: !studyWkt })
-    presentAlgoSelection(task, studyWkt, resultWkt)
+    const ok = await selectShellFeature('task', id, { openBubble: false, fly: !hasStudyArea })
+    presentAlgoSelection(task, hasStudyArea, hasResultArea)
     try {
       const tres = await api.getTask(id)
       const twkt = String((tres.data as { researchAreaWkt?: string })?.researchAreaWkt || '')
-      if (twkt && !studyWkt) {
+      if (twkt && !hasStudyArea) {
         await drawAlgoRegionOverlay({ inputWkt: twkt, fit: true, inputLabel: `关联任务区域 #${id}` })
       }
     } catch {
       /* optional */
     }
-    message.value = ok || studyWkt || resultWkt
-      ? `已定位算法关联任务 #${id}` + (studyWkt || resultWkt ? '，并绘制算法区域' : '')
+    message.value = ok || hasStudyArea || hasResultArea
+      ? `已定位算法关联任务 #${id}` + (hasStudyArea || hasResultArea ? '，并绘制算法区域' : '')
       : `已上图；未找到关联任务 #${id} 空间范围`
     return
   }
 
   if (dataList.length) {
     const id = String(dataList[0])
-    const ok = await selectShellFeature('data', id, { openBubble: false, fly: !studyWkt })
-    presentAlgoSelection(task, studyWkt, resultWkt)
-    message.value = ok || studyWkt || resultWkt
+    const ok = await selectShellFeature('data', id, { openBubble: false, fly: !hasStudyArea })
+    presentAlgoSelection(task, hasStudyArea, hasResultArea)
+    message.value = ok || hasStudyArea || hasResultArea
       ? `已定位关联监测数据 #${id}`
       : `已上图；未找到关联数据 #${id}`
     return
@@ -849,8 +895,8 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
     return
   }
 
-  if (studyWkt || resultWkt) {
-    message.value = `已绘制算法区域（输入${studyWkt ? '有' : '无'} / 结果${resultWkt ? '有' : '无'}）`
+  if (hasStudyArea || hasResultArea) {
+    message.value = `已绘制算法区域（输入${hasStudyArea ? '有' : '无'} / 结果${hasResultArea ? '有' : '无'}）`
     return
   }
 
@@ -864,7 +910,7 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
     return
   }
 
-  message.value = '当前任务无空间字段；请在输入数据中填写 studyAreaWkt，或关联观测任务/数据'
+  message.value = '当前任务无空间范围，请使用地图绘制，或关联已有观测任务/数据'
 }
 
 
@@ -1081,7 +1127,7 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
         <p v-else class="muted">暂无结构化日志；可查看原始输出。</p>
         <details>
           <summary>原始输出 / 资源占用字段</summary>
-          <pre class="result-pre">{{ JSON.stringify({ logs: selectedTask.logs, output: selectedTask.outputData || selectedTask.output, resourceUsage: selectedTask.resourceUsage || selectedTask.metrics }, null, 2) }}</pre>
+          <pre class="result-pre">{{ JSON.stringify(withoutWktFields({ logs: selectedTask.logs, output: selectedTask.outputData || selectedTask.output, resourceUsage: selectedTask.resourceUsage || selectedTask.metrics }), null, 2) }}</pre>
         </details>
       </div>
     </section>
@@ -1098,7 +1144,7 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
             <td>{{ t.code }}</td>
             <td>{{ taskStatusLabel(t.status) }}</td>
             <td>{{ resultStage(t) }} / {{ resultMeta(t) }}</td>
-            <td><code>{{ JSON.stringify(t.outputData || t.result || t.output || t.errorMessage || {}).toString().slice(0, 100) }}</code></td>
+            <td><code>{{ JSON.stringify(withoutWktFields(t.outputData || t.result || t.output || t.errorMessage || {})).toString().slice(0, 100) }}</code></td>
             <td class="ops">
               <button class="btn ghost" type="button" @click="inspectTask(t.id); linkForm.taskId = String(t.id)">查看</button>
               <button class="btn ghost" type="button" :disabled="!canVerify(t)" @click="verifyResult(t.id)">校验</button>
@@ -1120,7 +1166,7 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
         <label>外发渠道备注<input v-model="linkForm.externalChannel" placeholder="如：内部目录/业务系统（记录备注，非自动推送）" /></label>
         <button class="btn" type="button" @click="linkResultContext">保存关联</button>
       </div>
-      <pre v-if="selectedTask" class="result-pre">{{ JSON.stringify(selectedTask, null, 2) }}</pre>
+      <pre v-if="selectedTask" class="result-pre">{{ JSON.stringify(withoutWktFields(selectedTask), null, 2) }}</pre>
     </section>
   </section>
 </template>

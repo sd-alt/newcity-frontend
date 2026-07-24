@@ -72,6 +72,16 @@ function asRows(value: unknown): CountRow[] {
   return Array.isArray(value) ? (value as CountRow[]) : []
 }
 
+function withoutWktFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutWktFields)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !key.toLowerCase().includes('wkt'))
+      .map(([key, item]) => [key, withoutWktFields(item)]),
+  )
+}
+
 function rowLabel(row: CountRow, keys: string[]) {
   for (const key of keys) {
     if (row[key] != null && String(row[key]) !== '') return String(row[key])
@@ -103,6 +113,13 @@ function syncTab() {
     if (t === 'sensors' || t === 'data' || t === 'tasks') tab.value = 'gis'
     else if (tabs.some((x) => x.key === t)) tab.value = t
   }
+}
+
+async function syncGisRouteFilter() {
+  const t = route.query.tab
+  if (t === 'sensors') await mapShowSensors()
+  else if (t === 'data') await mapShowData()
+  else if (t === 'tasks') await mapShowTasks()
 }
 
 function buildQuery(params: Record<string, string>) {
@@ -295,8 +312,12 @@ onMounted(async () => {
   await loadStats({ quiet: true })
   if (tab.value === 'workbench') await loadWorkbench()
   if (tab.value === 'gis') await loadGisPreview()
+  await syncGisRouteFilter()
 })
-watch(() => route.query.tab, syncTab)
+watch(() => route.query.tab, async () => {
+  syncTab()
+  await syncGisRouteFilter()
+})
 watch(tab, async (v) => {
   if (v === 'workbench') await loadWorkbench()
   if (v === 'gis') await loadGisPreview()
@@ -792,8 +813,8 @@ async function filterTasksByStatus(status: unknown) {
         </tbody>
       </table>
       <p v-else class="muted">暂无图层目录记录。</p>
-      <h3>工作台原始摘要</h3>
-      <pre class="result-pre">{{ workbench ? JSON.stringify(workbench, null, 2).slice(0, 3500) : '暂无' }}</pre>
+      <h3>工作台摘要</h3>
+      <pre class="result-pre">{{ workbench ? JSON.stringify(withoutWktFields(workbench), null, 2).slice(0, 3500) : '暂无' }}</pre>
       <button class="btn" type="button" :disabled="pending" @click="mapShowAll">底图全部上图</button>
     </section>
   </section>

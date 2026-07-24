@@ -11,6 +11,7 @@ import {
 } from '../gis/mapShell'
 import { errMessage, isoNow, pickId } from '../utils/errors'
 import { mapDrawGeometry } from '../gis/mapTools'
+import type { SimpleGeometry } from '../gis/wkt'
 
 const route = useRoute()
 const router = useRouter()
@@ -46,15 +47,15 @@ const instForm = ref({
   defId: '',
   instanceName: '',
   scaleId: '',
-  spatialWkt: 'POLYGON((114 22,115 22,115 23,114 23,114 22))',
+  spatialGeoJson: null as SimpleGeometry | null,
   resolution: 10,
   temporalRes: '小时/次',
   targetAccuracy: 90,
 })
 
-function applyMapDrawWkt() {
+function applyMapDrawGeoJson() {
   const g = mapDrawGeometry.value
-  if (!g || !g.wkt) {
+  if (!g || !g.geojson) {
     error.value = '请先用地图工具绘制点或面（绘点/绘面）'
     return
   }
@@ -63,9 +64,18 @@ function applyMapDrawWkt() {
     const lon = g.lon ?? 0
     const lat = g.lat ?? 0
     const d = 0.05
-    instForm.value.spatialWkt = `POLYGON((${lon - d} ${lat - d},${lon + d} ${lat - d},${lon + d} ${lat + d},${lon - d} ${lat + d},${lon - d} ${lat - d}))`
+    instForm.value.spatialGeoJson = {
+      type: 'Polygon',
+      coordinates: [[
+        [lon - d, lat - d],
+        [lon + d, lat - d],
+        [lon + d, lat + d],
+        [lon - d, lat + d],
+        [lon - d, lat - d],
+      ]],
+    }
   } else {
-    instForm.value.spatialWkt = g.wkt
+    instForm.value.spatialGeoJson = g.geojson
   }
   message.value = '已将地图绘制范围写入指标实例'
   error.value = null
@@ -269,8 +279,8 @@ async function createInst() {
     error.value = '请选择样例、尺度，并填写实例名称（表单内容已保留）'
     return
   }
-  if (!String(instForm.value.spatialWkt || '').trim()) {
-    error.value = '请填写空间范围 WKT，或先用地图绘点/绘面后点“写入地图绘制范围”'
+  if (!instForm.value.spatialGeoJson) {
+    error.value = '请先用地图绘点或绘面设置指标适用范围'
     return
   }
   pending.value = true
@@ -284,13 +294,13 @@ async function createInst() {
       timeEnd: isoNow(5 * 3600_000),
       resolution: Number(instForm.value.resolution),
       temporalRes: instForm.value.temporalRes,
-      spatialWkt: instForm.value.spatialWkt,
+      spatialGeoJson: instForm.value.spatialGeoJson,
       targetAccuracy: Number(instForm.value.targetAccuracy),
     })
     const newId = pickId(created.data as Record<string, unknown>) || (created.data as { id?: string | number } | null)?.id
     message.value = newId != null ? `实例已生成 #${newId}` : '实例已生成'
     try { await showIndicatorsWorkspace('/indicators') } catch { /* map refresh optional */ }
-    if (newId != null && String(instForm.value.spatialWkt || '').trim()) {
+    if (newId != null && instForm.value.spatialGeoJson) {
       try { await selectShellFeature('indicator', String(newId), { openBubble: true, fly: true }) } catch { /* optional */ }
     }
     instForm.value.instanceName = ''
@@ -559,7 +569,9 @@ async function locateDefinitionOnMap(defId: unknown) {
     message.value = '样例 #' + id + ' 下暂无指标实例'
     return
   }
-  const withGeom = list.find((i) => String(i.spatialWkt || i.spatial_wkt || '').trim())
+  const withGeom = list.find(
+    (i) => i.spatialGeoJson || String(i.spatialWkt || i.spatial_wkt || '').trim(),
+  )
   const target = withGeom ?? list[0]
   if (!target) {
     message.value = '样例 #' + id + ' 下暂无可用实例'
@@ -574,7 +586,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
   const ok = await selectShellFeature('indicator', String(id), { openBubble: true, fly: true })
   message.value = ok
     ? `已在地图定位指标实例 #${id}`
-    : `地图未找到指标实例 #${id} 的空间范围（请确认已填写 spatialWkt）`
+    : `地图未找到指标实例 #${id} 的空间范围，请先使用地图绘制补充`
   if (!ok) error.value = message.value
   else error.value = null
 }
@@ -670,8 +682,10 @@ async function locateInstanceOnMap(id: string | number | unknown) {
             <option v-for="s in scales" :key="'sc'+s.id" :value="String(s.id)">{{ s.name }}</option>
           </select>
         </label>
-        <label>空间WKT<input v-model="instForm.spatialWkt" /></label>
-            <button class="btn ghost" type="button" @click="applyMapDrawWkt">写入地图绘制范围</button>
+        <div class="spatial-pick" :class="{ ready: instForm.spatialGeoJson }">
+          <span>{{ instForm.spatialGeoJson ? '指标适用范围已设置' : '指标适用范围未设置' }}</span>
+          <button class="btn ghost" type="button" @click="applyMapDrawGeoJson">采用地图绘制范围</button>
+        </div>
         <label>分辨率<input v-model.number="instForm.resolution" type="number" /></label>
         <label>目标精度<input v-model.number="instForm.targetAccuracy" type="number" /></label>
         <button class="btn" type="button" :disabled="pending" @click="createInst">生成实例</button>
