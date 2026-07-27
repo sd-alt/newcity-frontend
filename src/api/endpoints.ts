@@ -103,7 +103,9 @@ async function fetchText(path: string) {
 // indicators
 export const listDomains = () => listAny('/api/v1/indicators/domains')
 export const listThemes = () => listAny('/api/v1/indicators/themes')
+export const listSubThemes = () => listAny('/api/v1/indicators/sub-themes')
 export const listScales = () => listAny('/api/v1/indicators/scales')
+export const listScenes = () => listAny('/api/v1/association/scenes')
 export const listUnits = () => listAny('/api/v1/indicators/units')
 export const listDefinitions = () => listAny('/api/v1/indicators/definitions')
 export const createDefinition = (body: Record<string, unknown>) => createAny('/api/v1/indicators/definitions', body)
@@ -111,6 +113,7 @@ export const updateDefinition = (id: number | string, body: Record<string, unkno
 export const deleteDefinition = (id: number | string) => deleteAny('/api/v1/indicators/definitions/' + id)
 export const listDefinitionVersions = (id: number | string) => listAny('/api/v1/indicators/definitions/' + id + '/versions')
 export const listInstances = (query = '') => listAny('/api/v1/indicators/instances' + query)
+export const getInstance = (id: number | string) => getAny('/api/v1/indicators/instances/' + id)
 export const createInstance = (body: Record<string, unknown>) => createAny('/api/v1/indicators/instances', body)
 export const updateInstance = (id: number | string, body: Record<string, unknown>) => updateAny('/api/v1/indicators/instances/' + id, body)
 export const deleteInstance = (id: number | string) => deleteAny('/api/v1/indicators/instances/' + id)
@@ -127,6 +130,7 @@ export const getIndicatorTree = () => getAny('/api/v1/indicators/tree')
 export const listPlatformTypes = () => listAny('/api/v1/observations/platform-types')
 export const listSensorTypes = () => listAny('/api/v1/observations/sensor-types')
 export const listPlatforms = (query = '') => listAny('/api/v1/observations/platforms' + query)
+export const getPlatform = (id: number | string) => getAny('/api/v1/observations/platforms/' + id)
 export const createPlatform = (body: Record<string, unknown>) => createAny('/api/v1/observations/platforms', body)
 export const updatePlatform = (id: number | string, body: Record<string, unknown>) => updateAny('/api/v1/observations/platforms/' + id, body)
 export const deletePlatform = (id: number | string) => deleteAny('/api/v1/observations/platforms/' + id)
@@ -152,7 +156,10 @@ export const ingestPlatformTrack = (body: Record<string, unknown>) =>
 export const listDatasets = () => listAny('/api/v1/observations/datasets')
 export const createDataset = (body: Record<string, unknown>) => createAny('/api/v1/observations/datasets', body)
 export const listObservationData = (query = '') => listAny('/api/v1/observations/data' + query)
+export const getObservationData = (id: number | string) => getAny('/api/v1/observations/data/' + id)
 export const createObservationData = (body: Record<string, unknown>) => createAny('/api/v1/observations/data', body)
+export const updateObservationData = (id: number | string, body: Record<string, unknown>) =>
+  updateAny('/api/v1/observations/data/' + id, body)
 export const deleteObservationData = (id: number | string) => deleteAny('/api/v1/observations/data/' + id)
 export const listDataSources = () => listAny('/api/v1/observations/data-sources')
 export const createDataSource = (body: Record<string, unknown>) => createAny('/api/v1/observations/data-sources', body)
@@ -175,7 +182,38 @@ export const exportObservationDataCsv = (query = '') =>
 export const exportObservationData = (query = '') => exportObservationDataCsv(query)
 export const getDataVisualization = () => getAny('/api/v1/observations/visualization')
 
+// assistant
+export type AssistantAction = {
+  type: string
+  label?: string
+  route?: string
+  tab?: string
+  taskId?: number
+  taskCode?: string
+  taskName?: string
+}
+export type AssistantChatData = {
+  reply: string
+  intent: string
+  mode: string
+  actions: AssistantAction[]
+  suggestions?: string[]
+}
+export type AssistantStatusData = {
+  mode: string
+  model: string
+  ready: boolean
+  apiConfigured: boolean
+}
+export const assistantStatus = () => apiEnvelope<AssistantStatusData>('/api/v1/assistant/status')
+export const assistantChat = (message: string) =>
+  apiEnvelope<AssistantChatData>('/api/v1/assistant/chat', {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  })
+
 // planning
+export const listEvents = () => listAny('/api/v1/planning/events')
 export const listTasks = () => listAny('/api/v1/planning/tasks')
 export const getTask = (id: number | string) => getAny('/api/v1/planning/tasks/' + id)
 export const createTask = (body: Record<string, unknown>) => createAny('/api/v1/planning/tasks', body)

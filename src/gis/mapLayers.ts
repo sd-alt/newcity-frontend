@@ -63,6 +63,9 @@ function polygonCentroid(degrees: number[]): [number, number] | null {
   return [sx / n, sy / n]
 }
 
+// 高空视角隐藏文字标签，避免默认视图下标签堆叠成团；拉近后自动显示
+const LABEL_DISTANCE = () => new Cesium.DistanceDisplayCondition(0, 60000)
+
 function addGeometryEntity(
   dataSource: Cesium.CustomDataSource,
   id: string,
@@ -70,9 +73,11 @@ function addGeometryEntity(
   wkt: string,
   color: Cesium.Color,
   description: string,
+  options?: { quiet?: boolean },
 ) {
   const geometry = wktToGeoJson(wkt)
   if (!geometry) return
+  const quiet = options?.quiet === true
 
   if (geometry.type === 'Point') {
     const [lon, lat] = geometry.coordinates as [number, number]
@@ -102,6 +107,7 @@ function addGeometryEntity(
         showBackground: true,
         backgroundColor: Cesium.Color.fromCssColorString('#0F3D66').withAlpha(0.65),
         backgroundPadding: new Cesium.Cartesian2(6, 4),
+        distanceDisplayCondition: LABEL_DISTANCE(),
       },
     })
     return
@@ -133,7 +139,7 @@ function addGeometryEntity(
         outlineColor: color.withAlpha(0.95),
         height: 0,
       },
-      point: center
+      point: center && !quiet
         ? {
             pixelSize: 10,
             color: color.withAlpha(0.95),
@@ -143,7 +149,7 @@ function addGeometryEntity(
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           }
         : undefined,
-      label: center
+      label: center && !quiet
         ? {
             text: name,
             font: '12px "Microsoft YaHei", "PingFang SC", sans-serif',
@@ -154,6 +160,7 @@ function addGeometryEntity(
             verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
             pixelOffset: new Cesium.Cartesian2(0, -12),
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            distanceDisplayCondition: LABEL_DISTANCE(),
           }
         : undefined,
     })
@@ -426,7 +433,9 @@ export async function loadSensorLayer(
     if (!dynamicTrack && wkt) addGeometryEntity(ds, `sensor-${id}`, name, wkt, color, desc)
     if (track) addGeometryEntity(ds, `sensor-track-${id}`, `${name}-档案轨迹`, track, color, desc)
     if (coverage) {
-      addGeometryEntity(ds, `sensor-cov-${id}`, `${name}-覆盖`, coverage, color.withAlpha(0.22), desc)
+      addGeometryEntity(ds, `sensor-cov-${id}`, `${name}-覆盖`, coverage, color.withAlpha(0.22), desc, {
+        quiet: true,
+      })
     }
   }
   await viewer.dataSources.add(ds)

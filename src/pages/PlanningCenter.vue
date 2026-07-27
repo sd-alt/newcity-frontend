@@ -16,6 +16,7 @@ import {
 } from '../gis/mapShell'
 import { canByStatus, errMessage, isoNow, pickId } from '../utils/errors'
 import { useAuthStore } from '../stores/auth'
+import { taskStatusLabel } from '../utils/labels'
 import { mapDrawGeometry } from '../gis/mapTools'
 import { wktToGeoJson, type SimpleGeometry } from '../gis/wkt'
 
@@ -1906,7 +1907,7 @@ async function clearMapLinks() {
               <td>{{ t.id }}</td>
               <td><code>{{ t.code }}</code></td>
               <td>{{ t.name }}</td>
-              <td>{{ t.status }}</td>
+              <td><span class="status-badge" :class="taskStatusLabel(t.status).tone">{{ taskStatusLabel(t.status).text }}</span></td>
               <td>{{ Array.isArray(t.indicatorInstanceIds) ? t.indicatorInstanceIds.join(',') : '-' }}</td>
               <td class="ops">
                 <button class="btn ghost" type="button" @click.stop="selectTask(t.id)">选择并继续</button>

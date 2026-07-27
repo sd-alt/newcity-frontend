@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import * as api from '../api/endpoints'
 import { useAuthStore } from '../stores/auth'
+import { platformStatusLabel, taskStatusLabel } from '../utils/labels'
 import {
   focusAlertSensors,
   focusAnomalousData,
@@ -162,7 +163,7 @@ async function filterMap(mode: 'sensors' | 'data' | 'tasks' | 'all' | 'alerts' |
           <button type="button" class="linkish" @click="locateTask(t.id)">
             #{{ t.id }} {{ t.name || t.code || '任务' }}
           </button>
-          <span class="muted">{{ t.status }}</span>
+          <span class="status-badge" :class="taskStatusLabel(t.status).tone">{{ taskStatusLabel(t.status).text }}</span>
         </li>
       </ul>
     </div>
@@ -174,7 +175,7 @@ async function filterMap(mode: 'sensors' | 'data' | 'tasks' | 'all' | 'alerts' |
           <button type="button" class="linkish" @click="locateSensor(p.id)">
             #{{ p.id }} {{ p.name || p.code || '资源' }}
           </button>
-          <span class="muted">{{ p.status }}</span>
+          <span class="status-badge" :class="platformStatusLabel(p.status).tone">{{ platformStatusLabel(p.status).text }}</span>
         </li>
       </ul>
     </div>
