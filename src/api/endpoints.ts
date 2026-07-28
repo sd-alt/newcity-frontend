@@ -329,3 +329,62 @@ export const compareInstanceVersions = (id: number | string, fromV: number | str
   getAny('/api/v1/indicators/instances/' + id + '/versions/compare?from=' + fromV + '&to=' + toV)
 export const rollbackInstanceVersion = (id: number | string, version: number | string) =>
   postAction('/api/v1/indicators/instances/' + id + '/versions/' + version + '/rollback')
+
+// four-center domain APIs
+export const listSensingElements = () => listAny('/api/v1/task/sensing-elements')
+export const createSensingElement = (body: Record<string, unknown>) => createAny('/api/v1/task/sensing-elements', body)
+export const listIndicatorSystems = (query = '') => listAny('/api/v1/task/indicator-systems' + query)
+export const createIndicatorSystem = (body: Record<string, unknown>) => createAny('/api/v1/task/indicator-systems', body)
+export const updateIndicatorSystem = (id: number | string, body: Record<string, unknown>) => updateAny('/api/v1/task/indicator-systems/' + id, body)
+export const createIndicatorSystemVersion = (id: number | string, changeSummary = '') =>
+  postAction('/api/v1/task/indicator-systems/' + id + '/version', { changeSummary })
+export const listIndicatorNodes = (query = '') => listAny('/api/v1/task/indicator-nodes' + query)
+export const createIndicatorNode = (body: Record<string, unknown>) => createAny('/api/v1/task/indicator-nodes', body)
+export const updateIndicatorNode = (id: number | string, body: Record<string, unknown>) => updateAny('/api/v1/task/indicator-nodes/' + id, body)
+export const deleteIndicatorNode = (id: number | string) => deleteAny('/api/v1/task/indicator-nodes/' + id)
+export const listTaskIndicatorSystems = () => listAny('/api/v1/task/task-indicator-systems')
+export const createTaskIndicatorSystem = (body: Record<string, unknown>) => createAny('/api/v1/task/task-indicator-systems', body)
+export const updateTaskIndicatorSystem = (id: number | string, body: Record<string, unknown>) => updateAny('/api/v1/task/task-indicator-systems/' + id, body)
+export const confirmTaskIndicatorSystem = (id: number | string) => postAction('/api/v1/task/task-indicator-systems/' + id + '/confirm')
+
+export const getSensorOctuple = (id: number | string) => getAny('/api/v1/resource/sensors/' + id + '/octuple')
+export const updateSensorOctuple = (id: number | string, body: Record<string, unknown>) => updateAny('/api/v1/resource/sensors/' + id + '/octuple', body)
+export const listOmObservations = (query = '') => listAny('/api/v1/resource/observations' + query)
+export const createOmObservation = (body: Record<string, unknown>) => createAny('/api/v1/resource/observations', body)
+export const listAlgorithmServices = () => listAny('/api/v1/resource/algorithm-services')
+export const createAlgorithmService = (body: Record<string, unknown>) => createAny('/api/v1/resource/algorithm-services', body)
+export const listKnowledgeItems = (query = '') => listAny('/api/v1/resource/knowledge-items' + query)
+export const createKnowledgeItem = (body: Record<string, unknown>) => createAny('/api/v1/resource/knowledge-items', body)
+export const updateKnowledgeItem = (id: number | string, body: Record<string, unknown>) => updateAny('/api/v1/resource/knowledge-items/' + id, body)
+export const deleteKnowledgeItem = (id: number | string) => deleteAny('/api/v1/resource/knowledge-items/' + id)
+
+export const listMonitoringDemands = () => listAny('/api/v1/application/demands')
+export const createMonitoringDemand = (body: Record<string, unknown>) => createAny('/api/v1/application/demands', body)
+export const listCapabilityEvaluations = (query = '') => listAny('/api/v1/business/capability-evaluations' + query)
+export const listPlanResources = (query = '') => listAny('/api/v1/business/plan-resources' + query)
+export const listPlanEvaluations = (query = '') => listAny('/api/v1/business/plan-evaluations' + query)
+export const listExecutionItems = (query = '') => listAny('/api/v1/business/execution-items' + query)
+export const listTaskResults = (query = '') => listAny('/api/v1/business/task-results' + query)
+export const runBusinessAction = (objectType: 'tasks' | 'plans', id: number | string, action: string, body: Record<string, unknown> = {}) =>
+  postAction(`/api/v1/business/${objectType}/${id}/${action}`, body)
+
+export type AgentRunData = Record<string, unknown> & {
+  id: string
+  status: string
+  currentStage: string
+  progress: number
+  stages?: Array<Record<string, unknown>>
+  pendingApprovals?: Array<Record<string, unknown>>
+  toolCalls?: Array<Record<string, unknown>>
+  artifacts?: Array<Record<string, unknown>>
+}
+export const createAgentTask = (body: Record<string, unknown>) =>
+  apiEnvelope<Record<string, unknown>>('/api/application/agent-tasks/', { method: 'POST', body: JSON.stringify(body) })
+export const getAgentRun = (runId: string) => apiEnvelope<AgentRunData>(`/api/agent/runs/${runId}/`)
+export const sendAgentMessage = (runId: string, message: string) =>
+  apiEnvelope<AgentRunData>(`/api/agent/runs/${runId}/messages/`, { method: 'POST', body: JSON.stringify({ message }) })
+export const decideAgentApproval = (runId: string, approvalId: number | string, decision: 'approved' | 'rejected', note = '') =>
+  apiEnvelope<AgentRunData>(`/api/agent/runs/${runId}/approvals/${approvalId}/`, { method: 'POST', body: JSON.stringify({ decision, note }) })
+export const controlAgentRun = (runId: string, action: 'pause' | 'resume' | 'retry' | 'cancel' | 'takeover') =>
+  apiEnvelope<AgentRunData>(`/api/agent/runs/${runId}/${action}/`, { method: 'POST' })
+export const agentRunEventsUrl = (runId: string) => `/api/agent/runs/${runId}/events/`

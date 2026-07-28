@@ -126,6 +126,11 @@ function asList(payload: unknown): Array<Record<string, unknown>> {
 }
 
 function centerFromPath(path: string): ShellCenter {
+  if (path.startsWith('/tasks')) return 'indicators'
+  if (path.startsWith('/resources/data')) return 'data'
+  if (path.startsWith('/resources/algorithms')) return 'algorithms'
+  if (path.startsWith('/business')) return 'planning'
+  if (path.startsWith('/application')) return 'applications'
   if (path.startsWith('/indicators')) return 'indicators'
   if (path.startsWith('/resources')) return 'resources'
   if (path.startsWith('/data')) return 'data'

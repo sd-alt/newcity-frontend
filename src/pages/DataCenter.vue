@@ -341,7 +341,7 @@ async function setTab(key: string) {
   const q: Record<string, string> = { ...Object.fromEntries(
     Object.entries(route.query).filter(([, v]) => v != null && !Array.isArray(v)).map(([k, v]) => [k, String(v)]),
   ), tab: key }
-  await router.replace({ path: '/data', query: q })
+  await router.replace({ path: route.path, query: q })
 }
 function syncTab() {
   const t = route.query.tab
