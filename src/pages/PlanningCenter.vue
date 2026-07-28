@@ -222,7 +222,7 @@ async function setTab(key: string) {
   q.tab = key
   // keep current task id in URL for refresh / map jump
   if (taskId.value != null) q.taskId = String(taskId.value)
-  await router.replace({ path: '/planning', query: q })
+  await router.replace({ path: route.path, query: q })
 }
 function syncTab() {
   const t = route.query.tab
@@ -1049,7 +1049,7 @@ async function resetForm() {
   }
   q.tab = 'flow'
   tab.value = 'flow'
-  await router.replace({ path: '/planning', query: q })
+  await router.replace({ path: route.path, query: q })
 }
 
 async function loadPlanResult(planId: unknown, opts?: { silent?: boolean }) {

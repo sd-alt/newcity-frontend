@@ -278,7 +278,7 @@ const activeVersions = computed(() =>
 
 async function setTab(key: string) {
   tab.value = key
-  await router.replace({ path: '/algorithms', query: { tab: key } })
+  await router.replace({ path: route.path, query: { tab: key } })
 }
 function syncTab() {
   const t = route.query.tab

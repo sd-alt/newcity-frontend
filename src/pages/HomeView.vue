@@ -21,6 +21,13 @@ const mapHint = ref<string | null>(null)
 const runningTasks = ref<Array<Record<string, unknown>>>([])
 const offlineRows = ref<Array<Record<string, unknown>>>([])
 
+const centerEntries = [
+  { name: '任务中心', question: '需要监测什么', detail: '指标建模、指标体系与版本追溯', to: '/tasks', mark: '01' },
+  { name: '资源中心', question: '可以使用什么', detail: '传感器、观测数据、算法与知识', to: '/resources/sensors', mark: '02' },
+  { name: '业务中心', question: '如何完成监测', detail: '任务、资源匹配、方案、执行与成果', to: '/business', mark: '03' },
+  { name: '应用中心', question: '如何发起和跟踪', detail: '场景需求、Agent 进程与综合态势', to: '/application/tasks', mark: '04' },
+]
+
 const alertTotal = computed(
   () =>
     shellAlerts.offlineSensors +
@@ -121,6 +128,13 @@ async function filterMap(mode: 'sensors' | 'data' | 'tasks' | 'all' | 'alerts' |
       </div>
     </header>
 
+    <nav class="center-guide" aria-label="四中心业务入口">
+      <RouterLink v-for="item in centerEntries" :key="item.name" :to="item.to" class="center-entry">
+        <span class="center-mark">{{ item.mark }}</span>
+        <span><strong>{{ item.name }}</strong><small>{{ item.question }}</small><em>{{ item.detail }}</em></span>
+      </RouterLink>
+    </nav>
+
     <p class="hint">{{ shellLoading ? '图层加载中…' : shellStatus }}</p>
     <p v-if="mapHint" class="ok-text">{{ mapHint }}</p>
     <p v-if="error" class="error">{{ error }}</p>
@@ -185,6 +199,14 @@ async function filterMap(mode: 'sensors' | 'data' | 'tasks' | 'all' | 'alerts' |
 
 <style scoped>
 .home-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; margin: 0.6rem 0; }
+.center-guide { display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem; margin: 0.65rem 0 0.8rem; }
+.center-entry { display: grid; grid-template-columns: 2.2rem 1fr; gap: 0.55rem; padding: 0.65rem; color: #24343b; text-decoration: none; background: rgba(246, 249, 248, 0.94); border: 1px solid #cbd8d5; border-left: 3px solid #287b78; border-radius: 4px; }
+.center-entry:hover, .center-entry:focus-visible { border-color: #287b78; box-shadow: 0 0 0 2px rgba(40, 123, 120, 0.13); outline: none; }
+.center-mark { font: 700 0.72rem/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; color: #a76420; border-right: 1px solid #cbd8d5; }
+.center-entry strong, .center-entry small, .center-entry em { display: block; }
+.center-entry strong { font-size: 0.84rem; color: #173f48; }
+.center-entry small { margin-top: 0.12rem; font-size: 0.72rem; color: #287b78; }
+.center-entry em { margin-top: 0.2rem; font-size: 0.66rem; font-style: normal; color: #66757a; }
 .home-stats .card.stat { padding: 0.5rem 0.55rem; text-align: left; width: 100%; border: 1px solid #E5E7EB; background: #fff; border-radius: 10px; cursor: pointer; }
 .home-stats .card.stat.clickable:hover { border-color: #1677FF; box-shadow: 0 0 0 2px rgba(22,119,255,0.12); }
 .home-stats .card.stat:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -202,4 +224,5 @@ async function filterMap(mode: 'sensors' | 'data' | 'tasks' | 'all' | 'alerts' |
 }
 .linkish:hover { text-decoration: underline; }
 .ok-text { color: #027a48; font-size: 12px; }
+@media (max-width: 720px) { .center-guide { grid-template-columns: 1fr; } }
 </style>

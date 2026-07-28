@@ -112,7 +112,7 @@ const searchGroups = ref<
   Array<{ type: string; items: Array<{ id: string; title: string; subtitle: string; route: string; tab?: string }> }>
 >([])
 
-type SubItem = { key: string; label: string }
+type SubItem = { key: string; label: string; to: string; tab?: string }
 type CenterItem = {
   key: string
   label: string
@@ -125,95 +125,70 @@ type CenterItem = {
 
 const centers: CenterItem[] = [
   {
-    key: 'indicators',
-    label: '感知指标中心',
-    short: '感知指标',
-    icon: '标',
-    to: '/indicators',
-    defaultTab: 'instances',
+    key: 'tasks',
+    label: '任务中心',
+    short: '任务中心',
+    icon: '任',
+    to: '/tasks',
+    defaultTab: 'systems',
     children: [
-      { key: 'samples', label: '指标样例' },
-      { key: 'instances', label: '指标实例' },
-      { key: 'tree', label: '指标树' },
-      { key: 'query', label: '条件查询' },
-      { key: 'versions', label: '版本管理' },
+      { key: 'systems', label: '指标体系管理', to: '/tasks', tab: 'systems' },
+      { key: 'modeling', label: '手工指标建模', to: '/tasks', tab: 'modeling' },
+      { key: 'task-systems', label: '任务指标体系', to: '/tasks', tab: 'task-systems' },
+      { key: 'versions', label: '版本与追溯', to: '/tasks', tab: 'versions' },
     ],
   },
   {
     key: 'resources',
-    label: '传感资源中心',
-    short: '传感资源',
+    label: '资源中心',
+    short: '资源中心',
     icon: '资',
-    to: '/resources',
+    to: '/resources/sensors',
     defaultTab: 'crud',
     children: [
-      { key: 'types', label: '传感器类型' },
-      { key: 'crud', label: '传感器资源' },
-      { key: 'query', label: '资源查询' },
-      { key: 'viz', label: '资源地图' },
+      { key: 'sensor-types', label: '传感器类型', to: '/resources/sensors', tab: 'types' },
+      { key: 'sensors', label: '传感器资源', to: '/resources/sensors', tab: 'crud' },
+      { key: 'octuple', label: '传感器八元组', to: '/resources/metadata' },
+      { key: 'observations', label: '观测数据库', to: '/resources/data', tab: 'query' },
+      { key: 'data-sources', label: '数据接入', to: '/resources/data', tab: 'sources' },
+      { key: 'algorithms', label: '算法模型与服务', to: '/resources/algorithms', tab: 'models' },
+      { key: 'knowledge', label: '知识库', to: '/resources/knowledge' },
     ],
   },
   {
-    key: 'data',
-    label: '观测数据中心',
-    short: '观测数据',
-    icon: '数',
-    to: '/data',
-    defaultTab: 'query',
-    children: [
-      { key: 'crud', label: '数据模型' },
-      { key: 'sources', label: '数据接入' },
-      { key: 'query', label: '数据查询' },
-      { key: 'viz', label: '数据地图' },
-    ],
-  },
-  {
-    key: 'planning',
-    label: '观测规划中心',
-    short: '观测规划',
-    icon: '规',
-    to: '/planning',
+    key: 'business',
+    label: '业务中心',
+    short: '业务中心',
+    icon: '业',
+    to: '/business',
     defaultTab: 'tasks',
     children: [
-      { key: 'tasks', label: '任务建模' },
-      { key: 'flow', label: '需求与关联' },
-      { key: 'candidates', label: '候选与评分' },
-      { key: 'plans', label: '方案管理' },
+      { key: 'tasks', label: '观测任务管理', to: '/business', tab: 'tasks' },
+      { key: 'flow', label: '查选算评配优验', to: '/business', tab: 'flow' },
+      { key: 'candidates', label: '候选资源与评分', to: '/business', tab: 'candidates' },
+      { key: 'plans', label: '观测方案与评价', to: '/business', tab: 'plans' },
+      { key: 'execution', label: '执行与成果', to: '/business/execution' },
     ],
   },
   {
-    key: 'algorithms',
-    label: '算法处理中心',
-    short: '算法处理',
-    icon: '算',
-    to: '/algorithms',
-    defaultTab: 'tasks',
+    key: 'application',
+    label: '应用中心',
+    short: '应用中心',
+    icon: '应',
+    to: '/application/tasks',
+    defaultTab: 'agent-tasks',
     children: [
-      { key: 'models', label: '算法模型' },
-      { key: 'tasks', label: '处理任务' },
-      { key: 'run', label: '任务执行' },
-      { key: 'monitor', label: '过程监控' },
-      { key: 'results', label: '处理结果' },
-    ],
-  },
-  {
-    key: 'applications',
-    label: '综合应用中心',
-    short: '综合应用',
-    icon: '综',
-    to: '/applications',
-    defaultTab: 'gis',
-    children: [
-      { key: 'gis', label: 'GIS综合展示' },
-      { key: 'stats', label: '综合统计' },
-      { key: 'workbench', label: '工作台' },
+      { key: 'agent-tasks', label: '场景任务发起', to: '/application/tasks' },
+      { key: 'gis', label: 'GIS综合展示', to: '/application', tab: 'gis' },
+      { key: 'stats', label: '场景统计分析', to: '/application', tab: 'stats' },
+      { key: 'workbench', label: '场景与图层配置', to: '/application', tab: 'workbench' },
     ],
   },
 ]
 
 const activeCenter = computed(() => {
   if (route.path === '/' || route.name === 'home') return null
-  return centers.find((c) => route.path === c.to || route.path.startsWith(c.to + '/')) || null
+  return centers.find((c) => c.children.some((child) => route.path === child.to || route.path.startsWith(child.to + '/'))) || null
 })
 
 const currentCenterLabel = computed(() => {
@@ -223,15 +198,17 @@ const currentCenterLabel = computed(() => {
 
 const pageLabel = computed(() => {
   if (!activeCenter.value) return '运行态势'
-  const tab = String(route.query.tab || activeCenter.value.defaultTab)
-  return activeCenter.value.children.find((c) => c.key === tab)?.label || '概览'
+  return activeCenter.value.children.find((c) => c.key === activeSubKey.value)?.label || '概览'
 })
 
 const subItems = computed(() => activeCenter.value?.children || [])
 
 const activeSubKey = computed(() => {
   const q = String(route.query.tab || '')
-  if (q && subItems.value.some((s) => s.key === q)) return q
+  const exact = subItems.value.find((s) => s.to === route.path && (s.tab == null || s.tab === q))
+  if (exact) return exact.key
+  const byPath = subItems.value.find((s) => s.to === route.path)
+  if (byPath) return byPath.key
   return activeCenter.value?.defaultTab || ''
 })
 
@@ -625,13 +602,17 @@ async function goHome() {
 }
 
 async function goCenter(c: CenterItem) {
-  const tab = lastTabByCenter.value[c.key] || c.defaultTab
-  await router.push({ path: c.to, query: { tab } })
+  const key = lastTabByCenter.value[c.key] || c.defaultTab
+  const child = c.children.find((item) => item.key === key) || c.children[0]
+  if (!child) return
+  await router.push({ path: child.to, query: child.tab ? { tab: child.tab } : {} })
 }
 
 async function goSub(key: string) {
   if (!activeCenter.value) return
-  await router.push({ path: activeCenter.value.to, query: { ...route.query, tab: key } })
+  const child = activeCenter.value.children.find((item) => item.key === key)
+  if (!child) return
+  await router.push({ path: child.to, query: child.tab ? { tab: child.tab } : {} })
 }
 
 function kindLabel(kind: ShellFeatureKind) {
@@ -650,11 +631,11 @@ function kindLabel(kind: ShellFeatureKind) {
 async function jumpSelectedCenter() {
   const s = shellSelected.value
   if (!s) return
-  if (s.kind === 'sensor') await router.push({ path: '/resources', query: { tab: 'crud' } })
-  else if (s.kind === 'data') await router.push({ path: '/data', query: { tab: 'query' } })
-  else if (s.kind === 'task') await router.push({ path: '/planning', query: { tab: 'tasks' } })
-  else if (s.kind === 'indicator') await router.push({ path: '/indicators', query: { tab: 'instances' } })
-  else await router.push({ path: '/algorithms', query: { tab: 'tasks' } })
+  if (s.kind === 'sensor') await router.push({ path: '/resources/sensors', query: { tab: 'crud' } })
+  else if (s.kind === 'data') await router.push({ path: '/resources/data', query: { tab: 'query' } })
+  else if (s.kind === 'task') await router.push({ path: '/business', query: { tab: 'tasks' } })
+  else if (s.kind === 'indicator') await router.push({ path: '/tasks', query: { tab: 'task-systems' } })
+  else await router.push({ path: '/resources/algorithms', query: { tab: 'tasks' } })
 }
 
 function reflySelected() {
@@ -711,7 +692,7 @@ async function runSearch() {
         id: String(x.id ?? x.platformId ?? x.platform_id ?? ''),
         title: String(x.name || x.platformName || x.identifier || `平台 #${x.id}`),
         subtitle: String(x.platformTypeCode || x.status || '平台'),
-        route: '/resources',
+        route: '/resources/sensors',
         tab: 'crud',
       }))
     if (sensorItems.length) groups.push({ type: '传感器', items: sensorItems })
@@ -722,7 +703,7 @@ async function runSearch() {
         id: String(x.id),
         title: String(x.name || x.dataName || `监测数据 #${x.id}`),
         subtitle: String(x.qualityStatus || x.dataType || '监测数据'),
-        route: '/data',
+        route: '/resources/data',
         tab: 'query',
       }))
     if (dataItems.length) groups.push({ type: '监测数据', items: dataItems })
@@ -737,7 +718,7 @@ async function runSearch() {
         id: String(x.id),
         title: String(x.name || x.taskName || `观测任务 #${x.id}`),
         subtitle: String(x.status || '观测任务'),
-        route: '/planning',
+        route: '/business',
         tab: 'tasks',
       }))
     if (taskItems.length) groups.push({ type: '观测任务', items: taskItems })
@@ -748,8 +729,8 @@ async function runSearch() {
         id: String(x.id),
         title: String(x.name || x.instanceName || `指标实例 #${x.id}`),
         subtitle: String(x.status || '指标实例'),
-        route: '/indicators',
-        tab: 'instances',
+        route: '/tasks',
+        tab: 'task-systems',
       }))
     if (indItems.length) groups.push({ type: '指标实例', items: indItems })
 
@@ -771,20 +752,20 @@ async function openSearchItem(item: {
   await router.push({ path: item.route, query: item.tab ? { tab: item.tab } : {} })
   await new Promise((r) => setTimeout(r, 150))
   let ok = false
-  if (item.route === '/resources') ok = await selectShellFeature('sensor', item.id, { openBubble: true, fly: true })
-  else if (item.route === '/data') ok = await selectShellFeature('data', item.id, { openBubble: true, fly: true })
-  else if (item.route === '/planning') ok = await selectShellFeature('task', item.id, { openBubble: true, fly: true })
-  else if (item.route === '/indicators') ok = await selectShellFeature('indicator', item.id, { openBubble: true, fly: true })
+  if (item.route === '/resources/sensors') ok = await selectShellFeature('sensor', item.id, { openBubble: true, fly: true })
+  else if (item.route === '/resources/data') ok = await selectShellFeature('data', item.id, { openBubble: true, fly: true })
+  else if (item.route === '/business') ok = await selectShellFeature('task', item.id, { openBubble: true, fly: true })
+  else if (item.route === '/tasks') ok = await selectShellFeature('indicator', item.id, { openBubble: true, fly: true })
   openShellRight()
   if (!ok && item.id) {
     const kind =
-      item.route === '/resources'
+      item.route === '/resources/sensors'
         ? 'sensor'
-        : item.route === '/data'
+        : item.route === '/resources/data'
           ? 'data'
-          : item.route === '/planning'
+          : item.route === '/business'
             ? 'task'
-            : item.route === '/indicators'
+            : item.route === '/tasks'
               ? 'indicator'
               : 'unknown'
     shellSelected.value = {
