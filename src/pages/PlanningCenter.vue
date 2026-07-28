@@ -19,6 +19,7 @@ import { useAuthStore } from '../stores/auth'
 import { taskStatusLabel } from '../utils/labels'
 import { mapDrawGeometry } from '../gis/mapTools'
 import { wktToGeoJson, type SimpleGeometry } from '../gis/wkt'
+import ContextGuide from '../components/ContextGuide.vue'
 
 type StepKey =
   | 'create'
@@ -30,6 +31,17 @@ type StepKey =
   | 'supplement'
   | 'evaluate'
   | 'output'
+
+type ResourceRelationRow = {
+  left?: { platformName?: string; platformId?: string | number }
+  right?: { platformName?: string; platformId?: string | number }
+  modeLabels?: string[]
+  sharedIndicatorIds?: Array<string | number>
+  combinedIndicatorIds?: Array<string | number>
+  spatialOverlapPercent?: number
+  additionalCoveragePercent?: number
+  explanations?: string[]
+}
 
 const STEP_ORDER: StepKey[] = [
   'create',
@@ -52,6 +64,11 @@ const STEPS: { key: StepKey; title: string; desc: string }[] = [
   { key: 'supplement', title: '7. 增补关联', desc: '补足覆盖不足' },
   { key: 'evaluate', title: '8. 满足度评估', desc: '关联后覆盖/精度核查' },
   { key: 'output', title: '9. 规划输出', desc: '生成输出方案' },
+]
+const evaluationGuideSteps = [
+  { title: '先看是否满足', detail: '“指标满足”回答当前方案能不能完成任务。未满足时先不要输出方案。' },
+  { title: '再看空间质量', detail: '有效/共同覆盖越高越好；覆盖错位表示各指标虽然能测到，但不能在同一区域联合观测。' },
+  { title: '最后看资源组合', detail: '竞争表示可替代，互补表示能补盲，增强表示可交叉验证，协作表示需要联动作业。' },
 ]
 
 const { user, setLastTaskId } = useAuthStore()
@@ -192,6 +209,37 @@ const reverseSummary = computed(() => {
     recs,
   }
 })
+const evaluationSummary = computed(() => {
+  const raw = evalResult.value as Record<string, unknown> | null
+  if (!raw || typeof raw !== 'object') return null
+  const overall = (raw.overallCoverage || {}) as Record<string, unknown>
+  const common = (raw.commonCoverage || overall) as Record<string, unknown>
+  const misalignment = (raw.coverageMisalignment || {}) as Record<string, unknown>
+  const relationSummary = (raw.relationSummary || {}) as Record<string, unknown>
+  const overallCoveragePercent = Number(overall.coveragePercent || 0)
+  return {
+    indicatorCount: Number(raw.indicatorCount || 0),
+    satisfiedCount: Number(raw.satisfiedCount || 0),
+    overallSatisfied: Boolean(raw.overallSatisfied),
+    commonCoverageSatisfied: Boolean(raw.commonCoverageSatisfied),
+    overallCoveragePercent: Number(overallCoveragePercent.toFixed(2)),
+    commonCoveragePercent: Number(Number(common.coveragePercent || 0).toFixed(2)),
+    misalignmentPercent: Number(Number(misalignment.areaPercent || 0).toFixed(2)),
+    uncoveredPercent: Number(Math.max(0, 100 - overallCoveragePercent).toFixed(2)),
+    reasons: Array.isArray(raw.collaborationReasons) ? raw.collaborationReasons.map(String) : [],
+    relationSummary,
+    relations: Array.isArray(raw.resourceRelations) ? raw.resourceRelations as ResourceRelationRow[] : [],
+  }
+})
+
+function evaluationCoverage(value: unknown) {
+  const raw = value as Record<string, unknown> | null
+  if (!raw || typeof raw !== 'object') return {} as Record<string, unknown>
+  if (Number(raw.indicatorCount || 0) > 1 && raw.commonCoverage) {
+    return raw.commonCoverage as Record<string, unknown>
+  }
+  return (raw.overallCoverage || {}) as Record<string, unknown>
+}
 
 const hasTask = computed(() => taskId.value != null)
 const canEditDraft = computed(
@@ -740,7 +788,7 @@ async function requirementEvaluation() {
   try {
     const res = await api.requirementEvaluation(taskId.value)
     evalResult.value = res.data
-    const oc = (res.data as { overallCoverage?: Record<string, unknown> })?.overallCoverage || {}
+    const oc = evaluationCoverage(res.data)
     try {
       await drawPlanningCoverageOverlay({
         taskGeoJson: researchAreaGeoJson.value,
@@ -752,7 +800,10 @@ async function requirementEvaluation() {
     markDone('evaluate')
     advanceTo('output')
     await setTab('flow')
-    message.value = '满足度评估完成（关联后核查）'
+    const commonPercent = Number(oc.coveragePercent || 0)
+    message.value = Number((res.data as Record<string, unknown>)?.indicatorCount || 0) > 1
+      ? `协同评估完成：多指标共同覆盖率 ${commonPercent}%`
+      : `满足度评估完成：覆盖率 ${commonPercent}%`
   } catch (err) {
     error.value = errMessage(err, '评估失败')
   } finally {
@@ -1767,10 +1818,9 @@ async function drawPlanningCoverageFromEval() {
     }
   }
   const er = evalResult.value as {
-    overallCoverage?: Record<string, unknown>
     task?: { researchAreaGeoJson?: SimpleGeometry | null }
   } | null
-  const oc = er?.overallCoverage || {}
+  const oc = evaluationCoverage(evalResult.value)
   const r = await drawPlanningCoverageOverlay({
     taskGeoJson: researchAreaGeoJson.value || er?.task?.researchAreaGeoJson,
     coverageWkt: String(oc.coverageWkt || ''),
@@ -2058,8 +2108,74 @@ async function clearMapLinks() {
               </details>
             </div>
             <div v-if="evalResult" class="panel soft" style="margin-top:0.8rem">
-              <h3>满足度评估摘要（关联后）</h3>
-              <pre class="result-pre">{{ businessResultText(evalResult) }}</pre>
+              <h3>{{ evaluationSummary && evaluationSummary.indicatorCount > 1 ? '多指标协同评估（关联后）' : '满足度评估摘要（关联后）' }}</h3>
+              <ContextGuide
+                storage-key="newcity-planning-evaluation-guide"
+                kicker="评估结果怎么读"
+                title="按任务判定 → 空间质量 → 资源组合查看"
+                summary="这不是四项独立考核。先确认方案能否完成任务，再判断覆盖质量，最后核对为什么选择这些资源。"
+                :steps="evaluationGuideSteps"
+                reopen-label="查看判读说明"
+              />
+              <template v-if="evaluationSummary">
+                <div class="collaboration-metrics">
+                  <article>
+                    <span>指标满足</span>
+                    <strong>{{ evaluationSummary.satisfiedCount }} / {{ evaluationSummary.indicatorCount }}</strong>
+                    <small>{{ evaluationSummary.overallSatisfied ? '整体满足' : '仍需优化' }}</small>
+                  </article>
+                  <article>
+                    <span>总体并集覆盖</span>
+                    <strong>{{ evaluationSummary.overallCoveragePercent }}%</strong>
+                    <small>至少一个指标可观测</small>
+                  </article>
+                  <article class="primary-metric">
+                    <span>{{ evaluationSummary.indicatorCount > 1 ? '多指标共同覆盖' : '指标有效覆盖' }}</span>
+                    <strong>{{ evaluationSummary.commonCoveragePercent }}%</strong>
+                    <small>{{ evaluationSummary.commonCoverageSatisfied ? (evaluationSummary.indicatorCount > 1 ? '达到共同覆盖要求' : '达到指标覆盖要求') : (evaluationSummary.indicatorCount > 1 ? '未达到共同覆盖要求' : '未达到指标覆盖要求') }}</small>
+                  </article>
+                  <article :class="{ warning: evaluationSummary.misalignmentPercent > 0 }">
+                    <span>指标覆盖错位</span>
+                    <strong>{{ evaluationSummary.misalignmentPercent }}%</strong>
+                    <small>有覆盖但无法联合观测</small>
+                  </article>
+                </div>
+                <div class="coverage-alignment" :aria-label="evaluationSummary.indicatorCount > 1 ? '共同覆盖、覆盖错位和未覆盖区域比例' : '指标有效覆盖和未覆盖区域比例'">
+                  <div class="coverage-band">
+                    <i class="common" :style="{ width: evaluationSummary.commonCoveragePercent + '%' }" :title="evaluationSummary.indicatorCount > 1 ? '多指标共同覆盖' : '指标有效覆盖'"></i>
+                    <i class="misaligned" :style="{ width: evaluationSummary.misalignmentPercent + '%' }" title="指标覆盖错位"></i>
+                    <i class="uncovered" :style="{ width: evaluationSummary.uncoveredPercent + '%' }" title="未覆盖"></i>
+                  </div>
+                  <p><span><i class="common"></i>{{ evaluationSummary.indicatorCount > 1 ? '共同覆盖' : '有效覆盖' }} {{ evaluationSummary.commonCoveragePercent }}%</span><span><i class="misaligned"></i>覆盖错位 {{ evaluationSummary.misalignmentPercent }}%</span><span><i class="uncovered"></i>未覆盖 {{ evaluationSummary.uncoveredPercent }}%</span></p>
+                </div>
+                <ul v-if="evaluationSummary.reasons.length" class="hint-list collaboration-reasons">
+                  <li v-for="(reason, index) in evaluationSummary.reasons" :key="'cr' + index">{{ reason }}</li>
+                </ul>
+                <div class="relation-summary" v-if="Number(evaluationSummary.relationSummary.resourceCount || 0) > 0">
+                  <span>资源 {{ evaluationSummary.relationSummary.resourceCount }}</span>
+                  <span>竞争 {{ evaluationSummary.relationSummary.competition || 0 }}</span>
+                  <span>互补 {{ evaluationSummary.relationSummary.complementarity || 0 }}</span>
+                  <span>增强 {{ evaluationSummary.relationSummary.enhancement || 0 }}</span>
+                  <span>协作 {{ evaluationSummary.relationSummary.cooperation || 0 }}</span>
+                </div>
+                <div class="relation-list" v-if="evaluationSummary.relations.length">
+                  <article class="relation-item" v-for="(relation, index) in evaluationSummary.relations" :key="'relation' + index">
+                    <strong>{{ relation.left?.platformName || relation.left?.platformId }} ＋ {{ relation.right?.platformName || relation.right?.platformId }}</strong>
+                    <div class="relation-modes">
+                      <span class="relation-label" v-for="label in relation.modeLabels || []" :key="label">{{ label }}</span>
+                    </div>
+                    <dl>
+                      <div><dt>空间交叠</dt><dd>{{ relation.spatialOverlapPercent || 0 }}%</dd></div>
+                      <div><dt>新增覆盖</dt><dd>{{ relation.additionalCoveragePercent || 0 }}%</dd></div>
+                    </dl>
+                    <p>{{ (relation.explanations || []).join('；') }}</p>
+                  </article>
+                </div>
+              </template>
+              <details>
+                <summary>查看完整计算证据</summary>
+                <pre class="result-pre">{{ businessResultText(evalResult, 5000) }}</pre>
+              </details>
             </div>
             <div v-if="outputResult" class="panel soft" style="margin-top:0.8rem">
               <h3>规划输出摘要</h3>
@@ -2315,6 +2431,55 @@ async function clearMapLinks() {
   gap: 0.5rem;
   margin-top: 0.6rem;
 }
+.collaboration-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.45rem;
+  margin: 0.6rem 0;
+}
+.collaboration-metrics article {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.65rem;
+  border: 1px solid #d9e3e1;
+  border-left: 3px solid #78918d;
+  background: #fff;
+}
+.collaboration-metrics article.primary-metric { border-left-color: #0d756b; background: #eff7f5; }
+.collaboration-metrics article.warning { border-left-color: #b47b1c; background: #fff8ec; }
+.collaboration-metrics span, .collaboration-metrics small { color: #687b78; font-size: 10px; }
+.collaboration-metrics strong { color: #173f43; font-size: 16px; font-variant-numeric: tabular-nums; }
+.coverage-alignment { margin: 0.55rem 0; }
+.coverage-band { display: flex; height: 12px; overflow: hidden; border: 1px solid #b9c9c6; background: #edf1f0; }
+.coverage-band i { display: block; height: 100%; }
+.coverage-alignment .common { background: #0d756b; }
+.coverage-alignment .misaligned { background: #d49a3a; }
+.coverage-alignment .uncovered { background: #dfe6e4; }
+.coverage-alignment p { display: flex; flex-wrap: wrap; gap: 0.55rem; margin: 0.28rem 0 0; color: #687b78; font-size: 10px; }
+.coverage-alignment p span { display: inline-flex; align-items: center; gap: 0.2rem; }
+.coverage-alignment p i { width: 8px; height: 8px; border: 1px solid rgba(23, 63, 67, 0.15); }
+.collaboration-reasons { margin: 0.45rem 0; }
+.relation-summary { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.5rem 0; }
+.relation-summary span, .relation-label {
+  display: inline-flex;
+  width: max-content;
+  margin-right: 0.2rem;
+  padding: 0.18rem 0.4rem;
+  border: 1px solid #c8d9d6;
+  background: #f3f8f7;
+  color: #315e5a;
+  font-size: 10px;
+}
+.relation-list { display: grid; gap: 0.45rem; margin-top: 0.55rem; }
+.relation-item { padding: 0.55rem 0.6rem; border: 1px solid #d9e3e1; background: #fff; }
+.relation-item > strong { display: block; color: #173f43; font-size: 12px; line-height: 1.45; }
+.relation-modes { display: flex; flex-wrap: wrap; gap: 0.25rem; margin: 0.35rem 0; }
+.relation-modes .relation-label { margin-right: 0; }
+.relation-item dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; margin: 0; }
+.relation-item dl div { display: flex; align-items: baseline; justify-content: space-between; gap: 0.35rem; padding-top: 0.3rem; border-top: 1px solid #e6ecea; }
+.relation-item dt { color: #687b78; font-size: 10px; }
+.relation-item dd { margin: 0; color: #173f43; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.relation-item p { margin: 0.4rem 0 0; color: #536966; font-size: 11px; line-height: 1.55; }
 @media (max-width: 760px) {
   .area-control { align-items: stretch; flex-direction: column; }
 }

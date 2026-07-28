@@ -573,12 +573,11 @@ async function filterTasksByStatus(status: unknown) {
           <span class="muted tiny">当前：{{ activeMapFilter }}</span>
         </div>
 
-      <p class="muted">对应任务清单 C4–C6：传感资源统计、监测数据统计、观测任务统计。支持条件筛选与下钻到明细中心。</p>
-      <h2>综合统计（文档 3 项）</h2>
-      <p class="muted">传感资源 / 监测数据 / 观测任务。先设筛选条件，再刷新；结果按维度分表展示，避免只看原始 JSON。</p>
+      <h2>业务统计</h2>
+      <p class="muted">分别回答“资源是否够用、数据是否健康、任务是否形成方案”。设置条件后刷新，点击统计项可联动地图或进入明细。</p>
       <button class="btn" type="button" :disabled="pending" @click="() => loadStats()">刷新统计</button>
 
-      <h3>C4 传感资源统计</h3>
+      <h3>传感资源 · 能力盘点</h3>
       <div class="form-row">
         <label>类型编码<input v-model="resourceFilter.typeCode" placeholder="station/satellite" /></label>
         <label>状态<input v-model="resourceFilter.status" placeholder="active" /></label>
@@ -587,10 +586,10 @@ async function filterTasksByStatus(status: unknown) {
         <button class="btn ghost" type="button" :disabled="pending" @click="() => loadStats()">按条件统计</button>
         <RouterLink class="btn ghost" to="/resources?tab=query">下钻查询</RouterLink>
       </div>
-      <div class="cards">
-        <button type="button" class="card stat clickable" @click="filterMapByStat('sensors')"><h3>资源总数</h3><p class="stat-num">{{ resourceStats?.total ?? '—' }}</p><span class="muted">点击仅显传感资源</span></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('sensors')"><h3>类型数</h3><p class="stat-num">{{ resourceByType.length }}</p><span class="muted">联动地图图层</span></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('sensors')"><h3>状态类</h3><p class="stat-num">{{ resourceByStatus.length }}</p><span class="muted">联动地图图层</span></button>
+      <div class="stat-summary">
+        <button type="button" @click="filterMapByStat('sensors')"><span>已登记资源</span><strong>{{ resourceStats?.total ?? '—' }}</strong><small>地图查看</small></button>
+        <button type="button" @click="filterMapByStat('sensors')"><span>能力类型</span><strong>{{ resourceByType.length }}</strong><small>种分类</small></button>
+        <button type="button" @click="filterMapByStat('sensors')"><span>运行状态</span><strong>{{ resourceByStatus.length }}</strong><small>种状态</small></button>
       </div>
       <div class="grid-2">
         <div>
@@ -637,7 +636,7 @@ async function filterTasksByStatus(status: unknown) {
         </tbody>
       </table>
 
-      <h3>C5 监测数据统计</h3>
+      <h3>监测数据 · 质量判读</h3>
       <div class="form-row">
         <label>数据类型<input v-model="dataFilter.dataType" placeholder="timeseries" /></label>
         <label>质量状态<input v-model="dataFilter.qualityStatus" placeholder="passed/failed" /></label>
@@ -652,10 +651,10 @@ async function filterTasksByStatus(status: unknown) {
         <button class="btn ghost" type="button" :disabled="pending" @click="() => loadStats()">按条件统计</button>
         <RouterLink class="btn ghost" to="/data?tab=query">下钻查询</RouterLink>
       </div>
-      <div class="cards">
-        <button type="button" class="card stat clickable" @click="filterMapByStat('data')"><h3>数据总数</h3><p class="stat-num">{{ dataStats?.total ?? '—' }}</p><span class="muted">点击仅显监测数据</span></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('data')"><h3>隔离数</h3><p class="stat-num">{{ dataStats?.quarantinedCount ?? '—' }}</p><span class="muted">联动数据图层</span></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('data')"><h3>质量类</h3><p class="stat-num">{{ dataByQuality.length }}</p><span class="muted">可点质量行过滤</span></button>
+      <div class="stat-summary">
+        <button type="button" @click="filterMapByStat('data')"><span>数据记录</span><strong>{{ dataStats?.total ?? '—' }}</strong><small>地图查看</small></button>
+        <button type="button" @click="filterMapByStat('data')"><span>需要隔离</span><strong>{{ dataStats?.quarantinedCount ?? '—' }}</strong><small>条记录</small></button>
+        <button type="button" @click="filterMapByStat('data')"><span>质量状态</span><strong>{{ dataByQuality.length }}</strong><small>种状态</small></button>
       </div>
       <div class="grid-2">
         <div>
@@ -690,7 +689,7 @@ async function filterTasksByStatus(status: unknown) {
         </div>
       </div>
 
-      <h3>C6 观测任务统计</h3>
+      <h3>观测任务 · 方案进展</h3>
       <div class="form-row">
         <label>状态<input v-model="taskFilter.status" placeholder="submitted" /></label>
         <label>任务类型<input v-model="taskFilter.taskType" /></label>
@@ -702,10 +701,10 @@ async function filterTasksByStatus(status: unknown) {
       <div class="form-row" style="margin-bottom:0.5rem">
         <RouterLink class="btn ghost" to="/planning?tab=tasks">下钻任务管理</RouterLink>
       </div>
-      <div class="cards">
-        <button type="button" class="card stat clickable" @click="filterMapByStat('tasks')"><h3>任务总数</h3><p class="stat-num">{{ taskStats?.total ?? '—' }}</p><span class="muted">点击仅显观测任务</span></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('tasks')"><h3>已有方案</h3><p class="stat-num">{{ taskStats?.withPlanCount ?? '—' }}</p><span class="muted">联动任务图层</span></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('tasks')"><h3>状态类</h3><p class="stat-num">{{ taskByStatus.length }}</p><span class="muted">可点状态行过滤</span></button>
+      <div class="stat-summary">
+        <button type="button" @click="filterMapByStat('tasks')"><span>观测任务</span><strong>{{ taskStats?.total ?? '—' }}</strong><small>地图查看</small></button>
+        <button type="button" @click="filterMapByStat('tasks')"><span>已形成方案</span><strong>{{ taskStats?.withPlanCount ?? '—' }}</strong><small>个任务</small></button>
+        <button type="button" @click="filterMapByStat('tasks')"><span>任务状态</span><strong>{{ taskByStatus.length }}</strong><small>种状态</small></button>
       </div>
       <div class="grid-2">
         <div>
@@ -768,20 +767,8 @@ async function filterTasksByStatus(status: unknown) {
         <button class="btn ghost" type="button" :disabled="shellLoading" @click="mapShowIndicators">仅指标范围</button>
         <button class="btn ghost" type="button" :disabled="pending" @click="mapRefresh">刷新图层</button>
       </div>
-      <div class="form-row" style="margin-top:0.6rem">
-        <label class="check"><input type="checkbox" :checked="shellFilters.showSensors" @change="toggleShellLayer('showSensors', $event)" /> 传感器 <span class="badge">{{ shellCounts.sensors }}</span></label>
-        <label class="check"><input type="checkbox" :checked="shellFilters.showData" @change="toggleShellLayer('showData', $event)" /> 监测数据 <span class="badge">{{ shellCounts.data }}</span></label>
-        <label class="check"><input type="checkbox" :checked="shellFilters.showTasks" @change="toggleShellLayer('showTasks', $event)" /> 观测任务 <span class="badge">{{ shellCounts.tasks }}</span></label>
-        <label class="check"><input type="checkbox" :checked="shellFilters.showIndicators" @change="toggleShellLayer('showIndicators', $event)" /> 指标实例 <span class="badge">{{ shellCounts.indicators }}</span></label>
-      </div>
-      <div class="cards" style="margin-top:0.8rem">
-        <button type="button" class="card stat clickable" @click="filterMapByStat('sensors')"><h3>传感器要素</h3><p class="stat-num">{{ shellCounts.sensors }}</p></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('data')"><h3>数据要素</h3><p class="stat-num">{{ shellCounts.data }}</p></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('tasks')"><h3>任务要素</h3><p class="stat-num">{{ shellCounts.tasks }}</p></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('indicators')"><h3>指标实例</h3><p class="stat-num">{{ shellCounts.indicators }}</p></button>
-      </div>
-      <div class="layer-tree">
-        <h3>业务图层树</h3>
+      <div class="layer-console">
+        <header><div><span>图层账本</span><strong>当前底图显示什么</strong></div><small>{{ shellCounts.sensors + shellCounts.data + shellCounts.tasks + shellCounts.indicators }} 个业务要素</small></header>
         <label class="check"><input type="checkbox" :checked="shellFilters.showSensors" @change="toggleShellLayer('showSensors', $event)" /> 传感资源 <span class="badge">{{ shellCounts.sensors }}</span></label>
         <label class="check"><input type="checkbox" :checked="shellFilters.showData" @change="toggleShellLayer('showData', $event)" /> 监测数据 <span class="badge">{{ shellCounts.data }}</span></label>
         <label class="check"><input type="checkbox" :checked="shellFilters.showTasks" @change="toggleShellLayer('showTasks', $event)" /> 观测任务 <span class="badge">{{ shellCounts.tasks }}</span></label>
@@ -819,3 +806,20 @@ async function filterTasksByStatus(status: unknown) {
     </section>
   </section>
 </template>
+
+<style scoped>
+.stat-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: .5rem 0 .7rem; border: 1px solid #d5dfdd; background: #fff; }
+.stat-summary button { display: grid; gap: .08rem; min-width: 0; padding: .45rem; border: 0; border-right: 1px solid #e0e8e6; background: transparent; color: #60736f; text-align: left; cursor: pointer; }
+.stat-summary button:last-child { border-right: 0; }
+.stat-summary span { font-size: 9px; }
+.stat-summary strong { color: #173f43; font-size: 18px; font-variant-numeric: tabular-nums; }
+.stat-summary small { color: #7a8986; font-size: 8px; }
+.layer-console { display: grid; gap: .25rem; margin-top: .65rem; padding: .6rem; border: 1px solid #cbd8d5; border-top: 3px solid #287b78; background: #f8faf9; }
+.layer-console header { display: flex; align-items: flex-end; justify-content: space-between; gap: .4rem; padding-bottom: .4rem; border-bottom: 1px solid #dfe7e5; }
+.layer-console header div { display: grid; gap: .08rem; }
+.layer-console header span { color: #8a682a; font-size: 9px; }
+.layer-console header strong { color: #173f43; font-size: 12px; }
+.layer-console header small { color: #748582; font-size: 9px; }
+.layer-console > label { display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: .35rem; padding: .32rem .2rem; border-bottom: 1px solid #e4ebe9; font-size: 11px; }
+.layer-console > label:last-of-type { border-bottom: 0; }
+</style>
