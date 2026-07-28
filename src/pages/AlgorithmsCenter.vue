@@ -922,7 +922,7 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
       <div>
         <p class="eyebrow">算法处理中心</p>
         <h1>算法模型与处理任务</h1>
-        <p class="muted">闭环：创建模型 → 注册并发布版本 → 创建处理任务 → 调度执行 → 监控 → 查看结果</p>
+        <p class="muted">使用顺序：创建模型 → 注册并发布版本 → 创建处理任务 → 调度执行 → 监控 → 查看结果</p>
       </div>
       <div class="form-row">
         <button class="btn ghost" type="button" :disabled="pending" @click="showAlgoMap" data-map-action="algo-layers">相关图层上图</button>

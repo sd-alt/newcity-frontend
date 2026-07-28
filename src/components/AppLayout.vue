@@ -807,7 +807,6 @@ async function doLogout() {
       </div>
 
       <div class="topbar-search">
-        <span class="search-icon" aria-hidden="true"></span>
         <input
           v-model="searchQ"
           type="search"

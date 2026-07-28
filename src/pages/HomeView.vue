@@ -23,10 +23,10 @@ const runningTaskTotal = ref(0)
 const offlineRows = ref<Array<Record<string, unknown>>>([])
 
 const centerEntries = [
-  { name: '应用中心', question: '发起场景需求', detail: '选择手动、AI 辅助或多 Agent', to: '/application/tasks', mark: '发起' },
-  { name: '任务中心', question: '定义监测指标', detail: '把需求整理成正式指标体系', to: '/tasks', mark: '定义' },
-  { name: '资源中心', question: '准备感知能力', detail: '核对传感器、数据、算法与知识', to: '/resources/sensors', mark: '准备' },
-  { name: '业务中心', question: '规划并执行方案', detail: '完成匹配、评估、发布与执行', to: '/business', mark: '规划' },
+  { name: '应用中心', question: '填写监测需求', detail: '选择手动、AI 辅助或多 Agent', to: '/application/tasks', mark: '需求' },
+  { name: '任务中心', question: '配置监测指标', detail: '把需求整理成正式指标体系', to: '/tasks', mark: '指标' },
+  { name: '资源中心', question: '检查可用资源', detail: '核对传感器、数据、算法与知识', to: '/resources/sensors', mark: '资源' },
+  { name: '业务中心', question: '制定并执行方案', detail: '完成匹配、评估、发布与执行', to: '/business', mark: '方案' },
 ]
 
 const alertTotal = computed(
@@ -129,8 +129,8 @@ async function filterMap(mode: 'sensors' | 'data' | 'tasks' | 'all' | 'alerts' |
       </div>
     </header>
 
-    <div class="mission-route-head"><strong>一项监测任务怎么走</strong><small>成果最终回到应用中心</small></div>
-    <nav class="center-guide" aria-label="四中心业务闭环">
+    <div class="mission-route-head"><strong>一项监测任务怎么做</strong><small>通常从应用中心开始</small></div>
+    <nav class="center-guide" aria-label="四中心使用顺序">
       <RouterLink v-for="item in centerEntries" :key="item.name" :to="item.to" class="center-entry">
         <span class="center-mark">{{ item.mark }}</span>
         <span><strong>{{ item.name }}</strong><small>{{ item.question }}</small><em>{{ item.detail }}</em></span>

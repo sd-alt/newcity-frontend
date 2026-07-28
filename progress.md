@@ -137,3 +137,31 @@
   - `progress.md`：追加本轮实施、验证和回滚记录。
 - `frontend-design` 用于把全局引导、运行判读和 AI 设置统一为地学监测作业语言；`agent-browser` 用于真实浏览器双尺寸交互与页面错误验收。
 - 回滚方式：先执行 `git diff -- src/components/AppLayout.vue src/components/AssistantPanel.vue src/pages/AgentTaskWorkspace.vue src/pages/ApplicationsCenter.vue src/pages/HomeView.vue src/pages/ResourcesCenter.vue src/styles.css docs/四中心与智能任务规划前端说明.md progress.md > four-center-guidance-ai-settings.patch` 保存补丁；再用 `git restore -p -- <上述已跟踪文件>` 仅选择本日志块对应改动。新增文件先用 `git clean -n -- src/components/WorkspaceGuide.vue src/utils/aiPreferences.ts` 核对，确认后再执行同一命令的 `-f` 版本删除。
+
+## 2026-07-28 - Task: 去除抽象流程文案并调整顶部搜索图标
+
+### What was done
+- 将首页、全局使用引导和算法页面中的“闭环”及成果回流表述改为直接操作语言，统一使用“填写需求、配置指标、检查资源、制定方案”等用户可执行动作。
+- 全局引导改用“需求、指标、资源、方案”标记当前用途，不再使用“发起、定义、准备、规划”等方案汇报式阶段名称。
+- 顶部搜索框删除左侧重复放大镜和右侧箭头，将唯一的标准搜索图标放进右侧提交按钮，并调整输入区留白与加载状态。
+- 同步更新四中心前端说明中的使用顺序描述。
+
+### Testing
+- `rg -n "闭环" src docs/四中心与智能任务规划前端说明.md`：无匹配，正式页面源码与使用说明不再出现该词。
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 89 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误；仅提示既有 LF/CRLF 工作区转换信息。
+- agent-browser 本机 Chrome 验收：首页和全局引导使用直接操作文案；搜索框在 1440×1000 与 1024×768 下均无横向溢出，图标在右侧按钮内居中，输入和点击搜索可用，无页面异常。
+- 验收截图：`F:\aidata\qa-newcity-20260728\screenshots\copy-search-1440.png`、`copy-search-1024.png`，未写入仓库。
+
+### Notes
+- 改动文件：
+  - `src/components/WorkspaceGuide.vue`：将抽象流程说明改为直接操作提示。
+  - `src/pages/HomeView.vue`：将四中心入口名称和说明改为用户动作语言。
+  - `src/pages/AlgorithmsCenter.vue`：将模型处理说明中的“闭环”改为“使用顺序”。
+  - `src/components/AppLayout.vue`：移除搜索输入框左侧重复图标。
+  - `src/styles.css`：将标准放大镜绘制在右侧搜索按钮并调整输入留白。
+  - `docs/四中心与智能任务规划前端说明.md`：同步页面使用顺序和文案规则。
+  - `progress.md`：追加本轮实施、验证和回滚记录。
+- `frontend-design` 用于删去方案汇报式表达并把搜索控件收敛为单一明确动作；`agent-browser` 用于验证真实顶栏尺寸、搜索交互和页面文案。
+- 回滚方式：执行 `git revert <本轮提交号>` 可整体回滚；提交前可先用 `git diff -- src/components/WorkspaceGuide.vue src/pages/HomeView.vue src/pages/AlgorithmsCenter.vue src/components/AppLayout.vue src/styles.css docs/四中心与智能任务规划前端说明.md progress.md > copy-search-fix.patch` 保存补丁，再对同一文件清单执行 `git restore -- <文件清单>`。
