@@ -18,10 +18,10 @@ const router = useRouter()
 const open = ref(false)
 
 const journey: JourneyItem[] = [
-  { key: 'application', phase: '发起', center: '应用中心', question: '要解决什么场景问题？', outcome: '形成可跟踪的监测需求', to: '/application/tasks', matches: ['/application'], steps: ['选择手动、AI 辅助或多 Agent', '描述对象、区域、时间和成果要求', '在地图绘制任务范围并启动'] },
-  { key: 'tasks', phase: '定义', center: '任务中心', question: '具体需要监测什么？', outcome: '形成正式任务指标体系', to: '/tasks', matches: ['/tasks'], steps: ['选择或建立基础指标体系', '把需求拆成具体观测指标', '绑定任务草案并人工确认'] },
-  { key: 'resources', phase: '准备', center: '资源中心', question: '哪些资源和数据可以使用？', outcome: '形成可检索的资源能力档案', to: '/resources/sensors', matches: ['/resources'], steps: ['登记传感平台与传感器', '补齐能力、位置和服务档案', '核对数据、算法与在线状态'] },
-  { key: 'business', phase: '规划', center: '业务中心', question: '怎样组成可执行方案？', outcome: '输出经评估的观测方案', to: '/business', matches: ['/business'], steps: ['选择任务并反算资源需求', '完成候选评分、关联和增补', '核对覆盖后发布、执行并回看成果'] },
+  { key: 'application', phase: '需求', center: '应用中心', question: '要解决什么场景问题？', outcome: '填写监测需求', to: '/application/tasks', matches: ['/application'], steps: ['选择手动、AI 辅助或多 Agent', '描述对象、区域、时间和成果要求', '在地图绘制任务范围并启动'] },
+  { key: 'tasks', phase: '指标', center: '任务中心', question: '具体需要监测什么？', outcome: '配置监测指标', to: '/tasks', matches: ['/tasks'], steps: ['选择或建立基础指标体系', '把需求拆成具体观测指标', '绑定任务草案并人工确认'] },
+  { key: 'resources', phase: '资源', center: '资源中心', question: '哪些资源和数据可以使用？', outcome: '检查可用资源', to: '/resources/sensors', matches: ['/resources'], steps: ['登记传感平台与传感器', '补齐能力、位置和服务档案', '核对数据、算法与在线状态'] },
+  { key: 'business', phase: '方案', center: '业务中心', question: '怎样组成可执行方案？', outcome: '制定并执行方案', to: '/business', matches: ['/business'], steps: ['选择任务并反算资源需求', '完成候选评分、关联和增补', '核对覆盖后发布、执行并回看成果'] },
 ]
 
 const current = computed<JourneyItem>(() => journey.find((item) => item.matches.some((prefix) => route.path.startsWith(prefix))) ?? journey[0]!)
@@ -52,7 +52,7 @@ async function go(item: JourneyItem) {
     </button>
     <section v-if="open" class="workspace-guide-panel" aria-label="四中心使用引导">
       <header>
-        <div><span>监测任务闭环</span><strong>一项任务怎样走完整个系统</strong></div>
+        <div><span>使用提示</span><strong>不知道从哪里开始？按下面顺序操作</strong></div>
         <button type="button" @click="hide">隐藏</button>
       </header>
       <nav aria-label="四中心任务路线">
@@ -61,12 +61,12 @@ async function go(item: JourneyItem) {
         </button>
       </nav>
       <article>
-        <p>{{ current.phase }}阶段 · {{ current.outcome }}</p>
+        <p>{{ current.center }} · {{ current.outcome }}</p>
         <strong>{{ current.question }}</strong>
         <ol><li v-for="step in current.steps" :key="step">{{ step }}</li></ol>
         <button type="button" class="guide-go" @click="go(current)">进入{{ current.center }}</button>
       </article>
-      <footer>方案执行和成果会回到应用中心，形成下一轮监测依据。</footer>
+      <footer>任务完成后，可在应用中心查看地图和统计结果。</footer>
     </section>
   </div>
 </template>
