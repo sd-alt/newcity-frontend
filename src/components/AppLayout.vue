@@ -4,6 +4,7 @@ import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import MapBasemap from './MapBasemap.vue'
 import AssistantPanel from './AssistantPanel.vue'
+import WorkspaceGuide from './WorkspaceGuide.vue'
 import {
   reloadShellLayers,
   selectShellFeature,
@@ -148,7 +149,7 @@ const centers: CenterItem[] = [
     children: [
       { key: 'sensor-types', label: '传感器类型', to: '/resources/sensors', tab: 'types' },
       { key: 'sensors', label: '传感器资源', to: '/resources/sensors', tab: 'crud' },
-      { key: 'octuple', label: '传感器八元组', to: '/resources/metadata' },
+      { key: 'octuple', label: '传感器详情', to: '/resources/metadata' },
       { key: 'observations', label: '观测数据库', to: '/resources/data', tab: 'query' },
       { key: 'data-sources', label: '数据接入', to: '/resources/data', tab: 'sources' },
       { key: 'algorithms', label: '算法模型与服务', to: '/resources/algorithms', tab: 'models' },
@@ -846,6 +847,7 @@ async function doLogout() {
       </div>
 
       <div class="topbar-right">
+        <WorkspaceGuide v-if="user" />
         <div v-if="user" class="user-menu-wrap">
           <button
             type="button"

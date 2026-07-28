@@ -539,6 +539,10 @@ async function locateOnMap(kind: 'sensor', id: string | number | unknown) {
   else error.value = null
 }
 
+async function openSensorProfile(id: string | number | unknown) {
+  await router.push({ name: 'resource-metadata', query: { sensorId: String(id) } })
+}
+
 async function showOnMap() {
   const typeCode = String(vizFilter.value?.typeCode || '').trim()
   const status = String(vizFilter.value?.status || '').trim()
@@ -603,14 +607,9 @@ async function showOnMap() {
 
     <section v-if="tab === 'crud'" class="panel">
       <h2>平台与传感器增删改查</h2>
-      <div class="panel soft" style="margin-bottom:1rem">
-        <div class="section-head">
-          <div>
-            <h3>卫星在线接入</h3>
-            <p class="muted">卫星作为动态平台接入，位置由 TLE/SGP4 实时计算；星载传感器作为观测能力登记，不填写固定坐标。</p>
-          </div>
-          <span class="badge">真实在线数据</span>
-        </div>
+      <details class="advanced-entry">
+        <summary><span><strong>卫星在线接入</strong><small>TLE / SGP4 动态轨道与星载传感器</small></span><em>高级接入</em></summary>
+        <div class="advanced-entry-body">
         <div class="form-row">
           <label>卫星名称<input v-model="satelliteAccessForm.name" placeholder="例如 Sentinel-2B" /></label>
           <label>NORAD 编号<input v-model="satelliteAccessForm.noradNumber" inputmode="numeric" placeholder="例如 42063" /></label>
@@ -643,15 +642,11 @@ async function showOnMap() {
           <button class="btn" type="button" :disabled="pending" @click="accessSatellite">验证并接入</button>
         </div>
         <p class="muted">轨道协议：HTTPS / CelesTrak TLE / SGP4。遥感影像及其覆盖面属于观测数据，需由真实产品元数据或文件导入，不会用卫星当前位置代替。</p>
-      </div>
-      <div class="panel soft" style="margin-bottom:1rem">
-        <div class="section-head">
-          <div>
-            <h3>移动平台位置 / 轨迹接入</h3>
-            <p class="muted">用于无人机、走航车和船舶的实时位置。设备私有协议先由网关转换成结构化时间、经纬度和高度，再写入统一轨迹接口。</p>
-          </div>
-          <span class="badge">实际运行轨迹</span>
         </div>
+      </details>
+      <details class="advanced-entry">
+        <summary><span><strong>移动平台位置 / 轨迹接入</strong><small>无人机、走航车和船舶实际运行轨迹</small></span><em>高级接入</em></summary>
+        <div class="advanced-entry-body">
         <div class="form-row">
           <label>移动平台
             <select v-model="positionSourceForm.platformId" @change="applyExistingPositionSource">
@@ -693,7 +688,8 @@ async function showOnMap() {
           <button class="btn" type="button" :disabled="pending" @click="savePositionSource">保存位置源</button>
         </div>
         <p class="muted">统一写入接口：<code>/api/v1/observations/platform-tracks/ingest</code>。地图展示的是实际位置轨迹；规划航线和观测覆盖范围使用独立图层。</p>
-      </div>
+        </div>
+      </details>
       <h3>平台</h3>
       <div class="form-row">
         <label>平台类型
@@ -758,6 +754,7 @@ async function showOnMap() {
             <td>{{ s.sensorTypeId }}</td>
             <td>{{ s.accuracyPercent ?? '-' }}</td>
             <td class="ops">
+              <button class="btn ghost" type="button" @click.stop="openSensorProfile(s.id)">详情档案</button>
               <button class="btn ghost" type="button" @click.stop="locateOnMap('sensor', String(s.platformId || s.id))">定位</button>
               <button class="btn ghost" type="button" @click.stop="removeSensor(s.id)">删除</button>
             </td>
@@ -851,3 +848,15 @@ async function showOnMap() {
     </section>
   </section>
 </template>
+
+<style scoped>
+.advanced-entry { margin: .45rem 0; border: 1px solid #d4dfdc; background: #f7faf9; }
+.advanced-entry summary { display: flex; align-items: center; justify-content: space-between; gap: .45rem; padding: .55rem .65rem; cursor: pointer; list-style: none; }
+.advanced-entry summary::-webkit-details-marker { display: none; }
+.advanced-entry summary span { display: grid; gap: .08rem; }
+.advanced-entry summary strong { color: #294b48; font-size: 12px; }
+.advanced-entry summary small { color: #71827f; font-size: 9px; }
+.advanced-entry summary em { flex: 0 0 auto; padding: .12rem .35rem; border: 1px solid #d7bd8e; background: #fff8ec; color: #8a5c16; font-size: 9px; font-style: normal; }
+.advanced-entry[open] summary { border-bottom: 1px solid #dce5e3; background: #eef5f3; }
+.advanced-entry-body { padding: .65rem; background: #fff; }
+</style>

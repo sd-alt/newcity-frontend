@@ -4,12 +4,15 @@ import { useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
 import { shellViewer } from '../gis/mapShell'
 import { mapDrawGeometry, setMapToolMode } from '../gis/mapTools'
+import { AI_PREFERENCES_EVENT, readAiPreferences } from '../utils/aiPreferences'
 import { errMessage } from '../utils/errors'
 
 type Row = Record<string, any>
 const router = useRouter()
 const scenes = ref<Row[]>([])
-const mode = ref<'manual' | 'assisted' | 'agent'>('agent')
+const initialPreferences = readAiPreferences()
+const mode = ref<'manual' | 'assisted' | 'agent'>(initialPreferences.defaultTaskMode)
+const showTechnicalDetails = ref(initialPreferences.showTechnicalDetails)
 const sceneId = ref('')
 const requirement = ref('监测未来三天某流域洪涝风险，重点关注强降雨、水位上涨和重点河段，要求半小时更新一次。')
 const areaWkt = ref('')
@@ -127,14 +130,25 @@ function openAdjustment(approval: Row) {
   if (approval.type === 'indicator_confirmation') router.push({ path: '/tasks', query: { tab: 'task-systems' } })
   else router.push({ path: '/business', query: { tab: 'plans' } })
 }
+function applyAiPreferences() {
+  const value = readAiPreferences()
+  mode.value = value.defaultTaskMode
+  showTechnicalDetails.value = value.showTechnicalDetails
+}
 watch(mapDrawGeometry, (geometry) => {
   if (!geometry || geometry.type !== 'polygon') return
   const rings = geometry.geojson.coordinates as number[][][]
   const ring = rings[0]
   if (ring?.length) areaWkt.value = `POLYGON ((${ring.map((point) => `${point[0]} ${point[1]}`).join(', ')}))`
 })
-onMounted(loadScenes)
-onUnmounted(stopTracking)
+onMounted(() => {
+  void loadScenes()
+  window.addEventListener(AI_PREFERENCES_EVENT, applyAiPreferences)
+})
+onUnmounted(() => {
+  stopTracking()
+  window.removeEventListener(AI_PREFERENCES_EVENT, applyAiPreferences)
+})
 </script>
 
 <template>
@@ -166,8 +180,11 @@ onUnmounted(stopTracking)
       <h3 class="block-title">任务进程</h3>
       <div class="stage-track"><article v-for="item in stages" :key="item.id" :class="[item.status, { current: item.code === run.currentStage }]" :title="item.errorMessage || item.agentName"><span></span><div><strong>{{ item.name }}</strong><small>{{ item.agentName }} · {{ item.status }}</small><p v-if="item.errorMessage">{{ item.errorMessage }}</p></div></article></div>
 
-      <h3 class="block-title">工具调用与数据来源</h3>
-      <div v-if="toolCalls.length" class="audit-list"><article v-for="item in toolCalls.slice().reverse().slice(0, 12)" :key="item.id"><span>{{ item.status }}</span><strong>{{ item.toolName }}</strong><small>{{ item.source || '业务 Service' }} · {{ item.durationMs }}ms · 对象 {{ JSON.stringify(item.objectIds || {}) }}</small></article></div><div v-else class="empty-state">尚无工具调用记录。后台 Worker 开始处理后会实时显示。</div>
+      <template v-if="showTechnicalDetails">
+        <h3 class="block-title">工具调用与数据来源</h3>
+        <div v-if="toolCalls.length" class="audit-list"><article v-for="item in toolCalls.slice().reverse().slice(0, 12)" :key="item.id"><span>{{ item.status }}</span><strong>{{ item.toolName }}</strong><small>{{ item.source || '业务 Service' }} · {{ item.durationMs }}ms · 对象 {{ JSON.stringify(item.objectIds || {}) }}</small></article></div><div v-else class="empty-state">尚无工具调用记录。后台 Worker 开始处理后会实时显示。</div>
+      </template>
+      <p v-else class="technical-details-hidden">技术运行记录已隐藏，可在右下角 AI 助手的“设置”中开启。</p>
 
       <h3 class="block-title">阶段成果</h3>
       <div v-if="artifacts.length" class="artifact-list"><article v-for="item in artifacts" :key="item.id"><span>{{ item.sourceType }}</span><strong>{{ item.title }}</strong><small>{{ item.businessObjectType }} #{{ item.businessObjectId }}</small></article></div><div v-else class="empty-state">尚未生成指标、方案或成果工件。</div>
@@ -177,5 +194,6 @@ onUnmounted(stopTracking)
 
 <style scoped>
 .agent-workspace { padding-bottom: 1.2rem; }.run-code { padding: .22rem .4rem; background: #152c2a; color: #cfe7e2; font: 10px/1 ui-monospace, monospace; border-radius: 3px; }.mode-switch { display: grid; gap: .3rem; }.mode-switch button { display: grid; gap: .1rem; padding: .5rem; border: 1px solid #d7e1df; border-left: 3px solid #9eb3af; background: rgba(255,255,255,.92); text-align: left; }.mode-switch button.active { border-left-color: #0c766b; background: #eef7f5; }.mode-switch strong { color: #173f43; font-size: 12px; }.mode-switch small { color: #6a7d79; font-size: 9px; }.demand-form { display: grid; gap: .45rem; margin-top: .55rem; }.demand-form label { display: grid; gap: .18rem; color: #546a66; font-size: 11px; }.split { display: grid; grid-template-columns: 1fr 1fr; gap: .35rem; }.map-input { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; padding: .4rem; background: #f0f5f3; color: #60736f; font-size: 10px; }.map-input span { flex: 1; }.start-button { width: 100%; }.draft-card { margin-top: .5rem; padding: .55rem; border-left: 4px solid #b27a21; background: #fffbf1; }.draft-card div { display: grid; gap: .1rem; }.draft-card span { color: #9b6718; font-size: 9px; }.draft-card strong { color: #513a18; font-size: 12px; }.draft-card small { color: #7f6b4b; }.draft-card p { margin: .35rem 0 0; color: #5d5547; font-size: 11px; }.run-summary { display: grid; grid-template-columns: 1.3fr 1fr .7fr; gap: .25rem; margin-top: .55rem; }.run-summary div { display: grid; gap: .08rem; padding: .4rem; background: #edf4f2; }.run-summary span { color: #6d7e7b; font-size: 9px; }.run-summary strong { color: #183f43; font-size: 11px; }.run-progress { height: 5px; margin: .25rem 0; background: #dce7e4; overflow: hidden; }.run-progress i { display: block; height: 100%; background: #0c766b; transition: width .25s ease; }.run-actions { display: flex; flex-wrap: wrap; gap: .22rem; }.structured-card { margin-top: .5rem; }.structured-card h3 { margin: 0 0 .35rem; color: #173f43; font-size: 12px; }.structured-card dl { display: grid; gap: .2rem; margin: 0; }.structured-card dl div { display: grid; grid-template-columns: 54px 1fr; gap: .35rem; }.structured-card dt { color: #7a8986; font-size: 10px; }.structured-card dd { margin: 0; color: #425b57; font-size: 10px; overflow-wrap: anywhere; }.approval-stack { display: grid; gap: .35rem; margin-top: .5rem; }.approval-stack article { padding: .55rem; border: 1px solid #d8ae65; background: #fff8ea; }.approval-stack span { color: #a36b12; font-size: 9px; }.approval-stack strong { display: block; color: #59411d; font-size: 12px; }.approval-stack p { margin: .2rem 0; color: #756444; font-size: 10px; }.approval-stack article div { display: flex; justify-content: flex-end; gap: .25rem; }.followup { display: grid; gap: .35rem; margin-top: .5rem; }.block-title { margin: .7rem 0 .35rem; color: #173f43; font-size: 12px; }.stage-track { position: relative; display: grid; gap: 0; }.stage-track::before { content: ''; position: absolute; left: 5px; top: 8px; bottom: 8px; width: 1px; background: #b8c9c5; }.stage-track article { position: relative; display: grid; grid-template-columns: 12px 1fr; gap: .35rem; min-height: 34px; }.stage-track article > span { z-index: 1; width: 9px; height: 9px; margin-top: 4px; border: 2px solid #9db1ad; border-radius: 50%; background: #f7faf9; }.stage-track article.completed > span { border-color: #0d766b; background: #72c1b4; }.stage-track article.running > span,.stage-track article.current > span { border-color: #b47718; background: #f0c474; }.stage-track article.failed > span,.stage-track article.manual_required > span { border-color: #a84036; background: #e6a39c; }.stage-track article > div { display: grid; padding-bottom: .35rem; }.stage-track strong { color: #294a46; font-size: 11px; }.stage-track small { color: #71827f; font-size: 9px; }.stage-track p { margin: .12rem 0; color: #a33a31; font-size: 9px; }.audit-list,.artifact-list { display: grid; gap: .25rem; }.audit-list article,.artifact-list article { display: grid; gap: .08rem; padding: .4rem; border-left: 2px solid #7ea29d; background: rgba(255,255,255,.9); }.audit-list span,.artifact-list span { color: #8c641f; font-size: 8px; text-transform: uppercase; }.audit-list strong,.artifact-list strong { color: #284b47; font: 600 10px/1.3 ui-monospace, monospace; }.audit-list small,.artifact-list small { color: #71817e; font-size: 9px; overflow-wrap: anywhere; }.empty-state { padding: .75rem; border: 1px dashed #bdcbc8; color: #697c78; text-align: center; font-size: 10px; }.ok-text { color: #087066; font-size: 11px; }.danger { color: #a33a31; }
+.technical-details-hidden { margin: .65rem 0 0; padding: .45rem .55rem; border-left: 2px solid #9eb3af; background: #f2f6f5; color: #6a7d79; font-size: 9px; }
 @media (prefers-reduced-motion: reduce) { .run-progress i { transition: none; } }
 </style>
