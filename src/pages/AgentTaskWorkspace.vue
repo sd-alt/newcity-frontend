@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
+import CardPager from '../components/CardPager.vue'
 import { shellViewer } from '../gis/mapShell'
 import { mapDrawGeometry, setMapToolMode } from '../gis/mapTools'
 import { AI_PREFERENCES_EVENT, readAiPreferences } from '../utils/aiPreferences'
@@ -25,6 +26,9 @@ const message = ref('')
 const draft = ref<Row | null>(null)
 const run = ref<api.AgentRunData | null>(null)
 const followup = ref('')
+const auditPage = ref(1)
+const artifactPage = ref(1)
+const cardPageSize = 4
 let source: EventSource | null = null
 let pollTimer: number | null = null
 
@@ -33,10 +37,18 @@ const modes = [
   { key: 'assisted', label: 'AI辅助', note: 'AI生成草案，逐阶段人工采用或调整' },
   { key: 'agent', label: '多Agent自动规划', note: 'MAF专业Agent协同，关键节点人工确认' },
 ] as const
+const selectedMode = computed(() => modes.find((item) => item.key === mode.value) || modes[0])
 const stages = computed(() => (run.value?.stages || []) as Row[])
 const approvals = computed(() => ((run.value?.pendingApprovals || []) as Row[]).filter((item) => item.status === 'pending'))
 const toolCalls = computed(() => (run.value?.toolCalls || []) as Row[])
 const artifacts = computed(() => (run.value?.artifacts || []) as Row[])
+const reversedToolCalls = computed(() => toolCalls.value.slice().reverse())
+const auditPageCount = computed(() => Math.max(1, Math.ceil(reversedToolCalls.value.length / cardPageSize)))
+const pagedToolCalls = computed(() => reversedToolCalls.value.slice((auditPage.value - 1) * cardPageSize, auditPage.value * cardPageSize))
+const auditPageLabels = computed(() => Array.from({ length: auditPageCount.value }, (_, index) => `工具调用第 ${index + 1} 页`))
+const artifactPageCount = computed(() => Math.max(1, Math.ceil(artifacts.value.length / cardPageSize)))
+const pagedArtifacts = computed(() => artifacts.value.slice((artifactPage.value - 1) * cardPageSize, artifactPage.value * cardPageSize))
+const artifactPageLabels = computed(() => Array.from({ length: artifactPageCount.value }, (_, index) => `阶段成果第 ${index + 1} 页`))
 const structured = computed(() => ((run.value as Row | null)?.demand?.structuredRequirement || {}) as Row)
 const terminal = computed(() => ['completed', 'failed', 'cancelled', 'manual_required', 'paused'].includes(run.value?.status || ''))
 const runId = computed(() => run.value?.id || '')
@@ -154,15 +166,21 @@ onUnmounted(() => {
 <template>
   <section class="page agent-workspace">
     <header class="page-head"><div><p class="eyebrow">场景驱动任务入口</p><h1>综合感知任务</h1></div><span v-if="run" class="run-code">{{ run.id.slice(0, 8) }}</span></header>
-    <div class="mode-switch"><button v-for="item in modes" :key="item.key" :class="{ active: mode === item.key }" @click="mode = item.key"><strong>{{ item.label }}</strong><small>{{ item.note }}</small></button></div>
-    <div class="panel demand-form">
-      <label>场景<select v-model="sceneId"><option value="">选择场景</option><option v-for="scene in scenes" :key="scene.id" :value="String(scene.id)">{{ scene.name }}</option></select></label>
-      <label>监测需求<textarea v-model="requirement" rows="5" placeholder="描述对象、区域、时间、目标、约束和成果要求"></textarea></label>
-      <div class="split"><label>开始时间<input v-model="timeStart" type="datetime-local" /></label><label>结束时间<input v-model="timeEnd" type="datetime-local" /></label></div>
-      <label>更新频次<input v-model="updateFrequency" placeholder="例如 PT30M" /></label>
-      <div class="map-input"><span>{{ areaWkt ? '已绘制任务区域' : '可在地图选点、框选或绘制多边形' }}</span><button class="btn tiny" @click="drawArea">绘制区域</button><button v-if="areaWkt" class="btn ghost tiny" @click="clearArea">清除</button></div>
-      <button class="btn primary start-button" :disabled="submitting" @click="submitDemand">{{ submitting ? '正在创建任务草案…' : mode === 'manual' ? '创建手动任务草案' : mode === 'assisted' ? '生成 AI 辅助草案' : '启动多Agent自动规划' }}</button>
-    </div>
+    <section class="panel task-launch-card">
+      <header class="section-card-head"><h2>创建感知任务</h2><span>先选任务方式，再填写需求</span></header>
+      <label class="task-mode-field">任务方式
+        <select v-model="mode"><option v-for="item in modes" :key="item.key" :value="item.key">{{ item.label }}</option></select>
+        <small>{{ selectedMode.note }}</small>
+      </label>
+      <div class="demand-form">
+        <label>场景<select v-model="sceneId"><option value="">选择场景</option><option v-for="scene in scenes" :key="scene.id" :value="String(scene.id)">{{ scene.name }}</option></select></label>
+        <label>监测需求<textarea v-model="requirement" rows="5" placeholder="描述对象、区域、时间、目标、约束和成果要求"></textarea></label>
+        <div class="split"><label>开始时间<input v-model="timeStart" type="datetime-local" /></label><label>结束时间<input v-model="timeEnd" type="datetime-local" /></label></div>
+        <label>更新频次<input v-model="updateFrequency" placeholder="例如 PT30M" /></label>
+        <div class="map-input"><span>{{ areaWkt ? '已绘制任务区域' : '可在地图选点、框选或绘制多边形' }}</span><button class="btn tiny" @click="drawArea">绘制区域</button><button v-if="areaWkt" class="btn ghost tiny" @click="clearArea">清除</button></div>
+        <button class="btn primary start-button" :disabled="submitting" @click="submitDemand">{{ submitting ? '正在创建任务草案…' : mode === 'manual' ? '创建手动任务草案' : mode === 'assisted' ? '生成 AI 辅助草案' : '启动多Agent自动规划' }}</button>
+      </div>
+    </section>
     <p v-if="error" class="error">{{ error }}</p><p v-if="message" class="ok-text">{{ message }}</p>
 
     <article v-if="draft" class="draft-card"><div><span>任务草案</span><strong>#{{ draft.taskId }} · 需求 #{{ draft.demandId }}</strong><small>{{ draft.mode }} · {{ draft.status }}</small></div><p>{{ draft.originalRequirement }}</p><button v-if="draft.mode === 'manual'" class="btn tiny" @click="router.push({ path: '/tasks', query: { tab: 'task-systems', taskId: draft.taskId, sceneId } })">继续配置任务指标</button></article>
@@ -170,7 +188,14 @@ onUnmounted(() => {
     <template v-if="run">
       <div class="run-summary"><div><span>当前阶段</span><strong>{{ currentStageName }}</strong></div><div><span>运行状态</span><strong>{{ run.status }}</strong></div><div><span>总体进度</span><strong>{{ Number(run.progress || 0).toFixed(0) }}%</strong></div></div>
       <div class="run-progress"><i :style="{ width: `${Number(run.progress || 0)}%` }"></i></div>
-      <div class="run-actions"><button class="btn tiny" :disabled="run.status !== 'running' && run.status !== 'queued'" @click="control('pause')">暂停</button><button class="btn tiny" :disabled="run.status !== 'paused' && run.status !== 'manual_required'" @click="control('resume')">恢复</button><button class="btn tiny" :disabled="run.status !== 'failed' && run.status !== 'manual_required'" @click="control('retry')">重试</button><button class="btn ghost tiny" @click="control('takeover')">人工接管</button><button class="btn ghost tiny" @click="refreshRun()">刷新</button><button class="btn danger tiny" @click="control('cancel')">取消</button></div>
+      <div class="run-actions">
+        <button v-if="run.status === 'running' || run.status === 'queued'" class="btn tiny" @click="control('pause')">暂停</button>
+        <button v-if="run.status === 'paused' || run.status === 'manual_required'" class="btn tiny" @click="control('resume')">恢复</button>
+        <button v-if="run.status === 'failed' || run.status === 'manual_required'" class="btn tiny" @click="control('retry')">重试</button>
+        <button v-if="run.status !== 'completed' && run.status !== 'cancelled'" class="btn ghost tiny" @click="control('takeover')">人工接管</button>
+        <button class="btn ghost tiny" @click="refreshRun()">刷新</button>
+        <button v-if="run.status !== 'completed' && run.status !== 'cancelled'" class="btn danger tiny" @click="control('cancel')">取消</button>
+      </div>
 
       <div v-if="Object.keys(structured).length" class="panel structured-card"><h3>已识别需求</h3><dl><div><dt>对象</dt><dd>{{ structured.object || '-' }}</dd></div><div><dt>区域</dt><dd>{{ structured.area || '-' }}</dd></div><div><dt>时间</dt><dd>{{ structured.timeRange?.start || '-' }} → {{ structured.timeRange?.end || '-' }}</dd></div><div><dt>频次</dt><dd>{{ structured.updateFrequency || '-' }}</dd></div><div><dt>感知要素</dt><dd>{{ (structured.sensingElementCodes || []).join('、') || '-' }}</dd></div></dl></div>
 
@@ -182,18 +207,20 @@ onUnmounted(() => {
 
       <template v-if="showTechnicalDetails">
         <h3 class="block-title">工具调用与数据来源</h3>
-        <div v-if="toolCalls.length" class="audit-list"><article v-for="item in toolCalls.slice().reverse().slice(0, 12)" :key="item.id"><span>{{ item.status }}</span><strong>{{ item.toolName }}</strong><small>{{ item.source || '业务 Service' }} · {{ item.durationMs }}ms · 对象 {{ JSON.stringify(item.objectIds || {}) }}</small></article></div><div v-else class="empty-state">尚无工具调用记录。后台 Worker 开始处理后会实时显示。</div>
+        <div v-if="toolCalls.length" class="audit-list"><article v-for="item in pagedToolCalls" :key="item.id"><span>{{ item.status }}</span><strong>{{ item.toolName }}</strong><small>{{ item.source || '业务 Service' }} · {{ item.durationMs }}ms · 对象 {{ JSON.stringify(item.objectIds || {}) }}</small></article></div><div v-else class="empty-state">尚无工具调用记录。后台 Worker 开始处理后会实时显示。</div>
+        <CardPager v-model:page="auditPage" kind="records" :pages="auditPageLabels" :summary="`共 ${toolCalls.length} 条`" label="工具调用分页" />
       </template>
       <p v-else class="technical-details-hidden">技术运行记录已隐藏，可在右下角 AI 助手的“设置”中开启。</p>
 
       <h3 class="block-title">阶段成果</h3>
-      <div v-if="artifacts.length" class="artifact-list"><article v-for="item in artifacts" :key="item.id"><span>{{ item.sourceType }}</span><strong>{{ item.title }}</strong><small>{{ item.businessObjectType }} #{{ item.businessObjectId }}</small></article></div><div v-else class="empty-state">尚未生成指标、方案或成果工件。</div>
+      <div v-if="artifacts.length" class="artifact-list"><article v-for="item in pagedArtifacts" :key="item.id"><span>{{ item.sourceType }}</span><strong>{{ item.title }}</strong><small>{{ item.businessObjectType }} #{{ item.businessObjectId }}</small></article></div><div v-else class="empty-state">尚未生成指标、方案或成果工件。</div>
+      <CardPager v-model:page="artifactPage" kind="records" :pages="artifactPageLabels" :summary="`共 ${artifacts.length} 项`" label="阶段成果分页" />
     </template>
   </section>
 </template>
 
 <style scoped>
-.agent-workspace { padding-bottom: 1.2rem; }.run-code { padding: .22rem .4rem; background: #152c2a; color: #cfe7e2; font: 10px/1 ui-monospace, monospace; border-radius: 3px; }.mode-switch { display: grid; gap: .3rem; }.mode-switch button { display: grid; gap: .1rem; padding: .5rem; border: 1px solid #d7e1df; border-left: 3px solid #9eb3af; background: rgba(255,255,255,.92); text-align: left; }.mode-switch button.active { border-left-color: #0c766b; background: #eef7f5; }.mode-switch strong { color: #173f43; font-size: 12px; }.mode-switch small { color: #6a7d79; font-size: 9px; }.demand-form { display: grid; gap: .45rem; margin-top: .55rem; }.demand-form label { display: grid; gap: .18rem; color: #546a66; font-size: 11px; }.split { display: grid; grid-template-columns: 1fr 1fr; gap: .35rem; }.map-input { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; padding: .4rem; background: #f0f5f3; color: #60736f; font-size: 10px; }.map-input span { flex: 1; }.start-button { width: 100%; }.draft-card { margin-top: .5rem; padding: .55rem; border-left: 4px solid #b27a21; background: #fffbf1; }.draft-card div { display: grid; gap: .1rem; }.draft-card span { color: #9b6718; font-size: 9px; }.draft-card strong { color: #513a18; font-size: 12px; }.draft-card small { color: #7f6b4b; }.draft-card p { margin: .35rem 0 0; color: #5d5547; font-size: 11px; }.run-summary { display: grid; grid-template-columns: 1.3fr 1fr .7fr; gap: .25rem; margin-top: .55rem; }.run-summary div { display: grid; gap: .08rem; padding: .4rem; background: #edf4f2; }.run-summary span { color: #6d7e7b; font-size: 9px; }.run-summary strong { color: #183f43; font-size: 11px; }.run-progress { height: 5px; margin: .25rem 0; background: #dce7e4; overflow: hidden; }.run-progress i { display: block; height: 100%; background: #0c766b; transition: width .25s ease; }.run-actions { display: flex; flex-wrap: wrap; gap: .22rem; }.structured-card { margin-top: .5rem; }.structured-card h3 { margin: 0 0 .35rem; color: #173f43; font-size: 12px; }.structured-card dl { display: grid; gap: .2rem; margin: 0; }.structured-card dl div { display: grid; grid-template-columns: 54px 1fr; gap: .35rem; }.structured-card dt { color: #7a8986; font-size: 10px; }.structured-card dd { margin: 0; color: #425b57; font-size: 10px; overflow-wrap: anywhere; }.approval-stack { display: grid; gap: .35rem; margin-top: .5rem; }.approval-stack article { padding: .55rem; border: 1px solid #d8ae65; background: #fff8ea; }.approval-stack span { color: #a36b12; font-size: 9px; }.approval-stack strong { display: block; color: #59411d; font-size: 12px; }.approval-stack p { margin: .2rem 0; color: #756444; font-size: 10px; }.approval-stack article div { display: flex; justify-content: flex-end; gap: .25rem; }.followup { display: grid; gap: .35rem; margin-top: .5rem; }.block-title { margin: .7rem 0 .35rem; color: #173f43; font-size: 12px; }.stage-track { position: relative; display: grid; gap: 0; }.stage-track::before { content: ''; position: absolute; left: 5px; top: 8px; bottom: 8px; width: 1px; background: #b8c9c5; }.stage-track article { position: relative; display: grid; grid-template-columns: 12px 1fr; gap: .35rem; min-height: 34px; }.stage-track article > span { z-index: 1; width: 9px; height: 9px; margin-top: 4px; border: 2px solid #9db1ad; border-radius: 50%; background: #f7faf9; }.stage-track article.completed > span { border-color: #0d766b; background: #72c1b4; }.stage-track article.running > span,.stage-track article.current > span { border-color: #b47718; background: #f0c474; }.stage-track article.failed > span,.stage-track article.manual_required > span { border-color: #a84036; background: #e6a39c; }.stage-track article > div { display: grid; padding-bottom: .35rem; }.stage-track strong { color: #294a46; font-size: 11px; }.stage-track small { color: #71827f; font-size: 9px; }.stage-track p { margin: .12rem 0; color: #a33a31; font-size: 9px; }.audit-list,.artifact-list { display: grid; gap: .25rem; }.audit-list article,.artifact-list article { display: grid; gap: .08rem; padding: .4rem; border-left: 2px solid #7ea29d; background: rgba(255,255,255,.9); }.audit-list span,.artifact-list span { color: #8c641f; font-size: 8px; text-transform: uppercase; }.audit-list strong,.artifact-list strong { color: #284b47; font: 600 10px/1.3 ui-monospace, monospace; }.audit-list small,.artifact-list small { color: #71817e; font-size: 9px; overflow-wrap: anywhere; }.empty-state { padding: .75rem; border: 1px dashed #bdcbc8; color: #697c78; text-align: center; font-size: 10px; }.ok-text { color: #087066; font-size: 11px; }.danger { color: #a33a31; }
-.technical-details-hidden { margin: .65rem 0 0; padding: .45rem .55rem; border-left: 2px solid #9eb3af; background: #f2f6f5; color: #6a7d79; font-size: 9px; }
+.agent-workspace { padding-bottom: 1.2rem; }.run-code { padding: .24rem .45rem; background: #f3f4f6; color: #515154; font: 10px/1 ui-monospace, monospace; border: 1px solid #e1e3e6; border-radius: 7px; }.task-launch-card { margin-top: .5rem; }.section-card-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .5rem; }.section-card-head h2 { margin: 0; }.section-card-head span { color: #6e6e73; font-size: 10px; text-align: right; }.task-mode-field { display: grid; gap: .22rem; padding: .55rem; border-radius: 10px; background: #f3f4f6; color: #515154; font-size: 11px; }.task-mode-field select { height: 34px; padding-block: 0; background: #fff; }.task-mode-field small { color: #6e6e73; font-size: 9px; line-height: 1.45; }.demand-form { display: grid; gap: .55rem; margin-top: .6rem; padding-top: .6rem; border-top: 1px solid #eceef1; }.demand-form label { display: grid; gap: .2rem; color: #515154; font-size: 11px; }.split { display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; }.map-input { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; padding: .5rem; border-radius: 9px; background: #f3f4f6; color: #6e6e73; font-size: 10px; }.map-input span { flex: 1; }.start-button { width: 100%; }.draft-card { margin-top: .5rem; padding: .6rem; border: 1px solid #e1e3e6; border-radius: 10px; background: #f6f7f8; }.draft-card div { display: grid; gap: .1rem; }.draft-card span { color: #6e6e73; font-size: 9px; }.draft-card strong { color: #3a3a3c; font-size: 12px; }.draft-card small { color: #6e6e73; }.draft-card p { margin: .35rem 0 0; color: #515154; font-size: 11px; }.run-summary { display: grid; grid-template-columns: 1.3fr 1fr .7fr; gap: .3rem; margin-top: .55rem; }.run-summary div { display: grid; gap: .08rem; padding: .45rem; border-radius: 8px; background: #f3f4f6; }.run-summary span { color: #6e6e73; font-size: 9px; }.run-summary strong { color: #3a3a3c; font-size: 11px; }.run-progress { height: 5px; margin: .3rem 0; border-radius: 999px; background: #e5e5ea; overflow: hidden; }.run-progress i { display: block; height: 100%; background: var(--brand); transition: width .25s ease; }.run-actions { display: flex; flex-wrap: wrap; gap: .4rem; }.structured-card { margin-top: .5rem; }.structured-card h3 { margin: 0 0 .35rem; color: #3a3a3c; font-size: 12px; }.structured-card dl { display: grid; gap: .2rem; margin: 0; }.structured-card dl div { display: grid; grid-template-columns: 54px 1fr; gap: .35rem; }.structured-card dt { color: #86868b; font-size: 10px; }.structured-card dd { margin: 0; color: #515154; font-size: 10px; overflow-wrap: anywhere; }.approval-stack { display: grid; gap: .35rem; margin-top: .5rem; }.approval-stack article { padding: .6rem; border: 1px solid #ead3a7; border-radius: 10px; background: #fff8eb; }.approval-stack span { color: #956116; font-size: 9px; }.approval-stack strong { display: block; color: #3a3a3c; font-size: 12px; }.approval-stack p { margin: .2rem 0; color: #515154; font-size: 10px; }.approval-stack article div { display: flex; justify-content: flex-end; gap: .25rem; }.followup { display: grid; gap: .35rem; margin-top: .5rem; }.block-title { margin: .7rem 0 .35rem; color: #3a3a3c; font-size: 12px; }.stage-track { position: relative; display: grid; gap: 0; }.stage-track::before { content: ''; position: absolute; left: 5px; top: 8px; bottom: 8px; width: 1px; background: #d2d2d7; }.stage-track article { position: relative; display: grid; grid-template-columns: 12px 1fr; gap: .35rem; min-height: 34px; }.stage-track article > span { z-index: 1; width: 9px; height: 9px; margin-top: 4px; border: 2px solid #c7c7cc; border-radius: 50%; background: #fff; }.stage-track article.completed > span { border-color: #2f8f5b; background: #78c59b; }.stage-track article.running > span,.stage-track article.current > span { border-color: var(--brand); background: #68a9ea; }.stage-track article.failed > span { border-color: #b23730; background: #e6a39c; }.stage-track article.manual_required > span { border-color: #956116; background: #f0c474; }.stage-track article > div { display: grid; padding-bottom: .35rem; }.stage-track strong { color: #3a3a3c; font-size: 11px; }.stage-track small { color: #6e6e73; font-size: 9px; }.stage-track p { margin: .12rem 0; color: #b23730; font-size: 9px; }.audit-list,.artifact-list { display: grid; gap: .3rem; }.audit-list article,.artifact-list article { display: grid; gap: .08rem; padding: .45rem; border: 1px solid #e1e3e6; border-radius: 10px; background: #fff; }.audit-list span,.artifact-list span { color: #6e6e73; font-size: 8px; text-transform: uppercase; }.audit-list strong,.artifact-list strong { color: #3a3a3c; font: 600 10px/1.3 ui-monospace, monospace; }.audit-list small,.artifact-list small { color: #6e6e73; font-size: 9px; overflow-wrap: anywhere; }.empty-state { padding: .75rem; border: 1px dashed #cfd3d8; border-radius: 9px; color: #6e6e73; text-align: center; font-size: 10px; }.ok-text { color: #247347; font-size: 11px; }.danger { color: #b23730; }
+.technical-details-hidden { margin: .65rem 0 0; padding: .5rem .55rem; border: 1px solid #e1e3e6; border-radius: 8px; background: #f6f7f8; color: #6e6e73; font-size: 9px; }
 @media (prefers-reduced-motion: reduce) { .run-progress i { transition: none; } }
 </style>

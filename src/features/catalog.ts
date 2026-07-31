@@ -13,7 +13,7 @@ export const FEATURES: FeatureItem[] = [
   { center: '任务中心', module: '指标管理', name: '版本与追溯', route: '/tasks', tab: 'versions' },
   { center: '资源中心', module: '观测能力库', name: '传感器类型管理', route: '/resources/sensors', tab: 'types' },
   { center: '资源中心', module: '观测能力库', name: '传感器资源管理', route: '/resources/sensors', tab: 'crud' },
-  { center: '资源中心', module: '观测能力库', name: '传感器详情与八类档案', route: '/resources/metadata', tab: '' },
+  { center: '资源中心', module: '传感器资源', name: '传感器资源与八类档案', route: '/resources/sensors', tab: 'crud' },
   { center: '资源中心', module: '观测数据库', name: '观测数据管理', route: '/resources/data', tab: 'query' },
   { center: '资源中心', module: '观测数据库', name: '多源数据接入', route: '/resources/data', tab: 'sources' },
   { center: '资源中心', module: '算法模型库', name: '算法模型与服务', route: '/resources/algorithms', tab: 'models' },

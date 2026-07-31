@@ -236,8 +236,8 @@ function actionLabel(action: AssistantAction) {
       @click="toggle"
     >
       <svg v-if="!open" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M12 3l1.7 4.3L18 9l-4.3 1.7L12 15l-1.7-4.3L6 9l4.3-1.7z" />
-        <path d="M18.5 14.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z" />
+        <path d="M6 5h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7l-4.5 3v-3H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" />
+        <path d="M8 9h8M8 12h5" />
       </svg>
       <span v-else aria-hidden="true">×</span>
     </button>

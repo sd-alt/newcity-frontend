@@ -111,6 +111,7 @@ let cacheData: Array<Record<string, unknown>> = []
 let cacheTasks: Array<Record<string, unknown>> = []
 let cacheIndicators: Array<Record<string, unknown>> = []
 let hasFittedView = false
+let activeShellCenter: ShellCenter = 'home'
 let highlightedEntity: Cesium.Entity | null = null
 let highlightRestore: (() => void) | null = null
 
@@ -139,6 +140,11 @@ function centerFromPath(path: string): ShellCenter {
   if (path.startsWith('/applications')) return 'applications'
   if (path.startsWith('/gis')) return 'gis'
   return 'home'
+}
+
+export function getShellLayerProfile(path: string, query: Record<string, unknown> = {}) {
+  const center = centerFromPath(path)
+  return center === 'gis' ? `${center}:${String(query.tab || 'sensors')}` : center
 }
 
 export async function ensureShellViewer(container: HTMLElement): Promise<Viewer> {
@@ -237,6 +243,13 @@ function applyHighlight(entity: Cesium.Entity) {
       entity.point!.pixelSize = prev
       entity.point!.outlineWidth = prevOutline
       entity.point!.outlineColor = prevColor
+    })
+  }
+  if (entity.billboard) {
+    const prevScale = entity.billboard.scale
+    entity.billboard.scale = new Cesium.ConstantProperty(1.22)
+    restores.push(() => {
+      entity.billboard!.scale = prevScale
     })
   }
   if (entity.label) {
@@ -498,7 +511,45 @@ function bindPick(viewer: Viewer) {
     if (mapToolMode.value !== 'none') return
     shellContextMenu.value = null
     const picked = viewer.scene.pick(movement.position)
-    const entity = picked?.id as Cesium.Entity | undefined
+    const pickedId = picked?.id as Cesium.Entity | Cesium.Entity[] | undefined
+    if (Array.isArray(pickedId)) {
+      const names = pickedId
+        .slice(0, 8)
+        .map((entity) => String(entity.name || entity.id || '未命名对象'))
+      const summary = [
+        ...names,
+        pickedId.length > names.length ? `其余 ${pickedId.length - names.length} 个对象` : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+      shellSelected.value = {
+        kind: 'unknown',
+        id: '',
+        name: `聚合点（${pickedId.length} 个对象）`,
+        description: summary,
+        spatial: '多个对象位于同一区域或同一坐标',
+        relations: summary,
+      }
+      shellPickScreen.value = { x: movement.position.x, y: movement.position.y }
+      shellBubbleOpen.value = false
+      shellBubbleEntity = null
+      shellRightOpen.value = true
+      const ll = cartesianToLonLat(viewer, movement.position)
+      if (ll) {
+        const currentHeight = viewer.camera.positionCartographic.height
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(
+            ll.lon,
+            ll.lat,
+            Math.max(2500, currentHeight * 0.45),
+          ),
+          duration: 0.45,
+        })
+        shellStatus.value = `已展开 ${pickedId.length} 个聚合点`
+      }
+      return
+    }
+    const entity = pickedId
     if (!entity || typeof entity !== 'object') {
       shellSelected.value = null
       shellPickScreen.value = null
@@ -515,7 +566,8 @@ function bindPick(viewer: Viewer) {
 
   pickHandler.setInputAction((movement: { position: Cesium.Cartesian2 }) => {
     const picked = viewer.scene.pick(movement.position)
-    const entity = picked?.id as Cesium.Entity | undefined
+    const pickedId = picked?.id as Cesium.Entity | Cesium.Entity[] | undefined
+    const entity = Array.isArray(pickedId) ? undefined : pickedId
     openContextMenu(viewer, movement.position, entity && typeof entity === 'object' ? entity : null)
   }, Cesium.ScreenSpaceEventType.RIGHT_CLICK)
 
@@ -660,7 +712,30 @@ export async function selectShellFeature(
   selectFromEntity(entity, null, openBubble)
   if (options?.fly !== false) {
     try {
-      await viewer.flyTo(entity, { duration: 0.9 })
+      const sensor = kind === 'sensor'
+        ? cacheSensors.find((item) => String(item.platformId ?? item.id) === sid)
+        : null
+      const typeCode = String(sensor?.typeCode || '').toLowerCase()
+      const isUav = typeCode.includes('uav') || typeCode.includes('drone') || typeCode.includes('无人机')
+      const position = entity.position?.getValue(viewer.clock.currentTime)
+      if (isUav && position) {
+        const cartographic = Cesium.Cartographic.fromCartesian(position)
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromRadians(
+            cartographic.longitude,
+            cartographic.latitude,
+            60000,
+          ),
+          orientation: {
+            heading: 0,
+            pitch: Cesium.Math.toRadians(-90),
+            roll: 0,
+          },
+          duration: 0.9,
+        })
+      } else {
+        await viewer.flyTo(entity, { duration: 0.9 })
+      }
     } catch {
       /* ignore */
     }
@@ -785,11 +860,15 @@ function applyVisibility() {
       }
     } else if (name === 'tasks') ds.show = shellFilters.showTasks
     else if (name === 'indicators') ds.show = shellFilters.showIndicators
-    else if (name === 'assoc-links') ds.show = shellFilters.showSensors || shellFilters.showTasks
-    else if (name.startsWith('algo-')) ds.show = true
-    else if (name.startsWith('planning-') || name.includes('coverage') || name.includes('gap')) ds.show = true
+    else if (name === 'assoc-links') ds.show = activeShellCenter === 'planning' && (shellFilters.showSensors || shellFilters.showTasks)
+    else if (name.startsWith('algo-')) ds.show = activeShellCenter === 'algorithms'
+    else if (name.startsWith('planning-') || name.includes('coverage') || name.includes('gap')) ds.show = activeShellCenter === 'planning'
     else ds.show = true
   }
+}
+
+function hasDataSource(name: string) {
+  return dataSources.some((ds) => (ds.name || '') === name)
 }
 
 function filteredSensors() {
@@ -917,10 +996,16 @@ function recomputeAlerts() {
   shellAlerts.anomalousData = anomalous
 }
 
-export async function reloadShellLayers(path: string, query: Record<string, unknown> = {}) {
+export async function reloadShellLayers(
+  path: string,
+  query: Record<string, unknown> = {},
+  options?: { preserveExisting?: boolean },
+) {
   const viewer = shellViewer.value
   if (!viewer || viewer.isDestroyed()) return
   const center = centerFromPath(path)
+  const preserveExisting = options?.preserveExisting === true
+  activeShellCenter = center
   const gen = ++reloadGeneration
   shellLoading.value = true
   shellError.value = null
@@ -935,15 +1020,17 @@ export async function reloadShellLayers(path: string, query: Record<string, unkn
         }
       }, 5000)
     : 0
-  await clearSources(viewer)
-  shellCounts.sensors = 0
-  shellCounts.data = 0
-  shellCounts.tasks = 0
-  shellCounts.indicators = 0
-  shellAlerts.offlineSensors = 0
-  shellAlerts.faultSensors = 0
-  shellAlerts.failedTasks = 0
-  shellAlerts.anomalousData = 0
+  if (!preserveExisting) {
+    await clearSources(viewer)
+    shellCounts.sensors = 0
+    shellCounts.data = 0
+    shellCounts.tasks = 0
+    shellCounts.indicators = 0
+    shellAlerts.offlineSensors = 0
+    shellAlerts.faultSensors = 0
+    shellAlerts.failedTasks = 0
+    shellAlerts.anomalousData = 0
+  }
 
   if (center === 'gis') {
     const tab = String(query.tab || 'sensors')
@@ -999,52 +1086,58 @@ export async function reloadShellLayers(path: string, query: Record<string, unkn
       center === 'planning' ||
       center === 'algorithms' ||
       center === 'gis'
+    const needIndicators =
+      center === 'indicators' ||
+      center === 'home' ||
+      center === 'applications' ||
+      center === 'planning'
+    const loadSensors = needSensors && (!preserveExisting || !hasDataSource('sensors'))
+    const loadData = needData && (!preserveExisting || !hasDataSource('data'))
+    const loadTasks = needTasks && (!preserveExisting || !hasDataSource('tasks'))
+    const loadIndicators = needIndicators && (!preserveExisting || !hasDataSource('indicators'))
 
-    if (needSensors) {
+    if (preserveExisting) applyVisibility()
+
+    if (loadSensors) {
       const res = await api.getSensorGis()
       cacheSensors = asList((res.data as { features?: unknown })?.features ?? res.data)
-    } else {
+    } else if (!needSensors && !preserveExisting) {
       cacheSensors = []
     }
-    if (needData) {
+    if (loadData) {
       const res = await api.getDataGis()
       cacheData = asList((res.data as { features?: unknown })?.features ?? res.data)
-    } else {
+    } else if (!needData && !preserveExisting) {
       cacheData = []
     }
-    if (needTasks) {
+    if (loadTasks) {
       const res = await api.getTaskGis()
       cacheTasks = asList((res.data as { features?: unknown })?.features ?? res.data)
       if (query.taskId) shellFilters.taskId = String(query.taskId)
-    } else {
+    } else if (!needTasks && !preserveExisting) {
       cacheTasks = []
     }
 
-    if (needSensors || shellFilters.showSensors) {
+    if (loadSensors) {
       const feats = filteredSensors()
       const ds = await loadSensorLayer(viewer, feats)
       dataSources.push(ds)
       shellCounts.sensors = feats.length
     }
-    if (needData || shellFilters.showData) {
+    if (loadData) {
       const dataFeats = filteredData()
       const ds = await loadDataLayer(viewer, dataFeats)
       dataSources.push(ds)
       shellCounts.data = dataFeats.length
     }
-    if (needTasks || shellFilters.showTasks) {
+    if (loadTasks) {
       const feats = filteredTasks()
       const ds = await loadTaskLayer(viewer, feats)
       dataSources.push(ds)
       shellCounts.tasks = feats.length
     }
     // 指标范围：感知指标中心为主，首页/综合/规划也展示以便业务串联
-    if (
-      center === 'indicators' ||
-      center === 'home' ||
-      center === 'applications' ||
-      center === 'planning'
-    ) {
+    if (loadIndicators) {
       const res = await api.listInstances('?pageSize=100')
       const rows = asList(res.data).filter((r) => String(r.spatialWkt || r.geometryWkt || '').trim())
       cacheIndicators = rows
@@ -1052,6 +1145,8 @@ export async function reloadShellLayers(path: string, query: Record<string, unkn
         idPrefix: 'indicator',
         name: 'indicators',
         color: Cesium.Color.fromCssColorString('#be123c').withAlpha(0.75),
+        markerKind: 'indicator',
+        polygonAlpha: 0.14,
         getWkt: (item) => String(item.spatialWkt || item.geometryWkt || ''),
         getName: (item) =>
           String(item.displayName || item.instanceName || item.name || item.code || item.id),
@@ -1069,7 +1164,7 @@ export async function reloadShellLayers(path: string, query: Record<string, unkn
       })
       dataSources.push(ds)
       shellCounts.indicators = rows.length
-    } else {
+    } else if (!needIndicators && !preserveExisting) {
       cacheIndicators = []
     }
 
@@ -1082,7 +1177,10 @@ export async function reloadShellLayers(path: string, query: Record<string, unkn
       hasFittedView = true
     }
     const total =
-      shellCounts.sensors + shellCounts.data + shellCounts.tasks + shellCounts.indicators
+      (shellFilters.showSensors ? shellCounts.sensors : 0) +
+      (shellFilters.showData ? shellCounts.data : 0) +
+      (shellFilters.showTasks ? shellCounts.tasks : 0) +
+      (shellFilters.showIndicators ? shellCounts.indicators : 0)
     shellStatus.value =
       total > 0 ? `底图就绪 · 当前上图 ${total} 个要素` : '底图就绪 · 暂无业务空间要素（仍可浏览底图）'
   } catch (err) {
@@ -1096,7 +1194,7 @@ export async function reloadShellLayers(path: string, query: Record<string, unkn
       shellError.value = msg
       shellStatus.value = '底图就绪（业务图层加载失败）'
     }
-    flyToChina(viewer)
+    if (!preserveExisting) flyToChina(viewer)
   } finally {
     if (safetyTimer) window.clearTimeout(safetyTimer)
     if (gen === reloadGeneration) shellLoading.value = false
@@ -1128,6 +1226,8 @@ export async function rerenderShellLayers(fitView = true) {
         idPrefix: 'indicator',
         name: 'indicators',
         color: Cesium.Color.fromCssColorString('#be123c').withAlpha(0.75),
+        markerKind: 'indicator',
+        polygonAlpha: 0.14,
         getWkt: (item) => String(item.spatialWkt || item.geometryWkt || ''),
         getName: (item) =>
           String(item.displayName || item.instanceName || item.name || item.code || item.id),

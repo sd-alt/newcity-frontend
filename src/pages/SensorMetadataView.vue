@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import * as api from '../api/endpoints'
 import ContextGuide from '../components/ContextGuide.vue'
 import { errMessage } from '../utils/errors'
 
 type Row = Record<string, any>
+const props = withDefaults(defineProps<{ sensorId?: string; embedded?: boolean }>(), {
+  sensorId: '',
+  embedded: false,
+})
 const route = useRoute()
 const sensors = ref<Row[]>([])
 const selectedId = ref('')
@@ -71,7 +75,7 @@ async function loadSensors() {
   try {
     const response = await api.listSensors('?pageSize=200')
     sensors.value = rows(response.data)
-    const requestedId = typeof route.query.sensorId === 'string' ? route.query.sensorId : ''
+    const requestedId = props.sensorId || (typeof route.query.sensorId === 'string' ? route.query.sensorId : '')
     const requestedSensor = sensors.value.find((item) => String(item.id) === requestedId)
     const firstSensor = sensors.value[0]
     const initialSensor = requestedSensor || firstSensor
@@ -115,15 +119,24 @@ async function saveCurrent() {
   } finally { saving.value = false }
 }
 onMounted(loadSensors)
+watch(
+  () => props.sensorId,
+  async (id) => {
+    if (!id || id === selectedId.value) return
+    selectedId.value = id
+    await loadDetail()
+  },
+)
 </script>
 
 <template>
-  <section class="page metadata-page">
-    <header class="page-head resource-head">
+  <section class="page metadata-page" :class="{ embedded: props.embedded }">
+    <header v-if="!props.embedded" class="page-head resource-head">
       <div><p class="eyebrow">资源档案 · 八类元数据</p><h1>传感器详情</h1></div>
       <RouterLink :to="{ name: 'resource-sensors', query: { tab: 'crud' } }" class="back-link">返回资源列表</RouterLink>
     </header>
     <ContextGuide
+      v-if="!props.embedded"
       storage-key="newcity-sensor-profile-guide"
       kicker="资源档案怎么用"
       title="八类档案并列，不是必须依次完成的八步"
@@ -132,8 +145,10 @@ onMounted(loadSensors)
       reopen-label="查看档案说明"
     />
     <p v-if="error" class="error">{{ error }}</p><p v-if="message" class="ok-text">{{ message }}</p>
-    <input v-model="keyword" type="search" placeholder="搜索传感器或平台" />
-    <select v-model="selectedId" class="sensor-select" @change="loadDetail"><option value="">选择传感器</option><option v-for="item in filteredSensors" :key="item.id" :value="String(item.id)">{{ item.sensorName || item.name || `传感器 #${item.id}` }} · {{ item.platformName || '' }}</option></select>
+    <template v-if="!props.embedded">
+      <input v-model="keyword" type="search" placeholder="搜索传感器或平台" />
+      <select v-model="selectedId" class="sensor-select" @change="loadDetail"><option value="">选择传感器</option><option v-for="item in filteredSensors" :key="item.id" :value="String(item.id)">{{ item.sensorName || item.name || `传感器 #${item.id}` }} · {{ item.platformName || '' }}</option></select>
+    </template>
     <p v-if="loading" class="hint">正在读取传感器元数据…</p>
     <div v-else-if="!detail" class="empty-state">暂无传感器。先在“传感器资源”中创建资源，再维护资源档案。</div>
     <template v-else>
@@ -182,38 +197,46 @@ onMounted(loadSensors)
 </template>
 
 <style scoped>
-.metadata-page { padding-bottom: 1rem; }
+.metadata-page {
+  --profile-card-border: #e5e5ea;
+  --profile-card-radius: 16px;
+  --profile-card-background: #fff;
+  padding-bottom: 1rem;
+}
+.metadata-page.embedded { padding: 0; }
 .resource-head { align-items: flex-start; }
-.back-link { color: #176e66; font-size: 10px; text-decoration: none; border-bottom: 1px solid #8bb7b1; }
+.back-link { color: #0071e3; font-size: 10px; text-decoration: none; border-bottom: 1px solid #9bc7f3; }
 .sensor-select { width: 100%; margin: .35rem 0 .55rem; }
-.sensor-context { display: grid; gap: .25rem; padding: .65rem; border: 1px solid #c9d8d5; border-top: 3px solid #287b78; background: rgba(255,255,255,.94); }
+.sensor-context { display: grid; gap: .3rem; padding: .65rem; border: 1px solid var(--profile-card-border); border-radius: var(--profile-card-radius); background: var(--profile-card-background); }
 .sensor-context > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: .35rem; }
-.sensor-context span { color: #8a682a; font-size: 10px; }
-.sensor-context em { padding: .1rem .35rem; background: #edf2f1; color: #5d716e; font-size: 9px; font-style: normal; }
-.sensor-context em.active { background: #e8f5f1; color: #087066; }
-.sensor-context > strong { color: #173f43; font-size: 14px; overflow-wrap: anywhere; }
-.sensor-context p, .sensor-context small { margin: 0; color: #637774; font-size: 10px; line-height: 1.45; }
-.profile-progress { height: 4px; overflow: hidden; background: #e2e9e7; }
-.profile-progress i { display: block; height: 100%; background: #287b78; }
+.sensor-context span { color: #86868b; font-size: 10px; }
+.sensor-context em { padding: .12rem .38rem; border: 1px solid #dcdde1; border-radius: 6px; background: #f5f5f7; color: #5d6664; font-size: 9px; font-style: normal; line-height: 1.3; }
+.sensor-context em.active { border-color: #b7d7f7; background: #f0f7ff; color: #005bb5; }
+.sensor-context > strong { color: #1d1d1f; font-size: 14px; overflow-wrap: anywhere; }
+.sensor-context p, .sensor-context small { margin: 0; color: #86868b; font-size: 10px; line-height: 1.45; }
+.profile-progress { height: 4px; overflow: hidden; border-radius: 2px; background: #e5e7e7; }
+.profile-progress i { display: block; height: 100%; border-radius: inherit; background: #0071e3; }
 .octuple-heading { display: flex; align-items: baseline; justify-content: space-between; gap: .4rem; margin: .65rem 0 .3rem; }
-.octuple-heading strong { color: #173f43; font-size: 12px; }
-.octuple-heading small { color: #6b7d7a; font-size: 9px; }
-.octuple-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: .25rem; }
-.octuple-tabs button { display: grid; grid-template-columns: .55rem 1fr; align-items: start; gap: .35rem; min-width: 0; padding: .42rem; border: 1px solid #d6e0de; background: rgba(255,255,255,.9); color: #536965; text-align: left; }
+.octuple-heading strong { color: #1d1d1f; font-size: 12px; }
+.octuple-heading small { color: #86868b; font-size: 9px; }
+.octuple-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: .35rem; }
+.octuple-tabs button { display: grid; grid-template-columns: .55rem 1fr; align-items: start; gap: .35rem; min-width: 0; padding: .52rem; border: 1px solid var(--profile-card-border); border-radius: var(--profile-card-radius); background: var(--profile-card-background); color: #515154; text-align: left; cursor: pointer; transition: border-color .14s ease, background .14s ease, color .14s ease; }
 .octuple-tabs button > i { width: 6px; height: 6px; margin-top: .22rem; border: 1px solid #9eafac; border-radius: 50%; background: #fff; }
-.octuple-tabs button > i.complete { border-color: #287b78; background: #287b78; }
+.octuple-tabs button > i.complete { border-color: #34c759; background: #34c759; }
 .octuple-tabs button > span { display: grid; gap: .08rem; min-width: 0; }
 .octuple-tabs button strong { color: inherit; font-size: 11px; }
-.octuple-tabs button small { color: #748582; font-size: 9px; line-height: 1.3; }
-.octuple-tabs button.active { color: #0b645c; border-color: #67a49d; background: #eff8f6; }
-.editor { display: grid; gap: .45rem; margin-top: .55rem; }
-.editor-head { display: flex; align-items: flex-end; justify-content: space-between; gap: .45rem; padding-bottom: .4rem; border-bottom: 1px solid #e1e8e6; }
+.octuple-tabs button small { color: #86868b; font-size: 9px; line-height: 1.3; }
+.octuple-tabs button:hover { border-color: #c7c7cc; }
+.octuple-tabs button.active { color: #005bb5; border-color: #b7d7f7; background: #f0f7ff; }
+.octuple-tabs button:focus-visible { outline: 2px solid rgba(0, 113, 227, .22); outline-offset: 2px; }
+.editor { display: grid; gap: .5rem; margin-top: .65rem; padding: .65rem; border-color: var(--profile-card-border); border-radius: var(--profile-card-radius); background: var(--profile-card-background); box-shadow: none; }
+.editor-head { display: flex; align-items: flex-end; justify-content: space-between; gap: .45rem; padding-bottom: .45rem; border-bottom: 1px solid #e5e5e8; }
 .editor-head p, .editor-head h3 { margin: 0; }
-.editor-head h3 { color: #173f43; font-size: 13px; }
-.editor-head > small { max-width: 55%; color: #687b78; font-size: 9px; text-align: right; }
-.editor label { display: grid; gap: .18rem; color: #536965; font-size: 11px; }
-.metadata-list { display: grid; gap: .25rem; padding: .45rem; background: #f5f8f7; color: #465d59; font-size: 11px; }
-.empty-state, .empty-inline { padding: .8rem; border: 1px dashed #bac9c6; color: #667a76; text-align: center; font-size: 11px; }
+.editor-head h3 { color: #1d1d1f; font-size: 13px; }
+.editor-head > small { max-width: 55%; color: #86868b; font-size: 9px; text-align: right; }
+.editor label { display: grid; gap: .18rem; color: #515154; font-size: 11px; }
+.metadata-list { display: grid; gap: .25rem; padding: .55rem; border: 1px solid #e5e5ea; border-radius: 12px; background: #f7f7f9; color: #515154; font-size: 11px; }
+.empty-state, .empty-inline { padding: .8rem; border: 1px dashed #c7c7cc; color: #86868b; text-align: center; font-size: 11px; }
 .mono { font: 10px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
-.ok-text { color: #087066; font-size: 12px; }
+.ok-text { color: #248a3d; font-size: 12px; }
 </style>

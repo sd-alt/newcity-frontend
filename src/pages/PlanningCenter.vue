@@ -19,7 +19,9 @@ import { useAuthStore } from '../stores/auth'
 import { taskStatusLabel } from '../utils/labels'
 import { mapDrawGeometry } from '../gis/mapTools'
 import { wktToGeoJson, type SimpleGeometry } from '../gis/wkt'
+import CardPager from '../components/CardPager.vue'
 import ContextGuide from '../components/ContextGuide.vue'
+import { tablePager as vTablePager } from '../utils/tablePager'
 
 type StepKey =
   | 'create'
@@ -65,6 +67,14 @@ const STEPS: { key: StepKey; title: string; desc: string }[] = [
   { key: 'evaluate', title: '8. 满足度评估', desc: '关联后覆盖/精度核查' },
   { key: 'output', title: '9. 规划输出', desc: '生成输出方案' },
 ]
+const PIPELINE_PHASES: { key: string; label: string; steps: StepKey[]; result?: boolean }[] = [
+  { key: 'requirement', label: '需求', steps: ['create'] },
+  { key: 'indicator', label: '指标', steps: ['submit'] },
+  { key: 'resource', label: '资源', steps: ['reverse', 'candidates'] },
+  { key: 'planning', label: '规划', steps: ['basic', 'optimize', 'supplement', 'evaluate'] },
+  { key: 'execution', label: '执行', steps: ['output'] },
+  { key: 'result', label: '成果', steps: [], result: true },
+]
 const evaluationGuideSteps = [
   { title: '先看是否满足', detail: '“指标满足”回答当前方案能不能完成任务。未满足时先不要输出方案。' },
   { title: '再看空间质量', detail: '有效/共同覆盖越高越好；覆盖错位表示各指标虽然能测到，但不能在同一区域联合观测。' },
@@ -81,6 +91,12 @@ const tabs = [
   { key: 'candidates', label: '候选与评分' },
   { key: 'plans', label: '方案管理' },
 ]
+const flowFormPage = ref(1)
+const flowFormPages = ['任务与时间', '指标与尺度', '空间与约束', '评分权重']
+const planSectionPage = ref(1)
+const planSectionPages = ['方案列表', '方案对比', '当前结果']
+const rerunStep = ref<StepKey>('create')
+const maintenanceAction = ref<'save' | 'bind' | 'candidates'>('save')
 
 const instances = ref<Record<string, unknown>[]>([])
 const scales = ref<Record<string, unknown>[]>([])
@@ -194,6 +210,28 @@ const error = ref<string | null>(null)
 const message = ref<string | null>(null)
 
 const stepIndex = computed(() => STEP_ORDER.indexOf(currentStep.value))
+const unlockedStepIndex = computed(() => {
+  let maxDoneIndex = -1
+  for (const step of doneSteps.value) {
+    maxDoneIndex = Math.max(maxDoneIndex, STEP_ORDER.indexOf(step))
+  }
+  return Math.min(STEP_ORDER.length - 1, Math.max(stepIndex.value, maxDoneIndex + 1))
+})
+const currentStepInfo = computed(() => STEPS[stepIndex.value] || STEPS[0])
+const previousStep = computed(() => stepIndex.value > 0 ? STEPS[stepIndex.value - 1] : null)
+const nextStep = computed(() => stepIndex.value < STEPS.length - 1 ? STEPS[stepIndex.value + 1] : null)
+const pipelinePhases = computed(() => PIPELINE_PHASES.map((phase) => {
+  const complete = phase.result
+    ? doneSteps.value.has('output')
+    : phase.steps.length > 0 && phase.steps.every((step) => doneSteps.value.has(step))
+  const activeStep = STEP_ORDER[unlockedStepIndex.value]
+  const current = !complete && !phase.result && activeStep != null && phase.steps.includes(activeStep)
+  return {
+    ...phase,
+    state: complete ? 'done' : current ? 'current' : 'pending',
+    status: complete ? '已完成' : current ? '进行中' : '待开始',
+  }
+}))
 const reverseSummary = computed(() => {
   const raw = reverseResult.value as Record<string, unknown> | null
   if (!raw || typeof raw !== 'object') return null
@@ -231,6 +269,12 @@ const evaluationSummary = computed(() => {
     relations: Array.isArray(raw.resourceRelations) ? raw.resourceRelations as ResourceRelationRow[] : [],
   }
 })
+const relationPage = ref(1)
+const relationPageSize = 3
+const relationRows = computed(() => evaluationSummary.value?.relations || [])
+const relationPageCount = computed(() => Math.max(1, Math.ceil(relationRows.value.length / relationPageSize)))
+const pagedRelations = computed(() => relationRows.value.slice((relationPage.value - 1) * relationPageSize, relationPage.value * relationPageSize))
+const relationPageLabels = computed(() => Array.from({ length: relationPageCount.value }, (_, index) => `资源关系第 ${index + 1} 页`))
 
 function evaluationCoverage(value: unknown) {
   const raw = value as Record<string, unknown> | null
@@ -242,6 +286,7 @@ function evaluationCoverage(value: unknown) {
 }
 
 const hasTask = computed(() => taskId.value != null)
+const planningMapAction = ref<'tasks' | 'candidates' | 'basic' | 'optimized' | 'supplement' | 'coverage'>('tasks')
 const canEditDraft = computed(
   () => taskId.value != null && (taskStatus.value === '' || taskStatus.value === 'draft' || taskStatus.value === 'created'),
 )
@@ -322,22 +367,21 @@ function stepBlockedReason(step: StepKey): string {
 
 function onStepClick(step: StepKey) {
   if (step === currentStep.value) return
-  if (doneSteps.value.has(step) || step === 'create' && taskId.value == null) {
-    currentStep.value = step
-    message.value = '已切换到步骤：' + (STEPS.find((s) => s.key === step)?.title || step)
-    error.value = null
-    return
-  }
-  // 允许查看当前之前已完成链路中的任一步
-  const curIdx = STEP_ORDER.indexOf(currentStep.value)
   const stepIdx = STEP_ORDER.indexOf(step)
-  if (stepIdx < curIdx) {
+  if (stepIdx <= unlockedStepIndex.value) {
     currentStep.value = step
-    message.value = '已回看步骤：' + (STEPS.find((s) => s.key === step)?.title || step) + '（可重跑该步）'
+    message.value = doneSteps.value.has(step)
+      ? '已回看步骤：' + (STEPS.find((s) => s.key === step)?.title || step) + '（可重跑该步）'
+      : '已切换到步骤：' + (STEPS.find((s) => s.key === step)?.title || step)
     error.value = null
     return
   }
   error.value = stepBlockedReason(step) || '步骤未解锁'
+}
+
+function browseStep(step: StepKey | undefined) {
+  if (!step || STEP_ORDER.indexOf(step) > unlockedStepIndex.value) return
+  onStepClick(step)
 }
 
 const currentAction = computed(() => {
@@ -362,9 +406,7 @@ const currentAction = computed(() => {
   return { action: item.action, label: item.label }
 })
 
-async function runCurrentStep() {
-  const a = currentAction.value?.action
-  if (!a) return
+async function runStepAction(a: StepKey) {
   // 主操作在「需求与关联」表单区；若人在列表页，先切过去避免盲点
   if (tab.value !== 'flow' && a !== 'candidates') {
     await setTab('flow')
@@ -378,6 +420,24 @@ async function runCurrentStep() {
   if (a === 'supplement') return supplementAssociation()
   if (a === 'evaluate') return requirementEvaluation()
   if (a === 'output') return planningOutput()
+}
+
+async function runCurrentStep() {
+  const action = currentAction.value?.action
+  if (action) await runStepAction(action)
+}
+
+const maintenanceActionDisabled = computed(() => {
+  if (pending.value) return true
+  if (maintenanceAction.value === 'save') return !canEditDraft.value
+  if (maintenanceAction.value === 'bind') return taskId.value == null || (taskStatus.value !== '' && taskStatus.value !== 'draft')
+  return taskId.value == null
+})
+
+async function runMaintenanceAction() {
+  if (maintenanceAction.value === 'save') return saveTaskConfiguration()
+  if (maintenanceAction.value === 'bind') return bindSelectedIndicator()
+  return loadCandidates(true)
 }
 
 
@@ -508,7 +568,7 @@ async function createTask() {
     await setTab('flow')
     try { await showPlanningWorkspace('/planning') } catch { /* map refresh optional */ }
     try {
-      await selectShellFeature('task', String(data.id), { openBubble: true, fly: true })
+      await selectShellFeature('task', String(data.id), { openBubble: false, fly: true })
     } catch { /* map optional */ }
     await loadLists()
   } catch (err) {
@@ -901,7 +961,7 @@ function inferStepFromPlans(taskPlans: Record<string, unknown>[], status: string
 }
 
 async function selectTask(id: unknown) {
-  void locateTaskOnMap(String(id as string | number), { silent: true })
+  void locateTaskOnMap(String(id as string | number), { silent: true, openDetail: false })
 
   const tid = Number(id)
   if (Number.isFinite(tid) === false) return
@@ -1081,6 +1141,7 @@ async function resetForm() {
   taskStatus.value = ''
   currentStep.value = 'create'
   doneSteps.value = new Set()
+  flowFormPage.value = 1
   message.value = null
   error.value = null
   reverseResult.value = null
@@ -1091,7 +1152,23 @@ async function resetForm() {
   candidateMeta.value = null
   planResult.value = null
   taskCode.value = ''
+  taskName.value = '新建观测任务'
+  observationTarget.value = '面向目标区域开展连续观测并形成可追溯规划方案'
+  priority.value = 'normal'
+  taskTimeStart.value = isoNow(-30 * 60_000).slice(0, 16)
+  taskTimeEnd.value = isoNow(5 * 3600_000).slice(0, 16)
+  instanceId.value = ''
+  scaleId.value = ''
   researchAreaGeoJson.value = null
+  resolution.value = 10
+  temporalRes.value = '小时/次'
+  targetAccuracy.value = 90
+  minCoverageRatio.value = 0.9
+  wTheme.value = 0.2
+  wSpace.value = 0.2
+  wTime.value = 0.2
+  wCapability.value = 0.2
+  wReliability.value = 0.2
   // clear taskId from URL so map jump / watch does not re-select
   const q: Record<string, string> = {}
   for (const [k, v] of Object.entries(route.query)) {
@@ -1132,7 +1209,7 @@ async function loadPlanResult(planId: unknown, opts?: { silent?: boolean }) {
     try {
       await showAssociationOnMap(mode, { silent: !!opts?.silent })
       if (taskId.value != null) {
-        await selectShellFeature('task', String(taskId.value), { openBubble: true, fly: true })
+        await selectShellFeature('task', String(taskId.value), { openBubble: false, fly: true })
       }
     } catch {
       /* map optional */
@@ -1271,6 +1348,17 @@ async function doApprovePlan(planId: unknown, status?: unknown) {
   } finally {
     pending.value = false
   }
+}
+
+function runPlanRowAction(plan: Record<string, unknown>, event: Event) {
+  const select = event.target as HTMLSelectElement
+  const action = select.value
+  select.value = ''
+  if (action === 'result') void loadPlanResult(plan.id)
+  else if (action === 'copy') void doCopyPlan(plan.id)
+  else if (action === 'approve') void doApprovePlan(plan.id, plan.status)
+  else if (action === 'publish') void doPublishPlan(plan.id, plan.status)
+  else if (action === 'archive') void doArchivePlan(plan.id, plan.status)
 }
 
 
@@ -1520,9 +1608,9 @@ watch(() => route.query.taskId, () => { void applyRouteTaskQuery() })
 watch(instanceId, () => { syncFromSelectedInstance() })
 
 
-async function locateTaskOnMap(id: string | number | unknown, options?: { silent?: boolean }) {
+async function locateTaskOnMap(id: string | number | unknown, options?: { silent?: boolean; openDetail?: boolean }) {
   setShellVisibility({ showSensors: true, showData: false, showTasks: true })
-  const ok = await selectShellFeature('task', String(id), { openBubble: true, fly: true })
+  const ok = await selectShellFeature('task', String(id), { openBubble: options?.openDetail !== false, fly: true })
   if (options?.silent) return ok
   message.value = ok
     ? `已在地图定位观测任务 #${id}`
@@ -1843,6 +1931,15 @@ async function clearMapLinks() {
   await clearAssociationLinks()
   message.value = '已清除关联线'
 }
+
+async function applyPlanningMapAction() {
+  if (planningMapAction.value === 'tasks') await showTasksOnMap()
+  else if (planningMapAction.value === 'candidates') await showCandidatesOnMap()
+  else if (planningMapAction.value === 'basic') await showAssociationOnMap('basic')
+  else if (planningMapAction.value === 'optimized') await showAssociationOnMap('optimized')
+  else if (planningMapAction.value === 'supplement') await showAssociationOnMap('supplement')
+  else await drawPlanningCoverageFromEval()
+}
 </script>
 
 <template>
@@ -1859,17 +1956,25 @@ async function clearMapLinks() {
           <button class="btn ghost" type="button" :disabled="taskId == null || pending" @click="openOnMap">定位当前任务</button>
         </div>
       </div>
-      <div class="plan-map-actions panel soft" aria-label="地图联动">
-        <strong style="font-size:12px;margin-right:0.35rem">地图联动</strong>
-        <button class="btn ghost" type="button" :disabled="pending" @click="showTasksOnMap">任务/资源上图</button>
-        <button class="btn ghost" type="button" :disabled="pending || taskId == null" @click="showCandidatesOnMap">候选上图</button>
-        <button class="btn ghost" type="button" :disabled="pending || taskId == null" @click="showAssociationOnMap('basic')">基础关联(蓝)</button>
-        <button class="btn ghost" type="button" :disabled="pending || taskId == null" @click="showAssociationOnMap('optimized')">优化关联(绿)</button>
-        <button class="btn ghost" type="button" :disabled="pending || taskId == null" @click="showAssociationOnMap('supplement')">增补关联(橙)</button>
-        <button class="btn ghost" type="button" :disabled="pending || taskId == null" @click="drawPlanningCoverageFromEval">覆盖/缺口上图</button>
-        <button class="btn ghost" type="button" @click="clearMapLinks">清关联线</button>
-        <button class="btn ghost" type="button" @click="clearPlanningCoverageOnMap">清覆盖</button>
-        <span class="muted" style="font-size:12px">{{ shellStatus }}</span>
+      <div class="planning-map-toolbar" aria-label="地图联动">
+        <header><strong>地图联动</strong><span>{{ shellStatus }}</span></header>
+        <div class="planning-map-controls">
+          <label>显示内容
+            <select v-model="planningMapAction">
+              <option value="tasks">任务与资源</option>
+              <option value="candidates" :disabled="taskId == null">候选资源</option>
+              <option value="basic" :disabled="taskId == null">基础关联</option>
+              <option value="optimized" :disabled="taskId == null">优化关联</option>
+              <option value="supplement" :disabled="taskId == null">增补关联</option>
+              <option value="coverage" :disabled="taskId == null">覆盖与缺口</option>
+            </select>
+          </label>
+          <button class="btn" type="button" :disabled="pending || (planningMapAction !== 'tasks' && taskId == null)" @click="applyPlanningMapAction">上图</button>
+        </div>
+        <div class="planning-map-secondary">
+          <button type="button" @click="clearMapLinks">清除关联线</button>
+          <button type="button" @click="clearPlanningCoverageOnMap">清除覆盖</button>
+        </div>
       </div>
     </header>
 
@@ -1882,52 +1987,20 @@ async function clearMapLinks() {
       </div>
       <p v-if="error" class="error">{{ error }}</p>
       <p v-if="message" class="ok-text">{{ message }}</p>
-      <p v-if="hasTask" class="hint">当前任务 #{{ taskId }} · 状态 {{ taskStatus || '—' }} · 当前步骤 {{ currentStep }}</p>
 
-      <div v-if="user && tab !== 'flow' && hasTask" class="panel soft" style="margin:0.35rem 0;padding:0.45rem 0.55rem;display:flex;gap:0.5rem;align-items:center;justify-content:space-between">
-        <span class="muted" style="font-size:12px">当前任务 #{{ taskId }} · 步骤 {{ STEPS.find((x) => x.key === currentStep)?.title || currentStep }}</span>
+      <div v-if="user && tab !== 'flow' && hasTask" class="planning-context-bar">
+        <span>当前任务 #{{ taskId }} · 步骤 {{ STEPS.find((x) => x.key === currentStep)?.title || currentStep }}</span>
         <button class="btn ghost" type="button" @click="setTab('flow')">进入需求与关联</button>
       </div>
-      <div v-if="currentAction && tab === 'flow'" class="current-action-bar panel soft sticky-action" data-testid="planning-primary-bar">
-        <div style="min-width:0;flex:1">
-          <strong>
-            <template v-if="doneSteps.has(currentAction.action) && currentStep === currentAction.action && currentAction.action === 'output'">
-              流程已完成 · {{ currentAction.label }}
-            </template>
-            <template v-else-if="doneSteps.has(currentAction.action) && currentStep === currentAction.action">
-              本步已完成 · {{ currentAction.label }}
-            </template>
-            <template v-else>当前应执行：{{ currentAction.label }}</template>
-          </strong>
-          <p class="muted" style="margin:0.2rem 0 0">
-            <template v-if="taskId">任务 #{{ taskId }} · 状态 {{ taskStatus || '—' }} · 步骤 {{ STEPS.find((x) => x.key === currentStep)?.title || currentStep }}</template>
-            <template v-else>尚未选择任务：请先填写下方表单并执行创建，或从任务列表选择</template>
-          </p>
-          <p v-if="stepBlockedReason(currentAction.action)" class="error" style="margin:0.25rem 0 0;font-size:12px">
-            {{ stepBlockedReason(currentAction.action) }}
-          </p>
-          <p v-else class="muted" style="margin:0.25rem 0 0;font-size:12px">
-            <template v-if="doneSteps.has('output')">规划输出已生成；可切换到「方案管理」做审核/发布，或重新生成输出。</template>
-            <template v-else>执行后将更新左侧结果，并尽量同步地图关联/覆盖图层</template>
-          </p>
-        </div>
-        <button
-          class="btn"
-          type="button"
-          data-action-primary="1"
-          :data-action="currentAction.action"
-          :disabled="canRun(currentAction.action) === false"
-          :title="stepBlockedReason(currentAction.action) || currentAction.label"
-          @click="runCurrentStep"
-        >{{ pending ? '处理中…' : currentAction.label }}</button>
-      </div>
 
-
-      <div v-if="user" class="panel soft task-picker-bar" data-testid="planning-task-picker" style="margin:0.35rem 0;padding:0.5rem 0.6rem;display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center">
-        <strong style="font-size:12px">任务选择</strong>
+      <div v-if="user" class="planning-task-picker" data-testid="planning-task-picker">
+        <header>
+          <strong>任务选择</strong>
+          <span v-if="taskId">当前 #{{ taskId }} · {{ taskStatus || '—' }}</span>
+          <span v-else>尚未选择任务</span>
+        </header>
         <select
           class="task-pick-select"
-          style="min-width:220px;flex:1;max-width:420px"
           :value="taskId == null ? '' : String(taskId)"
           @change="pickTaskFromSelect"
         >
@@ -1936,15 +2009,16 @@ async function clearMapLinks() {
             #{{ t.id }} · {{ t.name || t.code || '未命名' }} · {{ t.status || '-' }}
           </option>
         </select>
-        <button class="btn ghost" type="button" @click="setTab('tasks')">任务列表</button>
-        <button class="btn ghost" type="button" @click="resetForm">新建任务</button>
-        <span v-if="taskId" class="muted" style="font-size:12px">当前 #{{ taskId }} · {{ taskStatus || '—' }}</span>
-        <span v-else class="muted" style="font-size:12px">未选任务时无法执行候选/关联/上图</span>
+        <div class="planning-task-actions">
+          <button class="btn ghost" type="button" @click="setTab('tasks')">任务列表</button>
+          <button class="btn ghost" type="button" @click="resetForm">新建任务</button>
+        </div>
+        <p v-if="!taskId">选择已有任务后，才可执行候选、关联和覆盖分析。</p>
       </div>
 
       <section v-if="tab === 'tasks'" class="panel">
         <h2>观测任务列表</h2>
-        <table class="table">
+        <table v-table-pager="{ label: '观测任务分页' }" class="table">
           <thead><tr><th>ID</th><th>编码</th><th>名称</th><th>状态</th><th>指标</th><th></th></tr></thead>
           <tbody>
             <tr v-if="!tasks.length">
@@ -1969,51 +2043,103 @@ async function clearMapLinks() {
       </section>
 
       <section v-if="tab === 'flow'">
-        <div class="stepper panel soft">
-          <div
-            v-for="(s, i) in STEPS"
-            :key="s.key"
-            class="step-item"
-            :class="{
-              current: currentStep === s.key,
-              done: doneSteps.has(s.key) || stepIndex > i,
-              blocked: !doneSteps.has(s.key) && currentStep !== s.key && stepIndex < i && !(s.key === 'create' && taskId == null),
-            }"
-            role="button"
-            tabindex="0"
-            :title="stepBlockedReason(s.key) || s.desc"
-            @click="onStepClick(s.key)"
-            @keydown.enter.prevent="onStepClick(s.key)"
-          >
-            <div class="step-title">{{ s.title }}</div>
-            <div class="step-desc">{{ s.desc }}</div>
-            <div v-if="stepBlockedReason(s.key)" class="step-lock">{{ stepBlockedReason(s.key) }}</div>
-          </div>
-        </div>
-        <p v-if="taskId" class="muted" style="margin: 0.35rem 0 0.6rem">
-          当前步骤：{{ STEPS.find((x) => x.key === currentStep)?.title || currentStep }}；
-          已完成 {{ doneSteps.size }} 步。点击已完成步骤可回看/重跑。上方「…上图」只刷新地图；下方「执行…」才真正推进流程。
-        </p>
+        <section class="planning-workflow panel" data-testid="planning-workflow">
+          <header class="planning-workflow-head">
+            <div>
+              <p class="eyebrow">任务流水线</p>
+              <h2>观测规划进度</h2>
+            </div>
+            <span class="planning-progress-count">{{ doneSteps.size }} / {{ STEPS.length }} 步</span>
+          </header>
 
-        <div class="grid-2">
-          <section class="panel">
+          <div class="pipeline-scroll" aria-label="任务流水线进度">
+            <ol class="planning-pipeline">
+              <li
+                v-for="(phase, index) in pipelinePhases"
+                :key="phase.key"
+                class="pipeline-phase"
+                :class="phase.state"
+                :aria-current="phase.state === 'current' ? 'step' : undefined"
+              >
+                <span class="pipeline-marker" aria-hidden="true">{{ phase.state === 'done' ? '✓' : index + 1 }}</span>
+                <span class="pipeline-copy">
+                  <strong>{{ phase.label }}</strong>
+                  <small>{{ phase.status }}</small>
+                </span>
+              </li>
+            </ol>
+          </div>
+
+          <article class="step-page-card" :class="{ completed: doneSteps.has(currentStep) }">
+            <button
+              class="step-page-button"
+              type="button"
+              :disabled="previousStep == null"
+              :title="previousStep ? `上一步：${previousStep.title}` : '已经是第一步'"
+              aria-label="查看上一步"
+              @click="browseStep(previousStep?.key)"
+            ><span aria-hidden="true">‹</span></button>
+
+            <div class="step-page-content">
+              <div class="step-page-meta">
+                <span>步骤 {{ stepIndex + 1 }} / {{ STEPS.length }}</span>
+                <span class="step-state">{{ doneSteps.has(currentStep) ? '已完成，可重新执行' : '当前步骤' }}</span>
+              </div>
+              <h3>{{ currentStepInfo?.title }}</h3>
+              <p>{{ currentStepInfo?.desc }}</p>
+              <p v-if="stepBlockedReason(currentStep)" class="step-page-message error" role="alert">
+                {{ stepBlockedReason(currentStep) }}
+              </p>
+              <p v-else class="step-page-message">
+                <template v-if="doneSteps.has('output')">规划方案已生成，可在“方案管理”中审核或发布。</template>
+                <template v-else-if="taskId">任务 #{{ taskId }} · {{ taskStatus || '待处理' }}</template>
+                <template v-else>填写下方任务信息后创建任务。</template>
+              </p>
+              <button
+                v-if="currentAction"
+                class="btn step-primary-action"
+                type="button"
+                data-action-primary="1"
+                :data-action="currentAction.action"
+                :disabled="canRun(currentAction.action) === false"
+                :title="stepBlockedReason(currentAction.action) || currentAction.label"
+                @click="runCurrentStep"
+              >{{ pending ? '处理中…' : currentAction.label }}</button>
+            </div>
+
+            <button
+              class="step-page-button"
+              type="button"
+              :disabled="nextStep == null || (nextStep && STEP_ORDER.indexOf(nextStep.key) > unlockedStepIndex)"
+              :title="nextStep == null ? '已经是最后一步' : STEP_ORDER.indexOf(nextStep.key) > unlockedStepIndex ? '完成当前步骤后可继续' : `下一步：${nextStep.title}`"
+              aria-label="查看下一步"
+              @click="browseStep(nextStep?.key)"
+            ><span aria-hidden="true">›</span></button>
+          </article>
+        </section>
+
+        <div class="flow-step-content">
+          <section v-if="currentStep === 'create' || currentStep === 'submit'" class="panel">
             <h2>观测任务草稿与空间配置</h2>
             <div class="form">
+              <template v-if="flowFormPage === 1">
               <p v-if="taskCode" class="task-code">任务编号 {{ taskCode }}</p>
               <label>任务名称<input v-model="taskName" :disabled="hasTask && !canEditDraft" /></label>
               <label>观测目标<textarea v-model="observationTarget" :disabled="hasTask && !canEditDraft" rows="3" /></label>
-              <div class="form-row">
-                <label>优先级
-                  <select v-model="priority" :disabled="hasTask && !canEditDraft">
-                    <option value="high">高</option>
-                    <option value="normal">常规</option>
-                    <option value="low">低</option>
-                  </select>
-                </label>
+              <label>优先级
+                <select v-model="priority" :disabled="hasTask && !canEditDraft">
+                  <option value="high">高</option>
+                  <option value="normal">常规</option>
+                  <option value="low">低</option>
+                </select>
+              </label>
+              <div class="task-time-grid">
                 <label>开始时间<input v-model="taskTimeStart" type="datetime-local" :disabled="hasTask" /></label>
                 <label>结束时间<input v-model="taskTimeEnd" type="datetime-local" :disabled="hasTask" /></label>
               </div>
-              <p class="muted">先保存草稿即可获得系统任务编号；任务区域和指标可随后补充。</p>
+              <p class="muted">确认任务目标和时间后创建草稿；指标与空间约束可在后续页面补齐。</p>
+              </template>
+              <template v-if="flowFormPage === 2">
               <label>指标实例
                 <select v-model="instanceId" :disabled="hasTask && !canEditDraft" @change="syncFromSelectedInstance">
                   <option disabled value="">请选择</option>
@@ -2027,6 +2153,8 @@ async function clearMapLinks() {
                   <option v-for="s in scales" :key="'sc'+s.id" :value="String(s.id)">{{ s.name }}</option>
                 </select>
               </label>
+              </template>
+              <template v-if="flowFormPage === 3">
               <div class="area-control" :class="{ ready: researchAreaGeoJson }">
                 <div>
                   <strong>任务区域</strong>
@@ -2044,6 +2172,9 @@ async function clearMapLinks() {
                 <label>目标精度<input v-model.number="targetAccuracy" type="number" :disabled="hasTask && !canEditDraft" /></label>
                 <label>最低覆盖率<input v-model.number="minCoverageRatio" type="number" step="0.01" :disabled="hasTask && !canEditDraft" /></label>
               </div>
+              <button class="btn" type="button" :disabled="!canEditDraft || pending" @click="saveTaskConfiguration">保存任务配置</button>
+              </template>
+              <template v-if="flowFormPage === 4">
               <p class="muted">评分权重（五维之和须为 1，影响候选排序与评分解释）。可先选预设再保存。</p>
               <div class="form-row">
                 <button class="btn ghost" type="button" @click="applyWeightPreset('balanced')">预设·均衡</button>
@@ -2059,38 +2190,46 @@ async function clearMapLinks() {
                 <label>可靠<input v-model.number="wReliability" type="number" step="0.05" min="0" max="1" /></label>
                 <button class="btn ghost" type="button" :disabled="!canEditDraft || pending" @click="saveWeights">保存权重</button>
               </div>
-              <button class="btn" type="button" :disabled="!canEditDraft || pending" @click="saveTaskConfiguration">保存任务配置</button>
+              </template>
             </div>
+            <CardPager v-model:page="flowFormPage" :pages="flowFormPages" previous-label="上一步" next-label="下一步" label="任务配置分页" />
           </section>
 
-          <section class="panel">
-            <h2>步骤重跑（高级）</h2>
-            <div class="action-stack">
-              <button class="btn" type="button" :disabled="canRun('create') === false" :title="stepBlockedReason('create') || '创建观测任务'" data-action="create" @click="createTask">执行创建任务</button>
-              <button class="btn ghost" type="button" :disabled="!canEditDraft || pending" @click="saveTaskConfiguration">保存区域与约束</button>
-              <button class="btn ghost" type="button" :disabled="taskId == null || pending || (taskStatus !== '' && taskStatus !== 'draft')" @click="bindSelectedIndicator">追加当前指标到任务（仅草稿）</button>
-              <button class="btn" type="button" :disabled="canRun('submit') === false" :title="stepBlockedReason('submit') || '提交任务'" data-action="submit" @click="submitTask">执行提交任务</button>
-              <button class="btn" type="button" :disabled="canRun('reverse') === false" :title="stepBlockedReason('reverse') || '需求反算'" data-action="reverse" @click="requirementReverse">执行需求反算</button>
-              <button class="btn" type="button" :disabled="canRun('candidates') === false" :title="stepBlockedReason('candidates') || '确认候选评分'" data-action="candidates" @click="confirmCandidates">执行候选评分</button>
-              <button class="btn" type="button" :disabled="canRun('basic') === false" :title="stepBlockedReason('basic') || '基础关联'" data-action="basic" @click="basicAssociation">执行基础关联</button>
-              <button class="btn" type="button" :disabled="canRun('optimize') === false" :title="stepBlockedReason('optimize') || '优化关联'" data-action="optimize" @click="optimizeAssociation">执行优化关联</button>
-              <button class="btn" type="button" :disabled="canRun('supplement') === false" :title="stepBlockedReason('supplement') || '增补关联'" data-action="supplement" @click="supplementAssociation">执行增补关联</button>
-              <button class="btn" type="button" :disabled="canRun('evaluate') === false" :title="stepBlockedReason('evaluate') || '满足度评估'" data-action="evaluate" @click="requirementEvaluation">执行满足度评估</button>
-              <button class="btn" type="button" :disabled="canRun('output') === false" :title="stepBlockedReason('output') || '规划输出'" data-action="output" @click="planningOutput">执行规划输出</button>
-              <button class="btn ghost" type="button" :disabled="taskId == null" @click="loadCandidates(true)">查看候选与评分</button>
-            </div>
+          <section v-else class="panel">
+            <h2>当前步骤结果与辅助操作</h2>
+            <details class="advanced-entry">
+              <summary><span><strong>步骤重跑</strong><small>仅在需要重新执行已完成步骤时使用</small></span><em>高级操作</em></summary>
+              <div class="advanced-entry-body">
+                <div class="advanced-operation-grid">
+                  <label>重跑步骤
+                    <select v-model="rerunStep">
+                      <option v-for="step in STEPS" :key="step.key" :value="step.key">{{ step.title }}</option>
+                    </select>
+                  </label>
+                  <button class="btn" type="button" :disabled="canRun(rerunStep) === false" :title="stepBlockedReason(rerunStep) || '执行所选步骤'" @click="runStepAction(rerunStep)">执行所选步骤</button>
+                  <label>任务维护
+                    <select v-model="maintenanceAction">
+                      <option value="save">保存区域与约束</option>
+                      <option value="bind">追加当前指标</option>
+                      <option value="candidates">查看候选与评分</option>
+                    </select>
+                  </label>
+                  <button class="btn ghost" type="button" :disabled="maintenanceActionDisabled" @click="runMaintenanceAction">执行所选操作</button>
+                </div>
+              </div>
+            </details>
             <p v-if="pending" class="hint">处理中，请勿重复点击…</p>
             <div v-if="hasTask" class="result-bar">
               <span>任务 #{{ taskId }}</span>
               <button class="btn" type="button" @click="openOnMap">在 GIS 查看</button>
             </div>
-            <div v-if="reverseSummary" class="panel soft" style="margin-top:0.8rem">
+            <div v-if="currentStep === 'reverse' && reverseSummary" class="panel soft" style="margin-top:0.8rem">
               <h3>需求反算结果（关联前）</h3>
               <p class="muted">可行性 {{ reverseSummary.feasibility }} · 可匹配 {{ reverseSummary.matched }} / 评估 {{ reverseSummary.evaluated }} · 建议平台数 {{ reverseSummary.recommendedTotal }}</p>
               <ul v-if="reverseSummary.recs.length" class="hint-list">
                 <li v-for="(r, i) in reverseSummary.recs" :key="'rr'+i">{{ r }}</li>
               </ul>
-              <table class="table" v-if="reverseSummary.estimates.length">
+              <table v-if="reverseSummary.estimates.length" v-table-pager="{ label: '需求反算结果分页' }" class="table">
                 <thead><tr><th>类型</th><th>可匹配</th><th>建议数</th><th>均分</th><th>Top平台</th></tr></thead>
                 <tbody>
                   <tr v-for="(e, i) in reverseSummary.estimates" :key="'re'+i">
@@ -2107,7 +2246,7 @@ async function clearMapLinks() {
                 <pre class="result-pre">{{ businessResultText(reverseResult, 3000) }}</pre>
               </details>
             </div>
-            <div v-if="evalResult" class="panel soft" style="margin-top:0.8rem">
+            <div v-if="currentStep === 'evaluate' && evalResult" class="panel soft" style="margin-top:0.8rem">
               <h3>{{ evaluationSummary && evaluationSummary.indicatorCount > 1 ? '多指标协同评估（关联后）' : '满足度评估摘要（关联后）' }}</h3>
               <ContextGuide
                 storage-key="newcity-planning-evaluation-guide"
@@ -2159,7 +2298,7 @@ async function clearMapLinks() {
                   <span>协作 {{ evaluationSummary.relationSummary.cooperation || 0 }}</span>
                 </div>
                 <div class="relation-list" v-if="evaluationSummary.relations.length">
-                  <article class="relation-item" v-for="(relation, index) in evaluationSummary.relations" :key="'relation' + index">
+                  <article class="relation-item" v-for="(relation, index) in pagedRelations" :key="'relation' + index">
                     <strong>{{ relation.left?.platformName || relation.left?.platformId }} ＋ {{ relation.right?.platformName || relation.right?.platformId }}</strong>
                     <div class="relation-modes">
                       <span class="relation-label" v-for="label in relation.modeLabels || []" :key="label">{{ label }}</span>
@@ -2171,26 +2310,33 @@ async function clearMapLinks() {
                     <p>{{ (relation.explanations || []).join('；') }}</p>
                   </article>
                 </div>
+                <CardPager v-model:page="relationPage" kind="records" :pages="relationPageLabels" :summary="`共 ${relationRows.length} 组`" label="资源关系分页" />
               </template>
               <details>
                 <summary>查看完整计算证据</summary>
                 <pre class="result-pre">{{ businessResultText(evalResult, 5000) }}</pre>
               </details>
             </div>
-            <div v-if="outputResult" class="panel soft" style="margin-top:0.8rem">
+            <div v-if="currentStep === 'output' && outputResult" class="panel soft" style="margin-top:0.8rem">
               <h3>规划输出摘要</h3>
-              <pre class="result-pre">{{ businessResultText(outputResult) }}</pre>
+              <p class="muted">规划输出已生成，完整计算结果按需展开。</p>
+              <details>
+                <summary>查看完整规划输出</summary>
+                <pre class="result-pre">{{ businessResultText(outputResult) }}</pre>
+              </details>
             </div>
           </section>
         </div>
       </section>
 
       <section v-if="tab === 'candidates'" class="panel">
-        <h2>候选传感器筛选 / 评分与解释</h2>
+        <div class="section-heading-actions">
+          <h2>候选传感器筛选 / 评分与解释</h2>
+          <button class="btn ghost tiny" type="button" :disabled="taskId == null" @click="loadCandidates(false)">刷新</button>
+        </div>
         <p class="muted">对应任务清单：候选筛选 + 评分与解释。流程中须在需求反算后确认本页，再进入基础关联。</p>
-        <button class="btn" type="button" :disabled="taskId == null" @click="loadCandidates(false)">刷新候选</button>
         <p class="muted" v-if="candidateMeta">候选数 {{ candidateMeta.candidateCount ?? candidateRows.length }} · 排除 {{ candidateMeta.excludedCount ?? '-' }}</p>
-        <table class="table" v-if="candidateRows.length">
+        <table v-if="candidateRows.length" v-table-pager="{ label: '候选资源分页' }" class="table">
           <thead>
             <tr>
               <th>平台</th>
@@ -2236,7 +2382,7 @@ async function clearMapLinks() {
       
         <h3 style="margin-top:1rem">排除列表（硬约束未通过）</h3>
         <p class="muted">展示被筛选掉的资源及原因，便于解释“为何未入选”。</p>
-        <table class="table" v-if="excludedRows.length">
+        <table v-if="excludedRows.length" v-table-pager="{ label: '排除资源分页' }" class="table">
           <thead><tr><th>平台</th><th>类型</th><th>排除原因</th></tr></thead>
           <tbody>
             <tr v-for="(c, idx) in excludedRows.slice(0, 30)" :key="'ex'+idx">
@@ -2252,7 +2398,8 @@ async function clearMapLinks() {
       <section v-if="tab === 'plans'" class="panel">
         <h2>规划方案管理</h2>
         <p class="muted">方案由任务关联流程生成；支持查看关联结果、复制草稿、审核、发布、归档与方案对比（文档：方案管理）。</p>
-        <table class="table">
+        <div v-if="planSectionPage === 1" class="plan-section-content">
+        <table v-table-pager="{ label: '规划方案分页' }" class="table">
           <thead><tr><th>ID</th><th>名称</th><th>任务</th><th>类型</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-if="!plans.length"><td colspan="6" class="muted">暂无方案。请先完成观测规划关联流程生成方案。</td></tr>
@@ -2263,16 +2410,21 @@ async function clearMapLinks() {
               <td>{{ p.planType || '-' }}</td>
               <td>{{ planStatusLabel(p.status) }}</td>
               <td class="ops">
-                <button class="btn ghost" type="button" @click.stop="loadPlanResult(p.id)">查看结果</button>
-                <button class="btn ghost" type="button" :disabled="pending" @click.stop="doCopyPlan(p.id)">复制</button>
-                <button class="btn ghost" type="button" :disabled="!canApprovePlanStatus(planLiveStatus(p.id, p.status)) || pending" :title="canApprovePlanStatus(planLiveStatus(p.id, p.status)) ? '审核通过' : '当前状态不可审核'" @click.stop="doApprovePlan(p.id, p.status)">审核</button>
-                <button class="btn ghost" type="button" :disabled="!canPublishPlanStatus(planLiveStatus(p.id, p.status)) || pending" :title="canPublishPlanStatus(planLiveStatus(p.id, p.status)) ? '发布方案' : '请先审核通过后再发布'" @click.stop="doPublishPlan(p.id, p.status)">发布</button>
-                <button class="btn ghost" type="button" :disabled="canByStatus(planLiveStatus(p.id, p.status), ['archived']) || pending" @click.stop="doArchivePlan(p.id, p.status)">归档</button>
+                <select class="table-action-select" :disabled="pending" aria-label="方案操作" @click.stop @change.stop="runPlanRowAction(p, $event)">
+                  <option value="">操作</option>
+                  <option value="result">查看结果</option>
+                  <option value="copy">复制为草稿</option>
+                  <option value="approve" :disabled="!canApprovePlanStatus(planLiveStatus(p.id, p.status))">审核</option>
+                  <option value="publish" :disabled="!canPublishPlanStatus(planLiveStatus(p.id, p.status))">发布</option>
+                  <option value="archive" :disabled="canByStatus(planLiveStatus(p.id, p.status), ['archived'])">归档</option>
+                </select>
               </td>
             </tr>
           </tbody>
         </table>
-        
+
+        </div>
+        <div v-else-if="planSectionPage === 2" class="plan-section-content">
         <h3>方案对比</h3>
         <p class="muted">选择两份方案，对比资源匹配集合与评分差异（文档：方案对比）。</p>
         <div class="form-row">
@@ -2316,7 +2468,7 @@ async function clearMapLinks() {
           </p>
 
           <h4>评分差异</h4>
-          <table class="table">
+          <table v-table-pager="{ label: '评分差异分页' }" class="table">
             <thead><tr><th>资源</th><th>左分</th><th>右分</th><th>差值</th></tr></thead>
             <tbody>
               <tr v-if="!planCompareList('scoreDiff').length"><td colspan="4" class="muted">无评分差异项</td></tr>
@@ -2330,7 +2482,7 @@ async function clearMapLinks() {
           </table>
 
           <h4>仅左侧资源</h4>
-          <table class="table">
+          <table v-table-pager="{ label: '左侧资源分页' }" class="table">
             <thead><tr><th>资源</th><th>评分</th><th>命中</th></tr></thead>
             <tbody>
               <tr v-if="!planCompareList('onlyLeft').length"><td colspan="3" class="muted">无</td></tr>
@@ -2343,7 +2495,7 @@ async function clearMapLinks() {
           </table>
 
           <h4>仅右侧资源</h4>
-          <table class="table">
+          <table v-table-pager="{ label: '右侧资源分页' }" class="table">
             <thead><tr><th>资源</th><th>评分</th><th>命中</th></tr></thead>
             <tbody>
               <tr v-if="!planCompareList('onlyRight').length"><td colspan="3" class="muted">无</td></tr>
@@ -2355,48 +2507,95 @@ async function clearMapLinks() {
             </tbody>
           </table>
         </div>
-
-        <div v-if="planResult" class="compare-card" style="margin-top:12px">
+        </div>
+        <div v-else class="plan-section-content">
+        <div v-if="planResult" class="compare-card">
           <h4>当前方案结果摘要</h4>
           <p>方案 #{{ asCompareObj(planResult).id || asCompareObj(planResult).planId || '-' }} · 状态 {{ planStatusLabel(asCompareObj(planResult).status) }}</p>
-          <p class="muted">完整 JSON 已折叠展示，便于核对：</p>
-          <pre class="result-pre">{{ businessResultText(planResult) }}</pre>
+          <details>
+            <summary>查看完整方案结果</summary>
+            <pre class="result-pre">{{ businessResultText(planResult) }}</pre>
+          </details>
         </div>
+        <div v-else class="empty-state">请先在“方案列表”中选择“查看结果”，结果摘要会在此显示。</div>
+        </div>
+        <CardPager v-model:page="planSectionPage" :pages="planSectionPages" label="规划方案内容分页" />
       </section>
     </template>
   </section>
 </template>
 
 <style scoped>
-.sticky-action {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0.4rem 0 0.75rem;
-}
-.sticky-action .btn {
-  flex-shrink: 0;
-  min-width: 140px;
-}
-.current-action-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .plan-head h1 { font-size: 16px; margin: 0.15rem 0; }
 .plan-map-actions.panel { padding: 0.45rem 0.55rem; }
+.planning-map-toolbar,
+.planning-task-picker {
+  display: grid;
+  gap: .55rem;
+  margin: .45rem 0 .65rem;
+  padding: .65rem;
+  border: 1px solid #e3e3e8;
+  border-radius: 12px;
+  background: #fff;
+}
+.planning-map-toolbar header,
+.planning-task-picker header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .6rem;
+}
+.planning-map-toolbar header strong,
+.planning-task-picker header strong { color: #1d1d1f; font-size: 12px; }
+.planning-map-toolbar header span,
+.planning-task-picker header span { color: #6e6e73; font-size: 9px; line-height: 1.4; text-align: right; }
+.planning-map-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: .45rem;
+}
+.planning-map-controls label { font-size: 10px; }
+.planning-map-controls select,
+.planning-task-picker select { min-width: 0; height: 32px; padding-top: 0; padding-bottom: 0; font-size: 10px; }
+.planning-map-controls .btn { min-height: 32px; padding: .35rem .75rem; font-size: 10px; }
+.planning-map-secondary,
+.planning-task-actions { display: flex; flex-wrap: wrap; gap: .35rem; }
+.planning-map-secondary { gap: .65rem; padding-top: .45rem; border-top: 1px solid #ededf0; }
+.planning-map-secondary button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #515154;
+  font: 500 10px/1.3 inherit;
+  cursor: pointer;
+}
+.planning-map-secondary button:hover { color: #0066cc; }
+.planning-task-actions .btn { min-height: 30px; padding: .3rem .55rem; font-size: 10px; }
+.planning-task-picker p { margin: 0; color: #6e6e73; font-size: 10px; line-height: 1.45; }
+.planning-context-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  margin: .45rem 0;
+  padding: .5rem .6rem;
+  border-radius: 10px;
+  background: #f5f5f7;
+}
+.planning-context-bar span { color: #515154; font-size: 10px; line-height: 1.4; }
+.planning-context-bar .btn { min-height: 30px; padding: .3rem .55rem; font-size: 10px; white-space: nowrap; }
+.section-heading-actions { display: flex; align-items: center; justify-content: space-between; gap: .55rem; }
+.section-heading-actions h2 { margin-bottom: 0; }
+.table-action-select { width: 84px; height: 30px; padding: 0 22px 0 8px; border-radius: 8px; font-size: 10px; }
 .task-code {
   width: fit-content;
   margin: 0;
   padding: 0.35rem 0.65rem;
-  border-left: 3px solid #39c6b3;
-  background: color-mix(in srgb, #39c6b3 12%, transparent);
+  border: 1px solid #e1e3e6;
+  border-radius: 8px;
+  background: #f6f7f8;
+  color: #515154;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   letter-spacing: 0.04em;
 }
@@ -2416,12 +2615,137 @@ async function clearMapLinks() {
   background: color-mix(in srgb, #39c6b3 9%, transparent);
 }
 .area-control p { margin: 0.25rem 0 0; }
-.stepper {
+.planning-workflow {
+  margin-bottom: 0.65rem;
+  overflow: hidden;
+}
+.planning-workflow-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.planning-workflow-head .eyebrow { margin: 0 0 0.08rem; font-size: 10px; }
+.planning-workflow-head h2 { margin: 0; font-size: 15px; }
+.planning-progress-count {
+  flex: 0 0 auto;
+  color: #68686d;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.pipeline-scroll {
+  max-width: 100%;
+  padding: 0 2px 0.25rem;
+}
+.planning-pipeline {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pipeline-phase {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 0.28rem;
+  min-width: 0;
+  color: #8e8e93;
+  text-align: center;
+}
+.pipeline-phase::before {
+  content: '';
+  position: absolute;
+  top: 13px;
+  right: 50%;
+  width: 100%;
+  height: 2px;
+  background: #dedee3;
+}
+.pipeline-phase:first-child::before { display: none; }
+.pipeline-phase.done::before,
+.pipeline-phase.current::before { background: #71b88b; }
+.pipeline-marker {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid #d7d7dc;
+  border-radius: 50%;
+  background: #fff;
+  color: #8e8e93;
+  font-size: 11px;
+  font-weight: 700;
+}
+.pipeline-phase.done .pipeline-marker { border-color: #2f8f5b; background: #2f8f5b; color: #fff; }
+.pipeline-phase.current .pipeline-marker { border-color: #c98619; background: #fff7e8; color: #9a6211; }
+.pipeline-copy { display: grid; gap: 0.02rem; }
+.pipeline-copy strong { color: #68686d; font-size: 10px; font-weight: 600; }
+.pipeline-copy small { font-size: 9px; line-height: 1.25; }
+.pipeline-phase.done .pipeline-copy strong { color: #246f48; }
+.pipeline-phase.current .pipeline-copy strong { color: #8b5a12; }
+.step-page-card {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 32px;
+  align-items: stretch;
+  gap: 0.45rem;
+  min-height: 148px;
+  padding: 0.62rem;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: #f6f7f8;
+}
+.step-page-card.completed { background: #f3f8f5; }
+.step-page-button {
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #d7d7dc;
+  border-radius: 10px;
+  background: #fff;
+  color: #3a3a3c;
+  font: 22px/1 Arial, sans-serif;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+.step-page-button:hover:not(:disabled) {
+  border-color: #9bc7f3;
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+.step-page-button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.step-page-button:disabled { background: #f1f1f3; color: #c7c7cc; cursor: not-allowed; }
+.step-page-content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.step-page-meta {
+  display: flex;
+  width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
   gap: 0.35rem;
-  max-height: min(42vh, 360px);
-  overflow: auto;
+  color: #77777c;
+  font-size: 10px;
+}
+.step-state { color: #246f48; }
+.step-page-content h3 { margin: 0.35rem 0 0.12rem; color: #1d1d1f; font-size: 14px; }
+.step-page-content > p { margin: 0; color: #68686d; font-size: 11px; line-height: 1.45; }
+.step-page-content .step-page-message { margin-top: 0.42rem; }
+.step-primary-action {
+  min-width: 128px;
+  margin-top: auto;
+  padding: 0.42rem 0.75rem;
+  font-size: 11px;
 }
 .ops { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 .result-bar {
@@ -2431,6 +2755,18 @@ async function clearMapLinks() {
   gap: 0.5rem;
   margin-top: 0.6rem;
 }
+.advanced-operation-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.55rem;
+}
+.advanced-operation-grid label { display: grid; gap: 0.2rem; min-width: 0; color: #515154; font-size: 10px; }
+.advanced-operation-grid select { min-width: 0; height: 32px; padding-block: 0; font-size: 10px; }
+.advanced-operation-grid .btn { min-height: 32px; white-space: nowrap; }
+.task-time-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; }
+.task-time-grid label { min-width: 0; }
+.task-time-grid input { min-width: 0; font-size: 10px; }
 .collaboration-metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -2441,21 +2777,21 @@ async function clearMapLinks() {
   display: grid;
   gap: 0.12rem;
   padding: 0.65rem;
-  border: 1px solid #d9e3e1;
-  border-left: 3px solid #78918d;
-  background: #fff;
+  border: 1px solid #e1e3e6;
+  border-radius: 10px;
+  background: #f6f7f8;
 }
-.collaboration-metrics article.primary-metric { border-left-color: #0d756b; background: #eff7f5; }
-.collaboration-metrics article.warning { border-left-color: #b47b1c; background: #fff8ec; }
-.collaboration-metrics span, .collaboration-metrics small { color: #687b78; font-size: 10px; }
-.collaboration-metrics strong { color: #173f43; font-size: 16px; font-variant-numeric: tabular-nums; }
+.collaboration-metrics article.primary-metric { border-color: #e1e3e6; background: #f6f7f8; }
+.collaboration-metrics article.warning { border-color: #ead3a7; background: #fff8eb; }
+.collaboration-metrics span, .collaboration-metrics small { color: #6e6e73; font-size: 10px; }
+.collaboration-metrics strong { color: #3a3a3c; font-size: 15px; font-variant-numeric: tabular-nums; }
 .coverage-alignment { margin: 0.55rem 0; }
-.coverage-band { display: flex; height: 12px; overflow: hidden; border: 1px solid #b9c9c6; background: #edf1f0; }
+.coverage-band { display: flex; height: 12px; overflow: hidden; border: 1px solid #d2d2d7; background: #f1f1f3; }
 .coverage-band i { display: block; height: 100%; }
-.coverage-alignment .common { background: #0d756b; }
+.coverage-alignment .common { background: var(--brand); }
 .coverage-alignment .misaligned { background: #d49a3a; }
-.coverage-alignment .uncovered { background: #dfe6e4; }
-.coverage-alignment p { display: flex; flex-wrap: wrap; gap: 0.55rem; margin: 0.28rem 0 0; color: #687b78; font-size: 10px; }
+.coverage-alignment .uncovered { background: #d2d2d7; }
+.coverage-alignment p { display: flex; flex-wrap: wrap; gap: 0.55rem; margin: 0.28rem 0 0; color: #6e6e73; font-size: 10px; }
 .coverage-alignment p span { display: inline-flex; align-items: center; gap: 0.2rem; }
 .coverage-alignment p i { width: 8px; height: 8px; border: 1px solid rgba(23, 63, 67, 0.15); }
 .collaboration-reasons { margin: 0.45rem 0; }
@@ -2465,22 +2801,24 @@ async function clearMapLinks() {
   width: max-content;
   margin-right: 0.2rem;
   padding: 0.18rem 0.4rem;
-  border: 1px solid #c8d9d6;
-  background: #f3f8f7;
-  color: #315e5a;
+  border: 1px solid #b7d7f7;
+  background: var(--brand-soft);
+  color: var(--brand-dark);
   font-size: 10px;
 }
 .relation-list { display: grid; gap: 0.45rem; margin-top: 0.55rem; }
-.relation-item { padding: 0.55rem 0.6rem; border: 1px solid #d9e3e1; background: #fff; }
-.relation-item > strong { display: block; color: #173f43; font-size: 12px; line-height: 1.45; }
+.relation-item { padding: 0.55rem 0.6rem; border: 1px solid #e1e3e6; border-radius: 10px; background: #f6f7f8; }
+.relation-item > strong { display: block; color: #3a3a3c; font-size: 12px; line-height: 1.45; }
 .relation-modes { display: flex; flex-wrap: wrap; gap: 0.25rem; margin: 0.35rem 0; }
 .relation-modes .relation-label { margin-right: 0; }
 .relation-item dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; margin: 0; }
-.relation-item dl div { display: flex; align-items: baseline; justify-content: space-between; gap: 0.35rem; padding-top: 0.3rem; border-top: 1px solid #e6ecea; }
-.relation-item dt { color: #687b78; font-size: 10px; }
-.relation-item dd { margin: 0; color: #173f43; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.relation-item p { margin: 0.4rem 0 0; color: #536966; font-size: 11px; line-height: 1.55; }
+.relation-item dl div { display: flex; align-items: baseline; justify-content: space-between; gap: 0.35rem; padding-top: 0.3rem; border-top: 1px solid #e1e3e6; }
+.relation-item dt { color: #6e6e73; font-size: 10px; }
+.relation-item dd { margin: 0; color: #3a3a3c; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.relation-item p { margin: 0.4rem 0 0; color: #515154; font-size: 11px; line-height: 1.55; }
 @media (max-width: 760px) {
   .area-control { align-items: stretch; flex-direction: column; }
+  .step-page-card { grid-template-columns: 30px minmax(0, 1fr) 30px; gap: 0.4rem; padding: 0.55rem; }
+  .step-page-button { width: 30px; height: 30px; }
 }
 </style>

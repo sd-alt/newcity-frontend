@@ -6,6 +6,7 @@ import MapBasemap from './MapBasemap.vue'
 import AssistantPanel from './AssistantPanel.vue'
 import WorkspaceGuide from './WorkspaceGuide.vue'
 import {
+  getShellLayerProfile,
   reloadShellLayers,
   selectShellFeature,
   updateShellBubbleScreen,
@@ -31,12 +32,18 @@ const router = useRouter()
 const leftOpen = ref(true)
 // right panel state lives in mapShell (shared with map toolbar)
 const rightOpen = shellRightOpen
-const leftWidth = ref(340)
+const leftWidth = ref(window.innerWidth >= 1440 ? 440 : 360)
 const userMenuOpen = ref(false)
 const searchQ = ref('')
 const searchOpen = ref(false)
 const searchLoading = ref(false)
-const drawerTab = ref<'basic' | 'spatial' | 'relations' | 'status'>('basic')
+type DrawerTabKey = 'overview' | 'spatial' | 'relations'
+const DRAWER_TABS: Array<{ key: DrawerTabKey; label: string }> = [
+  { key: 'overview', label: '概览' },
+  { key: 'spatial', label: '空间' },
+  { key: 'relations', label: '关联' },
+]
+const drawerTab = ref<DrawerTabKey>('overview')
 const detailEditing = ref(false)
 const detailLoading = ref(false)
 const detailSaving = ref(false)
@@ -118,7 +125,7 @@ type CenterItem = {
   key: string
   label: string
   short: string
-  icon: string
+  description: string
   to: string
   defaultTab: string
   children: SubItem[]
@@ -129,7 +136,7 @@ const centers: CenterItem[] = [
     key: 'tasks',
     label: '任务中心',
     short: '任务中心',
-    icon: '任',
+    description: '指标与任务管理',
     to: '/tasks',
     defaultTab: 'systems',
     children: [
@@ -143,13 +150,12 @@ const centers: CenterItem[] = [
     key: 'resources',
     label: '资源中心',
     short: '资源中心',
-    icon: '资',
+    description: '资源与数据管理',
     to: '/resources/sensors',
     defaultTab: 'crud',
     children: [
       { key: 'sensor-types', label: '传感器类型', to: '/resources/sensors', tab: 'types' },
       { key: 'sensors', label: '传感器资源', to: '/resources/sensors', tab: 'crud' },
-      { key: 'octuple', label: '传感器详情', to: '/resources/metadata' },
       { key: 'observations', label: '观测数据库', to: '/resources/data', tab: 'query' },
       { key: 'data-sources', label: '数据接入', to: '/resources/data', tab: 'sources' },
       { key: 'algorithms', label: '算法模型与服务', to: '/resources/algorithms', tab: 'models' },
@@ -160,7 +166,7 @@ const centers: CenterItem[] = [
     key: 'business',
     label: '业务中心',
     short: '业务中心',
-    icon: '业',
+    description: '方案与执行管理',
     to: '/business',
     defaultTab: 'tasks',
     children: [
@@ -175,7 +181,7 @@ const centers: CenterItem[] = [
     key: 'application',
     label: '应用中心',
     short: '应用中心',
-    icon: '应',
+    description: '场景与地图应用',
     to: '/application/tasks',
     defaultTab: 'agent-tasks',
     children: [
@@ -203,9 +209,14 @@ const pageLabel = computed(() => {
 })
 
 const subItems = computed(() => activeCenter.value?.children || [])
+const sensorProfileId = computed(() =>
+  route.path === '/resources/sensors' && typeof route.query.sensorId === 'string'
+    ? route.query.sensorId
+    : '',
+)
 
 const activeSubKey = computed(() => {
-  const q = String(route.query.tab || '')
+  const q = String(route.query.tab || activeCenter.value?.defaultTab || '')
   const exact = subItems.value.find((s) => s.to === route.path && (s.tab == null || s.tab === q))
   if (exact) return exact.key
   const byPath = subItems.value.find((s) => s.to === route.path)
@@ -224,13 +235,9 @@ watch(
   },
 )
 
-// 仅中心路径切换时重载底图业务图层，避免二级菜单切换清空关联线/高亮
+// 路由只切换业务图层可见性并按需补载；保留 Cesium 实例、视角和已加载的无关图层。
 watch(
-  () => {
-    const path = route.path
-    const tab = String(route.query.tab || '')
-    return path.startsWith('/gis') ? path + '::' + tab : path
-  },
+  () => getShellLayerProfile(route.path, { tab: String(route.query.tab || '') }),
   async () => {
     // 切换中心时退出测距/绘制，避免工具状态串台
     try {
@@ -240,16 +247,31 @@ watch(
     } catch {
       /* optional */
     }
-    await reloadShellLayers(route.path, { tab: String(route.query.tab || '') })
+    await reloadShellLayers(
+      route.path,
+      { tab: String(route.query.tab || '') },
+      { preserveExisting: true },
+    )
+  },
+  { immediate: true },
+)
+
+watch(
+  sensorProfileId,
+  (id) => {
+    if (id) {
+      closeShellRight()
+      leftOpen.value = true
+    }
   },
   { immediate: true },
 )
 
 watch(shellSelected, (v) => {
   detailEditing.value = false
-  if (v) {
+  if (v && shellBubbleOpen.value) {
     openShellRight()
-    drawerTab.value = 'basic'
+    drawerTab.value = 'overview'
   }
 })
 
@@ -449,7 +471,7 @@ async function beginDetailEdit() {
       indicatorInstanceIds: [...detailEditForm.value.indicatorInstanceIds],
     }
     detailEditing.value = true
-    drawerTab.value = 'basic'
+    drawerTab.value = 'overview'
   } catch (error) {
     toast.error(errMessage(error, '无法加载可编辑信息'))
   } finally {
@@ -580,7 +602,7 @@ watch(rightOpen, () => {
 function toggleLeft() {
   leftOpen.value = !leftOpen.value
 }
-function closeRight() {
+async function closeRight() {
   closeShellRight()
 }
 
@@ -588,7 +610,7 @@ function onLeftResize(ev: MouseEvent) {
   const startX = ev.clientX
   const startW = leftWidth.value
   function move(e: MouseEvent) {
-    leftWidth.value = Math.min(460, Math.max(280, startW + (e.clientX - startX)))
+    leftWidth.value = Math.min(520, Math.max(320, startW - (e.clientX - startX)))
   }
   function up() {
     window.removeEventListener('mousemove', move)
@@ -629,9 +651,125 @@ function kindLabel(kind: ShellFeatureKind) {
   return kind
 }
 
+type DrawerDetailRow = { label: string; value: string }
+
+const detailLabelMap: Record<string, string> = {
+  platformId: '平台 ID',
+  taskId: '任务 ID',
+  instanceId: '指标实例 ID',
+  sensorId: '传感器 ID',
+  identifier: '资源标识',
+  '平台ID': '平台 ID',
+  '任务ID': '任务 ID',
+  '数据ID': '数据 ID',
+  '实例ID': '实例 ID',
+  '定义ID': '定义 ID',
+  '指标实例ID': '指标实例 ID',
+}
+
+function detailRows(value: unknown): DrawerDetailRow[] {
+  const valueLabels: Record<string, string> = {
+    manual: '人工规划',
+    monitoring: '持续监测',
+    assistant: 'AI 助手创建',
+  }
+  const seen = new Set<string>()
+  const rows: DrawerDetailRow[] = []
+  for (const rawLine of String(value || '').replace(/<br\s*\/?>/gi, '\n').split('\n')) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const matched = line.match(/^([^:：]{1,24})[:：]\s*(.*)$/)
+    const rawLabel = matched?.[1]?.trim() || '说明'
+    const label = detailLabelMap[rawLabel] || rawLabel
+    const rawValue = matched?.[2]?.trim() || line
+    const fieldValue = label === '类型' ? valueLabels[rawValue.toLowerCase()] || rawValue : rawValue
+    if (!fieldValue || /wkt|geometry/i.test(label)) continue
+    const key = `${label}:${fieldValue}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    rows.push({ label, value: fieldValue })
+  }
+  return rows
+}
+
+const drawerStatusText = computed(() => {
+  const raw = String(shellSelected.value?.status || '').trim()
+  const labels: Record<string, string> = {
+    active: '启用',
+    enabled: '启用',
+    online: '在线',
+    normal: '正常',
+    submitted: '已提交',
+    published: '已发布',
+    completed: '已完成',
+    complete: '已完成',
+    finished: '已完成',
+    draft: '草稿',
+    created: '已创建',
+    unchecked: '未检查',
+    warning: '预警',
+    anomaly: '异常',
+    inactive: '停用',
+    offline: '离线',
+    failed: '失败',
+    fault: '故障',
+    cancelled: '已取消',
+  }
+  return labels[raw.toLowerCase()] || raw || '状态未知'
+})
+
+const drawerStatusTone = computed(() => {
+  const status = String(shellSelected.value?.status || '').toLowerCase()
+  if (/fail|fault|error|anomaly|异常|故障|失败|cancel/.test(status)) return 'danger'
+  if (/warning|warn|offline|inactive|unchecked|维护|预警|离线|停用|未检查/.test(status)) return 'warning'
+  if (/active|enabled|online|normal|submitted|published|complete|finished|启用|在线|正常|提交|发布|完成/.test(status)) return 'success'
+  return 'neutral'
+})
+
+const drawerOverviewRows = computed(() => {
+  const hiddenLabels = /^(状态|质量|位置|空间位置|空间范围|任务区域|覆盖范围)$/
+  return detailRows(shellSelected.value?.description).filter((row) => !hiddenLabels.test(row.label))
+})
+
+const drawerRelationRows = computed(() => {
+  const hiddenLabels = /^(状态|质量|位置|空间位置|空间范围|任务区域|覆盖范围)$/
+  return detailRows(shellSelected.value?.relations).filter((row) => !hiddenLabels.test(row.label))
+})
+
+const drawerSpatialReady = computed(() => Boolean(String(shellSelected.value?.spatial || '').trim()))
+
+const selectedCenterActionLabel = computed(() => {
+  const kind = shellSelected.value?.kind
+  if (kind === 'sensor') return '打开资源管理'
+  if (kind === 'data') return '打开数据管理'
+  if (kind === 'task') return '打开任务规划'
+  if (kind === 'indicator') return '打开指标配置'
+  return '打开业务页面'
+})
+
+function setDrawerTab(tab: DrawerTabKey) {
+  drawerTab.value = tab
+}
+
+function onDrawerTabKeydown(event: KeyboardEvent, index: number) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  let targetIndex = index
+  if (event.key === 'Home') targetIndex = 0
+  else if (event.key === 'End') targetIndex = DRAWER_TABS.length - 1
+  else if (event.key === 'ArrowLeft') targetIndex = (index - 1 + DRAWER_TABS.length) % DRAWER_TABS.length
+  else targetIndex = (index + 1) % DRAWER_TABS.length
+  const target = DRAWER_TABS[targetIndex]
+  if (!target) return
+  setDrawerTab(target.key)
+  requestAnimationFrame(() => document.getElementById(`drawer-tab-${target.key}`)?.focus())
+}
+
 async function jumpSelectedCenter() {
   const s = shellSelected.value
   if (!s) return
+  closeShellRight()
+  leftOpen.value = true
   if (s.kind === 'sensor') await router.push({ path: '/resources/sensors', query: { tab: 'crud' } })
   else if (s.kind === 'data') await router.push({ path: '/resources/data', query: { tab: 'query' } })
   else if (s.kind === 'task') await router.push({ path: '/business', query: { tab: 'tasks' } })
@@ -793,27 +931,21 @@ async function doLogout() {
     :class="{
       'left-closed': !leftOpen,
       'right-open': rightOpen,
+      'workspace-open': leftOpen && !rightOpen,
     }"
-    :style="{ '--left-w': leftOpen ? leftWidth + 'px' : '0px' }"
+    :style="{ '--left-w': leftOpen ? leftWidth + 'px' : '0px', '--drawer-w': leftWidth + 'px' }"
   >
     <header class="topbar">
       <div class="topbar-left">
         <span class="brand-mark" aria-hidden="true"></span>
         <button type="button" class="sys-name" title="返回首页" @click="goHome">地学传感网智能感知服务系统</button>
-        <span class="topbar-sep">/</span>
-        <span class="topbar-center-label">{{ currentCenterLabel }}</span>
-        <span class="topbar-sep topbar-page-sep">/</span>
-        <span class="topbar-page">{{ pageLabel }}</span>
+        <template v-if="!leftOpen">
+          <span class="topbar-sep">/</span>
+          <span class="topbar-page">{{ currentCenterLabel }} · {{ pageLabel }}</span>
+        </template>
       </div>
 
       <div class="topbar-search">
-        <input
-          v-model="searchQ"
-          type="search"
-          placeholder="搜索地点、指标、传感器、任务、方案或数据"
-          @keydown.enter="runSearch"
-          @focus="searchOpen = searchGroups.length > 0"
-        />
         <button
           type="button"
           class="topbar-search-btn"
@@ -825,6 +957,13 @@ async function doLogout() {
         >
           <span aria-hidden="true"></span>
         </button>
+        <input
+          v-model="searchQ"
+          type="search"
+          placeholder="搜索地点、指标、传感器、任务、方案或数据"
+          @keydown.enter="runSearch"
+          @focus="searchOpen = searchGroups.length > 0"
+        />
         <div v-if="searchOpen" class="search-pop">
           <div class="search-pop-scroll">
             <div v-if="!searchGroups.length" class="muted tiny-pad">无匹配结果</div>
@@ -873,42 +1012,44 @@ async function doLogout() {
 
     <!-- section -->
     <aside class="left-rail" aria-label="中心导航">
-      <button
-        v-for="c in centers"
-        :key="c.key"
-        type="button"
-        class="rail-item"
-        :class="{ active: activeCenter?.key === c.key }"
-        :aria-current="activeCenter?.key === c.key ? 'page' : undefined"
-        :title="c.label"
-        @click="goCenter(c)"
-      >
-        <span class="rail-icon">{{ c.icon }}</span>
-        <span class="rail-text">{{ c.short }}</span>
-      </button>
+      <div v-for="c in centers" :key="c.key" class="rail-group">
+        <button
+          type="button"
+          class="rail-item"
+          :class="{ active: activeCenter?.key === c.key }"
+          :aria-expanded="activeCenter?.key === c.key"
+          :title="c.label"
+          @click="goCenter(c)"
+        >
+          <span class="rail-dot" aria-hidden="true"></span>
+          <span class="rail-copy">
+            <strong>{{ c.short }}</strong>
+            <small>{{ c.description }}</small>
+          </span>
+          <span class="rail-chevron" aria-hidden="true">›</span>
+        </button>
+
+        <div v-if="activeCenter?.key === c.key" class="rail-subnav" :aria-label="c.label + '功能'">
+          <button
+            v-for="s in c.children"
+            :key="s.key"
+            type="button"
+            class="rail-subitem"
+            :class="{ active: activeSubKey === s.key }"
+            :aria-current="activeSubKey === s.key ? 'page' : undefined"
+            @click="goSub(s.key)"
+          >
+            {{ s.label }}
+          </button>
+        </div>
+      </div>
     </aside>
 
     <!-- section -->
-    <aside v-show="leftOpen" class="left-panel" :style="{ width: leftWidth + 'px' }">
+    <aside v-show="leftOpen && !rightOpen" class="left-panel" :style="{ width: leftWidth + 'px' }">
       <div class="left-panel-head">
-        <div>
-          <div class="left-kicker">业务面板</div>
-          <strong>{{ currentCenterLabel }}</strong>
-        </div>
-        <button type="button" class="btn ghost tiny" @click="toggleLeft">收起</button>
-      </div>
-
-      <div v-if="subItems.length" class="left-subs">
-        <button
-          v-for="s in subItems"
-          :key="s.key"
-          type="button"
-          class="left-sub"
-          :class="{ active: activeSubKey === s.key }"
-          @click="goSub(s.key)"
-        >
-          {{ s.label }}
-        </button>
+        <span>{{ pageLabel }}</span>
+        <button type="button" class="btn ghost tiny" @click="toggleLeft">收起面板</button>
       </div>
 
       <div class="left-body">
@@ -928,8 +1069,11 @@ async function doLogout() {
     <aside class="detail-drawer" :class="{ open: rightOpen }">
       <div class="drawer-head">
         <div>
-          <span class="drawer-kicker">地图对象</span>
-          <strong>{{ detailEditing ? '编辑信息' : '对象详情' }}</strong>
+          <span class="drawer-kicker">地图对象详情</span>
+          <strong>
+            <template v-if="shellSelected">{{ detailEditing ? `编辑${kindLabel(shellSelected.kind)}` : kindLabel(shellSelected.kind) }}</template>
+            <template v-else>对象详情</template>
+          </strong>
         </div>
         <div class="drawer-head-actions">
           <button
@@ -938,7 +1082,7 @@ async function doLogout() {
             class="btn ghost tiny"
             :disabled="detailLoading"
             @click="beginDetailEdit"
-          >{{ detailLoading ? '加载中' : '编辑' }}</button>
+          >{{ detailLoading ? '加载中' : '编辑资料' }}</button>
           <button type="button" class="icon-btn drawer-close" title="关闭详情" aria-label="关闭详情" @click="closeRight">×</button>
         </div>
       </div>
@@ -1036,26 +1180,99 @@ async function doLogout() {
             </div>
           </form>
           <template v-else>
-          <div class="drawer-tabs">
-            <span :class="{ on: drawerTab === 'basic' }" role="button" tabindex="0" @click="drawerTab = 'basic'">基本信息</span>
-            <span :class="{ on: drawerTab === 'spatial' }" role="button" tabindex="0" @click="drawerTab = 'spatial'">空间信息</span>
-            <span :class="{ on: drawerTab === 'relations' }" role="button" tabindex="0" @click="drawerTab = 'relations'">关联关系</span>
-            <span :class="{ on: drawerTab === 'status' }" role="button" tabindex="0" @click="drawerTab = 'status'">状态</span>
-          </div>
-          <div class="drawer-meta">{{ kindLabel(shellSelected.kind) }} · ID {{ shellSelected.id }}</div>
-          <h3>{{ shellSelected.name }}</h3>
-          <pre v-if="drawerTab === 'basic'" class="drawer-pre">{{ shellSelected.description || '暂无描述' }}</pre>
-          <div v-else-if="drawerTab === 'spatial'" class="drawer-pre">
-            {{ shellSelected.spatial ? '空间位置已加载，可通过地图定位、缩放和图层查看。' : '暂无空间信息，请在对应业务中心使用地图绘制补充。' }}
-          </div>
-          <pre v-else-if="drawerTab === 'relations'" class="drawer-pre">{{ shellSelected.relations || '暂无关联关系' }}</pre>
-          <pre v-else class="drawer-pre">{{ shellSelected.status || '状态未知' }}
+            <div class="drawer-view">
+              <section class="drawer-summary" aria-labelledby="drawer-object-name">
+                <div class="drawer-summary-top">
+                  <div class="drawer-object-identity">
+                    <span class="drawer-object-mark" aria-hidden="true">{{ kindLabel(shellSelected.kind).slice(0, 1) }}</span>
+                    <div>
+                      <span class="drawer-meta">{{ kindLabel(shellSelected.kind) }} · ID {{ shellSelected.id }}</span>
+                      <h2 id="drawer-object-name">{{ shellSelected.name }}</h2>
+                    </div>
+                  </div>
+                  <span class="drawer-status" :class="drawerStatusTone">
+                    <i aria-hidden="true"></i>{{ drawerStatusText }}
+                  </span>
+                </div>
+                <div class="drawer-summary-facts">
+                  <span><small>空间</small><strong>{{ drawerSpatialReady ? '已加载' : '未配置' }}</strong></span>
+                  <span><small>关联</small><strong>{{ drawerRelationRows.length ? '已记录' : '暂无' }}</strong></span>
+                </div>
+              </section>
 
-{{ shellSelected.description || '' }}</pre>
-          <div class="drawer-actions">
-            <button type="button" class="btn" @click="jumpSelectedCenter">跳转业务中心</button>
-            <button type="button" class="btn ghost" @click="reflySelected">地图定位</button>
-          </div>
+              <div class="drawer-tabs" role="tablist" aria-label="对象详情分类">
+                <button
+                  v-for="(item, index) in DRAWER_TABS"
+                  :id="`drawer-tab-${item.key}`"
+                  :key="item.key"
+                  type="button"
+                  role="tab"
+                  :class="{ on: drawerTab === item.key }"
+                  :aria-selected="drawerTab === item.key"
+                  :aria-controls="`drawer-panel-${item.key}`"
+                  :tabindex="drawerTab === item.key ? 0 : -1"
+                  @click="setDrawerTab(item.key)"
+                  @keydown="onDrawerTabKeydown($event, index)"
+                >{{ item.label }}</button>
+              </div>
+
+              <section
+                v-if="drawerTab === 'overview'"
+                id="drawer-panel-overview"
+                class="drawer-tab-panel"
+                role="tabpanel"
+                aria-labelledby="drawer-tab-overview"
+              >
+                <h3>对象信息</h3>
+                <dl v-if="drawerOverviewRows.length" class="drawer-detail-list">
+                  <div v-for="row in drawerOverviewRows" :key="`${row.label}-${row.value}`">
+                    <dt>{{ row.label }}</dt>
+                    <dd>{{ row.value }}</dd>
+                  </div>
+                </dl>
+                <p v-else class="drawer-empty-state">暂未提供可展示的对象信息。</p>
+              </section>
+
+              <section
+                v-else-if="drawerTab === 'spatial'"
+                id="drawer-panel-spatial"
+                class="drawer-tab-panel"
+                role="tabpanel"
+                aria-labelledby="drawer-tab-spatial"
+              >
+                <h3>空间信息</h3>
+                <div class="drawer-spatial-state" :class="{ ready: drawerSpatialReady }">
+                  <strong>{{ drawerSpatialReady ? '空间位置已加载' : '暂未配置空间位置' }}</strong>
+                  <p>{{ drawerSpatialReady ? '当前对象已在地图中选中，可使用下方按钮重新定位。' : '请进入对应业务页面，使用地图绘制或位置配置补充。' }}</p>
+                </div>
+                <dl class="drawer-detail-list">
+                  <div><dt>地图状态</dt><dd>{{ drawerSpatialReady ? '已选中并高亮' : '无可定位范围' }}</dd></div>
+                  <div><dt>查看方式</dt><dd>缩放地图或切换业务图层</dd></div>
+                </dl>
+              </section>
+
+              <section
+                v-else
+                id="drawer-panel-relations"
+                class="drawer-tab-panel"
+                role="tabpanel"
+                aria-labelledby="drawer-tab-relations"
+              >
+                <h3>关联信息</h3>
+                <dl v-if="drawerRelationRows.length" class="drawer-detail-list">
+                  <div v-for="row in drawerRelationRows" :key="`${row.label}-${row.value}`">
+                    <dt>{{ row.label }}</dt>
+                    <dd>{{ row.value }}</dd>
+                  </div>
+                </dl>
+                <p v-else class="drawer-empty-state">当前对象暂无关联记录。</p>
+              </section>
+
+              <div class="drawer-actions">
+                <button type="button" class="btn ghost" @click="jumpSelectedCenter">{{ selectedCenterActionLabel }}</button>
+                <button type="button" class="btn" :disabled="!drawerSpatialReady" @click="reflySelected">地图定位</button>
+              </div>
+            </div>
           </template>
         </template>
         <template v-else>

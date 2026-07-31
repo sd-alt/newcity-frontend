@@ -8,7 +8,6 @@ import PlanningCenter from '../pages/PlanningCenter.vue'
 import AlgorithmsCenter from '../pages/AlgorithmsCenter.vue'
 import ApplicationsCenter from '../pages/ApplicationsCenter.vue'
 import TaskCenterView from '../pages/TaskCenterView.vue'
-import SensorMetadataView from '../pages/SensorMetadataView.vue'
 import ResourceKnowledgeView from '../pages/ResourceKnowledgeView.vue'
 import BusinessExecutionView from '../pages/BusinessExecutionView.vue'
 import AgentTaskWorkspace from '../pages/AgentTaskWorkspace.vue'
@@ -25,7 +24,13 @@ const router = createRouter({
         { path: '', name: 'home', component: HomeView, meta: { requiresAuth: true } },
         { path: 'tasks', name: 'task-center', component: TaskCenterView, meta: { requiresAuth: true } },
         { path: 'resources/sensors', name: 'resource-sensors', component: ResourcesCenter, meta: { requiresAuth: true } },
-        { path: 'resources/metadata', name: 'resource-metadata', component: SensorMetadataView, meta: { requiresAuth: true } },
+        {
+          path: 'resources/metadata',
+          redirect: (to) => ({
+            name: 'resource-sensors',
+            query: { ...to.query, tab: 'crud' },
+          }),
+        },
         { path: 'resources/data', name: 'resource-data', component: DataCenter, meta: { requiresAuth: true } },
         { path: 'resources/algorithms', name: 'resource-algorithms', component: AlgorithmsCenter, meta: { requiresAuth: true } },
         { path: 'resources/knowledge', name: 'resource-knowledge', component: ResourceKnowledgeView, meta: { requiresAuth: true } },

@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
+import CardPager from '../components/CardPager.vue'
 import {
   applyShellDataQualityFilter,
   reloadShellLayers,
@@ -20,6 +21,7 @@ import {
 import { mapDrawGeometry } from '../gis/mapTools'
 import { wktToGeoJson, type SimpleGeometry } from '../gis/wkt'
 import { canByStatus, errMessage, isoNow, pickId } from '../utils/errors'
+import { tablePager as vTablePager } from '../utils/tablePager'
 
 const route = useRoute()
 const router = useRouter()
@@ -42,8 +44,19 @@ const qDatasetId = ref('')
 const qPlatformId = ref('')
 const queryServerHits = ref<Record<string, unknown>[]>([])
 const queryPage = ref(1)
-const queryPageSize = ref(20)
+const queryPageSize = ref(4)
 const queryTotal = ref(0)
+const serverQueryActive = ref(false)
+const crudPage = ref(1)
+const sourcePage = ref(1)
+const editingDataId = ref('')
+const editingSourceId = ref('')
+const queryViewPage = ref(1)
+const vizPage = ref(1)
+const crudPages = computed(() => ['数据集', editingDataId.value ? '编辑监测数据' : '新增监测数据', '监测数据列表'])
+const sourcePages = computed(() => ['通道说明', editingSourceId.value ? '编辑数据源基础' : '数据源基础', '鉴权与参数', '数据源管理', '即时拉取', '定时接入', '接入状态', '接入审计', '文件信息', '导入设置', '导入任务'])
+const queryViewPages = ['查询条件', '查询结果']
+const vizPages = ['时间与上图', '数据概览', '质量分布']
 
 const datasetForm = ref({ code: '', name: '' })
 const dataForm = ref({
@@ -154,6 +167,8 @@ const timeCursor = ref(0)
 const timeWindowHours = ref(24)
 const timePlaying = ref(false)
 const timeFilterActive = ref(false)
+const mapDisplayMode = ref<'all' | 'heat' | 'points'>('all')
+const mapQualityFilter = ref('')
 let timePlayTimer: number | null = null
 
 function stopTimePlayback() {
@@ -270,7 +285,7 @@ const tabs = [
 ]
 
 const filtered = computed(() => {
-  const base = queryServerHits.value.length ? queryServerHits.value : dataList.value
+  const base = serverQueryActive.value ? queryServerHits.value : dataList.value
   return base.filter((d) => {
     const okQ = q.value === '' || JSON.stringify(d).includes(q.value)
     const okType = qType.value === '' || String(d.dataType || '') === qType.value
@@ -280,6 +295,12 @@ const filtered = computed(() => {
     return okQ && okType && okQlt && okDs && okPl
   })
 })
+const dataQueryCount = computed(() => serverQueryActive.value ? queryTotal.value : filtered.value.length)
+const dataQueryPageCount = computed(() => Math.max(1, Math.ceil(dataQueryCount.value / queryPageSize.value)))
+const displayedData = computed(() => serverQueryActive.value
+  ? filtered.value
+  : filtered.value.slice((queryPage.value - 1) * queryPageSize.value, queryPage.value * queryPageSize.value))
+const dataQueryPageLabels = computed(() => Array.from({ length: dataQueryPageCount.value }, (_, index) => `监测数据第 ${index + 1} 页`))
 
 function buildDataQueryString(forExport = false) {
   const params = new URLSearchParams()
@@ -308,6 +329,8 @@ async function runDataQuery(resetPage = false) {
     queryTotal.value = Number((res as { total?: number }).total ?? res.data.length)
     queryPage.value = Number((res as { page?: number }).page ?? queryPage.value)
     queryPageSize.value = Number((res as { pageSize?: number }).pageSize ?? queryPageSize.value)
+    serverQueryActive.value = true
+    if (resetPage) queryViewPage.value = 2
     message.value =
       '服务端综合查询完成：本页 ' +
       res.data.length +
@@ -323,12 +346,25 @@ async function runDataQuery(resetPage = false) {
   }
 }
 
-async function changeDataPage(delta: number) {
-  const maxPage = Math.max(1, Math.ceil(queryTotal.value / queryPageSize.value) || 1)
-  const next = Math.min(maxPage, Math.max(1, queryPage.value + delta))
+async function setDataPage(page: number) {
+  const next = Math.min(dataQueryPageCount.value, Math.max(1, page))
   if (next === queryPage.value) return
   queryPage.value = next
-  await runDataQuery(false)
+  if (serverQueryActive.value) await runDataQuery(false)
+}
+
+async function resetDataQuery() {
+  q.value = ''
+  qType.value = ''
+  qQuality.value = ''
+  qDatasetId.value = ''
+  qPlatformId.value = ''
+  queryServerHits.value = []
+  queryTotal.value = 0
+  queryPage.value = 1
+  serverQueryActive.value = false
+  await runDataQuery(true)
+  if (!error.value) message.value = '查询条件已重置，已重新读取服务端监测数据'
 }
 
 function clearAlerts() {
@@ -492,7 +528,7 @@ async function createData() {
       error.value = '卫星遥感观测范围必须是 Polygon 或 MultiPolygon'
       return
     }
-    await api.createObservationData({
+    const body: Record<string, unknown> = {
       datasetId: Number(dataForm.value.datasetId),
       platformId: Number(dataForm.value.platformId),
       name: dataForm.value.name,
@@ -500,11 +536,12 @@ async function createData() {
       sourceName: dataForm.value.sourceName,
       dataFormat: dataForm.value.dataFormat,
       spatialGeoJson,
-      timeStart: isoNow(-7200_000),
-      timeEnd: isoNow(),
       version: Number(dataForm.value.version) || 1,
-    })
-    message.value = '监测数据已创建'
+    }
+    if (editingDataId.value) await api.updateObservationData(editingDataId.value, body)
+    else await api.createObservationData({ ...body, timeStart: isoNow(-7200_000), timeEnd: isoNow() })
+    message.value = editingDataId.value ? '监测数据修改已保存' : '监测数据已创建'
+    editingDataId.value = ''
     try { await reloadShellLayers('/data', {}) } catch { /* map refresh optional */ }
     dataForm.value.name = ''
     await load()
@@ -622,8 +659,11 @@ async function createSource() {
       ingestionStrategy,
     }
     if (sourceForm.value.platformId) body.platformId = Number(sourceForm.value.platformId)
-    await api.createDataSource(body)
-    message.value = '协议数据源已登记（默认可测试/启用后实时拉取）'
+    else if (editingSourceId.value) body.platformId = null
+    if (editingSourceId.value) await api.updateDataSource(editingSourceId.value, body)
+    else await api.createDataSource(body)
+    message.value = editingSourceId.value ? '数据源修改已保存' : '协议数据源已登记（默认可测试/启用后实时拉取）'
+    editingSourceId.value = ''
     sourceForm.value.code = ''
     sourceForm.value.name = ''
     await load()
@@ -1005,6 +1045,7 @@ async function showDataOnMap() {
   refreshTimeExtent()
   await showShellAndFit('data', '/data')
   await setDataLayerStyle('all')
+  mapDisplayMode.value = 'all'
   message.value = `已在底图显示监测数据（点+热力聚合，${shellCounts.data} 个要素）`
 }
 
@@ -1012,6 +1053,7 @@ async function showHeatmapOnMap() {
   refreshTimeExtent()
   await showShellAndFit('data', '/data')
   await setDataLayerStyle('heat')
+  mapDisplayMode.value = 'heat'
   message.value = `已切换热力聚合上图（${shellCounts.data} 个数据要素的网格聚合）`
 }
 
@@ -1019,6 +1061,7 @@ async function showDataPointsOnMap() {
   refreshTimeExtent()
   await showShellAndFit('data', '/data')
   await setDataLayerStyle('points')
+  mapDisplayMode.value = 'points'
   message.value = `已切换采样点上图（${shellCounts.data} 个要素）`
 }
 
@@ -1027,11 +1070,63 @@ async function filterDataQualityOnMap(quality: string = '') {
   error.value = null
   await showShellAndFit('data', '/data')
   await applyShellDataQualityFilter(q)
+  mapQualityFilter.value = q
   if (q) {
     message.value = `地图已按质量筛选: ${q} · ${shellCounts.data} 个`
   } else {
     message.value = `已清除质量筛选，显示全部数据 ${shellCounts.data} 个`
   }
+}
+
+function editSource(item: Record<string, unknown>) {
+  const jsonText = (value: unknown, fallback: string) => value && typeof value === 'object' ? JSON.stringify(value, null, 2) : fallback
+  editingSourceId.value = String(item.id)
+  sourceForm.value = {
+    code: String(item.code || ''),
+    name: String(item.name || ''),
+    platformId: item.platformId == null ? '' : String(item.platformId),
+    protocol: String(item.protocol || 'https'),
+    endpointAddress: String(item.endpointAddress || ''),
+    authMethod: String(item.authMethod || 'none'),
+    credentialReference: String(item.credentialReference || ''),
+    connectionParametersText: jsonText(item.connectionParameters, '{}'),
+    fieldMappingText: jsonText(item.fieldMapping, '{}'),
+    ingestionStrategyText: jsonText(item.ingestionStrategy, '{}'),
+  }
+  sourcePage.value = 2
+  message.value = `正在编辑数据源“${item.name}”，完成基础信息后到下一步保存`
+}
+
+function cancelSourceEdit() {
+  editingSourceId.value = ''
+  sourceForm.value.code = ''
+  sourceForm.value.name = ''
+}
+
+function editData(item: Record<string, unknown>) {
+  editingDataId.value = String(item.id)
+  dataForm.value = {
+    datasetId: String(item.datasetId || ''),
+    platformId: String(item.platformId || ''),
+    name: String(item.name || ''),
+    dataType: String(item.dataType || 'observation'),
+    sourceName: String(item.sourceName || ''),
+    dataFormat: String(item.dataFormat || 'json'),
+    spatialGeoJson: (item.spatialGeoJson as SimpleGeometry | null) || wktToGeoJson(String(item.spatialWkt || '')),
+    version: Number(item.version || 1),
+  }
+  crudPage.value = 2
+  message.value = `正在编辑监测数据“${item.name}”`
+}
+
+function cancelDataEdit() {
+  editingDataId.value = ''
+  dataForm.value.name = ''
+  dataForm.value.spatialGeoJson = null
+}
+
+function changeMapQualityFilter(event: Event) {
+  void filterDataQualityOnMap((event.target as HTMLSelectElement).value)
 }
 
 
@@ -1050,37 +1145,54 @@ onUnmounted(() => {
         <h1>数据建模、多源接入与查询</h1>
         <p class="muted">对应文档：监测数据 CRUD、多源接入、综合查询导出、可视化支撑。</p>
       </div>
-      <RouterLink class="btn ghost" to="/applications?tab=gis">GIS 数据图层</RouterLink>
     </header>
     <div class="tabs">
       <button v-for="t in tabs" :key="t.key" type="button" class="tab" :class="{ active: tab === t.key }" @click="setTab(t.key)">{{ t.label }}</button>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="message" class="ok-text">{{ message }}</p>
-      <div class="plan-map-actions panel soft" data-testid="data-map-actions" style="margin:0.35rem 0;padding:0.45rem 0.55rem">
-        <strong style="font-size:12px;margin-right:0.35rem">地图联动</strong>
-        <button class="btn ghost" type="button" :disabled="pending" @click="showDataOnMap">数据上图</button>
-        <button class="btn ghost" type="button" :disabled="pending" @click="showHeatmapOnMap">热力聚合上图</button>
-        <button class="btn ghost" type="button" :disabled="pending" @click="showDataPointsOnMap">采样点上图</button>
-        <button class="btn ghost" type="button" :disabled="pending" @click="filterDataQualityOnMap('unchecked')">仅未检</button>
-        <button class="btn ghost" type="button" :disabled="pending" @click="filterDataQualityOnMap('warning')">仅告警</button>
-        <button class="btn ghost" type="button" :disabled="pending" @click="filterDataQualityOnMap('anomaly')">仅异常</button>
-        <button class="btn ghost" type="button" :disabled="pending" @click="filterDataQualityOnMap()">全部数据</button>
-        <button class="btn ghost" type="button" :disabled="pending" @click="clearTimeFilterOnMap">清除时间过滤</button>
-        <span class="muted" style="font-size:12px">{{ shellStatus }}</span>
+      <div class="data-map-toolbar" data-testid="data-map-actions" aria-label="地图联动">
+        <div class="data-map-toolbar-head">
+          <strong>地图联动</strong>
+          <RouterLink class="data-map-manage-link" to="/applications?tab=gis">图层管理 <span aria-hidden="true">›</span></RouterLink>
+        </div>
+        <div class="data-map-control-row">
+          <span class="data-map-control-label">展示</span>
+          <div class="data-map-segmented" role="group" aria-label="数据展示方式">
+            <button type="button" :class="{ active: mapDisplayMode === 'all' }" :aria-pressed="mapDisplayMode === 'all'" :disabled="pending" @click="showDataOnMap">点 + 热力</button>
+            <button type="button" :class="{ active: mapDisplayMode === 'heat' }" :aria-pressed="mapDisplayMode === 'heat'" :disabled="pending" @click="showHeatmapOnMap">热力图</button>
+            <button type="button" :class="{ active: mapDisplayMode === 'points' }" :aria-pressed="mapDisplayMode === 'points'" :disabled="pending" @click="showDataPointsOnMap">采样点</button>
+          </div>
+        </div>
+        <div class="data-map-filter-row">
+          <label class="data-map-quality-select">
+            <span class="data-map-control-label">质量</span>
+            <select :value="mapQualityFilter" :disabled="pending" @change="changeMapQualityFilter">
+              <option value="">全部数据</option>
+              <option value="unchecked">未检</option>
+              <option value="warning">告警</option>
+              <option value="anomaly">异常</option>
+            </select>
+          </label>
+          <button class="data-map-clear" type="button" :disabled="pending || !timeFilterActive" @click="clearTimeFilterOnMap">清除时间筛选</button>
+        </div>
+        <p class="data-map-status" aria-live="polite"><span aria-hidden="true"></span>{{ shellStatus }}</p>
       </div>
 
     <section v-if="tab === 'crud'" class="panel">
       <h2>监测数据建模与增删改查</h2>
-      <h3>1) 数据集</h3>
+      <template v-if="crudPage === 1">
+      <h3>数据集</h3>
       <div class="form-row">
         <label>编码<input v-model="datasetForm.code" /></label>
         <label>名称<input v-model="datasetForm.name" /></label>
         <button class="btn" type="button" :disabled="pending" @click="createDataset">创建数据集</button>
       </div>
       <p class="muted">已有数据集 {{ datasets.length }} 个</p>
+      </template>
 
-      <h3>2) 监测数据</h3>
+      <template v-if="crudPage === 2">
+      <h3>{{ editingDataId ? '编辑监测数据' : '新增监测数据' }}</h3>
       <div class="form-row">
         <label>数据集
           <select v-model="dataForm.datasetId">
@@ -1102,9 +1214,12 @@ onUnmounted(() => {
           <span>{{ dataForm.spatialGeoJson ? (isSatellitePlatform(dataForm.platformId) ? '影像覆盖范围已设置' : '数据空间位置已设置') : (isSatellitePlatform(dataForm.platformId) ? '需提供真实影像覆盖范围' : '默认采用关联平台位置') }}</span>
           <button class="btn ghost" type="button" @click="applyMapDrawSpatial('data')">{{ isSatellitePlatform(dataForm.platformId) ? '采用地图绘制覆盖面' : '采用地图位置' }}</button>
         </div>
-        <button class="btn" type="button" :disabled="pending" @click="createData">新增监测数据</button>
+        <div class="form-actions"><button class="btn" type="button" :disabled="pending" @click="createData">{{ editingDataId ? '保存修改' : '新增监测数据' }}</button><button v-if="editingDataId" class="btn ghost" type="button" @click="cancelDataEdit">取消编辑</button></div>
       </div>
-      <table class="table">
+      </template>
+      <template v-if="crudPage === 3">
+      <h3>监测数据列表</h3>
+      <table v-table-pager="{ label: '监测数据分页' }" class="table">
         <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>平台</th><th>质量</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-if="!dataList.length"><td colspan="8" class="muted">暂无监测数据，可通过建模新增或接入通道拉取</td></tr>
@@ -1116,6 +1231,7 @@ onUnmounted(() => {
             <td>{{ d.qualityStatus || '-' }}</td>
             <td class="ops">
               <button class="btn ghost" type="button" @click.stop="locateOnMap(String(d.id))">定位</button>
+              <button class="btn ghost" type="button" @click.stop="editData(d)">编辑</button>
               <button class="btn ghost" type="button" @click="runQuality(d.id)">质检</button>
               <button class="btn ghost" type="button" @click="doQuarantine(d.id)">隔离</button>
               <button class="btn ghost" type="button" @click="doRelease(d.id)">放行</button>
@@ -1127,10 +1243,13 @@ onUnmounted(() => {
         </tbody>
       </table>
       <pre v-if="detail" class="result-pre">{{ JSON.stringify(detail, null, 2).slice(0, 3000) }}</pre>
+      </template>
+      <CardPager v-model:page="crudPage" :pages="crudPages" label="监测数据维护内容分页" />
     </section>
 
     <section v-if="tab === 'sources'" class="panel">
       <h2>多源协议数据接入工作台</h2>
+      <template v-if="sourcePage === 1">
       <p class="muted">
         <strong>多源接入 = 把别人系统的协议数据持续接入本系统</strong>（活通道），不是简单文件导入。
         主路径：登记外部协议端点 → 测试连接 → 启用 → 立即拉取 / 定时接入 → 审计溯源。
@@ -1143,9 +1262,11 @@ onUnmounted(() => {
       <div class="form-row">
         <button class="btn ghost" type="button" :disabled="pending" @click="previewSampleFeed">预览约定样例通道</button>
       </div>
+      </template>
 
-      <h3>1. 登记协议数据源</h3>
-      <div class="form-row">
+      <template v-if="sourcePage === 2">
+      <h3>2. {{ editingSourceId ? '编辑数据源基础信息' : '数据源基础信息' }}</h3>
+      <div class="form-row source-basic-grid">
         <label>编码<input v-model="sourceForm.code" placeholder="LIVE-HTTP-001" /></label>
         <label>名称<input v-model="sourceForm.name" placeholder="市气象局实时接口" /></label>
         <label>绑定平台
@@ -1164,7 +1285,12 @@ onUnmounted(() => {
             <option value="db">db（可登记，拉取执行器待扩展）</option>
           </select>
         </label>
-        <label>端点地址<input v-model="sourceForm.endpointAddress" style="min-width:22rem" /></label>
+        <label class="wide">端点地址<input v-model="sourceForm.endpointAddress" /></label>
+      </div>
+      </template>
+      <template v-if="sourcePage === 3">
+      <h3>3. 鉴权与接入参数</h3>
+      <div class="form-row">
         <label>鉴权
           <select v-model="sourceForm.authMethod">
             <option value="none">none</option>
@@ -1174,15 +1300,23 @@ onUnmounted(() => {
         </label>
         <label>凭据引用<input v-model="sourceForm.credentialReference" placeholder="env:OBS_TOKEN（禁止写明文）" /></label>
       </div>
-      <div class="form-row">
-        <label class="wide">连接参数 JSON<textarea v-model="sourceForm.connectionParametersText" rows="3"></textarea></label>
-        <label class="wide">字段映射 JSON<textarea v-model="sourceForm.fieldMappingText" rows="3"></textarea></label>
-        <label class="wide">接入策略 JSON<textarea v-model="sourceForm.ingestionStrategyText" rows="2"></textarea></label>
-        <button class="btn" type="button" :disabled="pending" @click="createSource">登记协议数据源</button>
+      <details class="source-advanced-config">
+        <summary>高级连接、字段映射与接入策略</summary>
+        <div class="form-row source-json-grid">
+          <label class="wide">连接参数 JSON<textarea v-model="sourceForm.connectionParametersText" rows="3"></textarea></label>
+          <label class="wide">字段映射 JSON<textarea v-model="sourceForm.fieldMappingText" rows="3"></textarea></label>
+          <label class="wide">接入策略 JSON<textarea v-model="sourceForm.ingestionStrategyText" rows="2"></textarea></label>
+        </div>
+      </details>
+      <div class="source-primary-action">
+        <button class="btn" type="button" :disabled="pending" @click="createSource">{{ editingSourceId ? '保存数据源修改' : '登记协议数据源' }}</button>
+        <button v-if="editingSourceId" class="btn ghost" type="button" @click="cancelSourceEdit">取消编辑</button>
       </div>
+      </template>
 
-      <h3>2. 数据源生命周期</h3>
-      <table class="table">
+      <template v-if="sourcePage === 4">
+      <h3>4. 数据源生命周期</h3>
+      <table v-table-pager="{ label: '数据源分页' }" class="table">
         <thead>
           <tr>
             <th>ID</th><th>编码</th><th>名称</th><th>协议</th><th>平台</th><th>状态</th>
@@ -1202,6 +1336,7 @@ onUnmounted(() => {
             <td class="clamp">{{ s.lastTestMessage || '-' }}</td>
             <td class="ops">
               <button class="btn ghost" type="button" @click="selectSourceForOps(s.id)">选中</button>
+              <button class="btn ghost" type="button" @click="editSource(s)">编辑</button>
               <button class="btn ghost" type="button" @click="testSource(s.id)">测试连接</button>
               <button class="btn ghost" type="button" @click.stop="enableSource(s.id)">启用</button>
               <button class="btn ghost" type="button" @click.stop="disableSource(s.id)">停用</button>
@@ -1209,9 +1344,11 @@ onUnmounted(() => {
           </tr>
         </tbody>
       </table>
+      </template>
 
-      <h3>3. 实时接入（单次拉取 / 定时活接入）</h3>
-      <div class="form-row">
+      <template v-if="sourcePage === 5">
+      <h3>5. 即时拉取</h3>
+      <div class="form-row source-pull-grid">
         <label>数据源
           <select v-model="pullForm.sourceId" @change="loadSourceAudits(pullForm.sourceId); refreshLiveStatus(pullForm.sourceId)">
             <option value="">请选择已启用源</option>
@@ -1226,22 +1363,32 @@ onUnmounted(() => {
             <option v-for="d in datasets" :key="'pds'+d.id" :value="String(d.id)">#{{ d.id }} {{ d.name }}</option>
           </select>
         </label>
-        <label>数据名称（仅单次拉取）<input v-model="pullForm.dataName" placeholder="可空，默认源码+时间戳" /></label>
+        <label class="wide">数据名称（仅单次拉取）<input v-model="pullForm.dataName" placeholder="可空，默认源码+时间戳" /></label>
         <label>类型<input v-model="pullForm.dataType" /></label>
-        <div class="spatial-pick" :class="{ ready: pullForm.spatialGeoJson }">
+        <div class="spatial-pick wide" :class="{ ready: pullForm.spatialGeoJson }">
           <span>{{ pullForm.spatialGeoJson ? '接入范围已设置' : '默认采用平台位置' }}</span>
         </div>
+        <div class="source-form-actions">
+          <button class="btn" type="button" :disabled="pending" @click="pullSource">立即拉取一次</button>
+          <button class="btn ghost" type="button" @click="applyMapDrawSpatial('live')">采用地图范围</button>
+        </div>
+      </div>
+      <p class="muted">单次拉取会写入观测数据，来源追溯 <code>source:数据源编码</code>。</p>
+      </template>
+      <template v-if="sourcePage === 6">
+      <h3>6. 定时接入</h3>
+      <div class="form-row">
         <label>定时间隔秒<input v-model.number="liveIntervalSeconds" type="number" min="5" step="5" /></label>
-        <button class="btn" type="button" :disabled="pending" @click="pullSource">立即拉取一次</button>
-        <button class="btn ghost" type="button" @click="applyMapDrawSpatial('live')">采用地图范围→接入</button>
         <button class="btn" type="button" :disabled="pending" @click="startLivePull">启动定时接入</button>
         <button class="btn ghost" type="button" :disabled="pending" @click="stopLivePull">停止定时接入</button>
         <button class="btn ghost" type="button" :disabled="pending" @click="refreshLiveStatus()">刷新接入状态</button>
       </div>
       <p class="muted">
-        单次/定时拉取都会写入观测数据，来源追溯 <code>source:数据源编码</code>。
         定时接入按间隔反复从外部协议端点拉数，属于“活接入”；停用数据源会自动停止定时任务。
       </p>
+      </template>
+      <template v-if="sourcePage === 7">
+      <h3>7. 实时接入状态</h3>
       <div v-if="liveStatus" class="live-status-card" :class="{ running: String(liveStatus.status || '').toLowerCase() === 'running' || String(liveStatus.status || '').toLowerCase() === 'active' || String(liveStatus.status || '').toLowerCase() === 'pulling' }">
         <div class="live-status-head">
           <span :class="liveStatusClass(liveStatus.status)"></span>
@@ -1261,8 +1408,11 @@ onUnmounted(() => {
           <div class="wide" v-if="liveStatus.lastError"><span class="muted">错误</span><strong class="error">{{ liveStatus.lastError }}</strong></div>
         </div>
       </div>
+      <p v-else class="muted">选择数据源并刷新接入状态后，可在这里查看拉取次数、成功率和最近观测。</p>
+      </template>
 
-      <h3>4. 接入审计 / 失败提示</h3>
+      <template v-if="sourcePage === 8">
+      <h3>8. 接入审计 / 失败提示</h3>
       <div class="form-row">
         <label>查看数据源
           <select v-model="selectedAuditSourceId" @change="loadSourceAudits()">
@@ -1272,7 +1422,7 @@ onUnmounted(() => {
         </label>
         <button class="btn ghost" type="button" @click="loadSourceAudits()">刷新审计</button>
       </div>
-      <table class="table" v-if="sourceAudits.length">
+      <table v-if="sourceAudits.length" v-table-pager="{ label: '接入审计分页' }" class="table">
         <thead><tr><th>ID</th><th>动作</th><th>结果</th><th>说明</th><th>HTTP</th><th>耗时ms</th><th>时间</th></tr></thead>
         <tbody>
           <tr v-if="!sourceAudits.length"><td colspan="6" class="muted">暂无接入审计，请选择通道并测试/拉取</td></tr>
@@ -1288,11 +1438,13 @@ onUnmounted(() => {
         </tbody>
       </table>
       <p class="muted" v-else>暂无审计记录。对数据源执行测试/启用/拉取后会出现。</p>
+      </template>
 
-      <h3>5. 离线/文件样例通道（次要）</h3>
+      <template v-if="sourcePage === 9">
+      <h3>9. 文件与关联信息</h3>
       <p class="muted">仅用于本地样例文件或离线补录，不替代协议实时接入。</p>
-      <div class="form-row">
-        <label>数据文件<input type="file" accept=".csv,.json,.geojson,.txt" @change="onPickFile" /></label>
+      <div class="form-row source-file-grid">
+        <label class="wide">数据文件<input type="file" accept=".csv,.json,.geojson,.txt" @change="onPickFile" /></label>
         <label>数据集
           <select v-model="importForm.datasetId">
             <option value="">请选择</option>
@@ -1313,6 +1465,11 @@ onUnmounted(() => {
         </label>
         <label>数据名称<input v-model="importForm.dataName" /></label>
         <label>类型<input v-model="importForm.dataType" /></label>
+      </div>
+      </template>
+      <template v-if="sourcePage === 10">
+      <h3>10. 导入设置</h3>
+      <div class="form-row">
         <div class="spatial-pick" :class="{ ready: importForm.spatialGeoJson || platformGeometry(importForm.platformId) }">
           <span>{{ importForm.spatialGeoJson ? (isSatellitePlatform(importForm.platformId) ? '影像覆盖范围已设置' : '导入空间位置已设置') : (isSatellitePlatform(importForm.platformId) ? '需从产品元数据或地图提供覆盖面' : '导入后默认采用平台位置') }}</span>
           <button class="btn ghost" type="button" @click="applyMapDrawSpatial('import')">{{ isSatellitePlatform(importForm.platformId) ? '采用地图绘制覆盖面' : '采用地图位置' }}</button>
@@ -1328,10 +1485,11 @@ onUnmounted(() => {
         <button class="btn" type="button" :disabled="pending" @click="submitImport">上传并导入</button>
         <button class="btn ghost" type="button" @click="downloadTemplate">下载 CSV 模板</button>
       </div>
-
-      <h4>文件导入任务</h4>
+      </template>
+      <template v-if="sourcePage === 11">
+      <h3>11. 文件导入任务</h3>
       <p class="muted" v-if="imports.length === 0">暂无导入任务。</p>
-      <table class="table" v-else>
+      <table v-else v-table-pager="{ label: '文件导入任务分页' }" class="table">
         <thead><tr><th>ID</th><th>文件</th><th>状态</th><th>进度</th><th>成功/失败</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-if="!imports.length"><td colspan="7" class="muted">暂无文件导入任务</td></tr>
@@ -1350,13 +1508,16 @@ onUnmounted(() => {
           </tr>
         </tbody>
       </table>
+      </template>
+      <CardPager v-model:page="sourcePage" :pages="sourcePages" previous-label="上一步" next-label="下一步" label="数据接入步骤分页" />
     </section>
 
     <section v-if="tab === 'query'" class="panel">
       <h2>监测数据综合查询与导出</h2>
       <p class="muted">支持按关键字、类型、质量、数据集、平台组合查询；导出使用同一套筛选条件。</p>
-      <div class="form-row">
-        <label>关键字<input v-model="q" placeholder="名称/来源/平台" /></label>
+      <template v-if="queryViewPage === 1">
+      <div class="form-row data-query-grid">
+        <label class="wide">关键字<input v-model="q" placeholder="名称/来源/平台" /></label>
         <label>类型<input v-model="qType" placeholder="observation / timeseries" /></label>
         <label>质量状态<input v-model="qQuality" placeholder="passed/failed/unchecked" /></label>
         <label>数据集
@@ -1373,50 +1534,55 @@ onUnmounted(() => {
         </label>
         <label>每页
           <select v-model.number="queryPageSize" @change="runDataQuery(true)">
-            <option :value="10">10</option>
-            <option :value="20">20</option>
-            <option :value="50">50</option>
-            <option :value="100">100</option>
+            <option :value="4">4</option>
+            <option :value="8">8</option>
+            <option :value="12">12</option>
           </select>
         </label>
-        <button class="btn" type="button" :disabled="pending" @click="runDataQuery(true)">服务端查询</button>
-        <button class="btn ghost" type="button" @click="doExport">导出 CSV（当前条件）</button>
-        <button class="btn ghost" type="button" @click="queryServerHits = []; queryTotal = 0; queryPage = 1; message = '已重置为本地列表'">重置</button>
+        <div class="data-query-actions">
+          <button class="btn" type="button" :disabled="pending" @click="runDataQuery(true)">查询</button>
+          <button class="btn ghost" type="button" @click="doExport">导出 CSV</button>
+          <button class="btn ghost" type="button" @click="resetDataQuery">重置</button>
+        </div>
       </div>
+      </template>
+      <template v-if="queryViewPage === 2">
       <p class="muted">
         显示 {{ filtered.length }} 条
-        · 服务端本页 {{ queryServerHits.length }} / 总计 {{ queryTotal || dataList.length }}
-        · 本地缓存 {{ dataList.length }}
+        · 服务端本页 {{ queryServerHits.length }} / 总计 {{ queryTotal }}
       </p>
-      <div class="form-row" v-if="queryServerHits.length || queryTotal">
-        <button class="btn ghost" type="button" :disabled="pending || queryPage <= 1" @click="changeDataPage(-1)">上一页</button>
-        <span class="muted">第 {{ queryPage }} 页</span>
-        <button class="btn ghost" type="button" :disabled="pending || queryPage * queryPageSize >= queryTotal" @click="changeDataPage(1)">下一页</button>
+      <div class="table-region">
+        <div class="table-scroll">
+          <table class="table">
+            <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>质量</th><th>时间</th><th>空间</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr v-if="!displayedData.length"><td colspan="7" class="muted">无查询结果</td></tr>
+              <tr v-for="d in displayedData" :key="'q'+d.id" class="row-click" :class="{ selected: shellSelected && shellSelected.kind === 'data' && shellSelected.id === String(d.id) }" @click="locateOnMap(String(d.id))">
+                <td>{{ d.id }}</td>
+                <td>{{ d.name }}</td>
+                <td>{{ d.dataType }}</td>
+                <td>{{ d.qualityStatus || '-' }}</td>
+                <td>{{ d.timeStart }} ~ {{ d.timeEnd }}</td>
+                <td>{{ d.spatialGeoJson || d.spatialWkt ? '已定位' : '未定位' }}</td>
+                <td class="ops">
+                  <button class="btn ghost" type="button" @click.stop="locateOnMap(String(d.id))">定位</button>
+                  <button class="btn ghost" type="button" @click.stop="showDataOnMap">数据上图</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <CardPager :page="queryPage" kind="records" :pages="dataQueryPageLabels" :summary="`共 ${dataQueryCount} 条`" label="监测数据查询分页" @update:page="setDataPage" />
       </div>
-      <table class="table">
-        <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>质量</th><th>时间</th><th>空间</th><th>操作</th></tr></thead>
-        <tbody>
-          <tr v-if="!filtered.length"><td colspan="8" class="muted">无查询结果</td></tr>
-          <tr v-for="d in filtered" :key="'q'+d.id" class="row-click" :class="{ selected: shellSelected && shellSelected.kind === 'data' && shellSelected.id === String(d.id) }" @click="locateOnMap(String(d.id))">
-            <td>{{ d.id }}</td>
-            <td>{{ d.name }}</td>
-            <td>{{ d.dataType }}</td>
-            <td>{{ d.qualityStatus || '-' }}</td>
-            <td>{{ d.timeStart }} ~ {{ d.timeEnd }}</td>
-            <td>{{ d.spatialGeoJson || d.spatialWkt ? '已定位' : '未定位' }}</td>
-            <td class="ops">
-              <button class="btn ghost" type="button" @click.stop="locateOnMap(String(d.id))">定位</button>
-              <button class="btn ghost" type="button" @click.stop="showDataOnMap">数据上图</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
       <pre v-if="exportPreview" class="result-pre">{{ exportPreview.slice(0, 3000) }}</pre>
+      </template>
+      <CardPager v-model:page="queryViewPage" :pages="queryViewPages" label="监测数据查询内容分页" />
     </section>
 
     <section v-if="tab === 'viz'" class="panel">
       <h2>监测数据可视化</h2>
       <p class="muted">空间分布请打开 GIS 工作台的数据图层；中心内提供类型/质量分布快览，详细统计在综合应用中心。</p>
+      <template v-if="vizPage === 1">
       <div class="form-row" style="margin:0.5rem 0">
         <button class="btn" type="button" :disabled="pending" @click="showDataOnMap">数据上图</button>
         <button class="btn ghost" type="button" :disabled="pending" @click="filterDataQualityOnMap('unchecked')">仅未检</button>
@@ -1450,15 +1616,17 @@ onUnmounted(() => {
           · {{ timeFilterActive ? '过滤已启用' : '未启用过滤' }}
         </p>
       </div>
+      </template>
+      <template v-if="vizPage === 2">
       <div class="cards">
         <div class="card stat"><h3>监测数据</h3><p class="stat-num">{{ dataList.length }}</p></div>
         <div class="card stat"><h3>数据集</h3><p class="stat-num">{{ datasets.length }}</p></div>
         <div class="card stat"><h3>数据源</h3><p class="stat-num">{{ sources.length }}</p></div>
       </div>
-      <div class="grid-2" style="margin-top:1rem">
+      <div style="margin-top:1rem">
         <div>
           <h3>按数据类型分布</h3>
-          <table class="table">
+          <table v-table-pager="{ label: '数据类型统计分页' }" class="table">
             <thead><tr><th>类型</th><th>数量</th></tr></thead>
             <tbody>
               <tr v-if="!vizByType.length"><td colspan="2" class="muted">暂无类型分布</td></tr>
@@ -1466,9 +1634,13 @@ onUnmounted(() => {
             </tbody>
           </table>
         </div>
+      </div>
+      </template>
+      <template v-if="vizPage === 3">
+      <div style="margin-top:1rem">
         <div>
           <h3>按质量状态分布</h3>
-          <table class="table">
+          <table v-table-pager="{ label: '质量状态统计分页' }" class="table">
             <thead><tr><th>质量状态</th><th>数量</th></tr></thead>
             <tbody>
               <tr v-if="!vizByQuality.length"><td colspan="2" class="muted">暂无质量分布</td></tr>
@@ -1482,6 +1654,181 @@ onUnmounted(() => {
         <RouterLink class="btn ghost" to="/applications?tab=gis">图层控制</RouterLink>
         <RouterLink class="btn ghost" to="/applications?tab=stats">数据统计</RouterLink>
       </div>
+      </template>
+      <CardPager v-model:page="vizPage" :pages="vizPages" label="监测数据可视化内容分页" />
     </section>
   </section>
 </template>
+
+<style scoped>
+.data-map-toolbar {
+  display: grid;
+  gap: 10px;
+  margin: 0.45rem 0 0.75rem;
+  padding: 11px 12px 10px;
+  border: 1px solid #e3e3e8;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(29, 29, 31, 0.035);
+}
+.data-map-toolbar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.data-map-toolbar-head strong {
+  color: #1d1d1f;
+  font-size: 12px;
+  line-height: 1.3;
+}
+.data-map-manage-link {
+  color: #515154;
+  font-size: 11px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.data-map-manage-link:hover { color: #0071e3; }
+.data-map-control-row {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.data-map-control-label {
+  color: #6e6e73;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.data-map-segmented {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: #f3f3f5;
+}
+.data-map-segmented button {
+  min-width: 0;
+  min-height: 29px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #515154;
+  font: 500 10px/1.2 inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.data-map-segmented button.active {
+  background: #fff;
+  color: #0066cc;
+  box-shadow: 0 0 0 1px rgba(0, 113, 227, 0.18), 0 1px 2px rgba(29, 29, 31, 0.06);
+}
+.data-map-filter-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.data-map-quality-select {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.data-map-quality-select select {
+  width: 100%;
+  height: 31px;
+  padding: 0 26px 0 9px;
+  border: 1px solid #d2d2d7;
+  border-radius: 8px;
+  background: #fff;
+  color: #3a3a3c;
+  font-size: 10px;
+}
+.data-map-clear {
+  min-height: 31px;
+  padding: 0 3px;
+  border: 0;
+  background: transparent;
+  color: #515154;
+  font: 500 10px/1.2 inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.data-map-clear:hover:not(:disabled) { color: #0066cc; }
+.data-map-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid #ededf0;
+  color: #6e6e73;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.data-map-status > span {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: #34a853;
+}
+.data-map-toolbar :is(button, select, a):focus-visible {
+  outline: 3px solid rgba(0, 113, 227, 0.18);
+  outline-offset: 1px;
+}
+.data-map-toolbar button:disabled {
+  color: #aeaeb2;
+  cursor: not-allowed;
+}
+.data-query-grid.form-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+.data-query-grid .wide,
+.data-query-actions { grid-column: 1 / -1; }
+.data-query-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.data-query-actions .btn {
+  min-height: 32px;
+  padding: 0.35rem 0.65rem;
+  font-size: 10px;
+}
+.source-basic-grid.form-row,
+.source-pull-grid.form-row,
+.source-file-grid.form-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+.source-advanced-config {
+  margin: .65rem 0;
+  border: 1px solid #e1e3e6;
+  border-radius: 10px;
+  background: #f6f7f8;
+}
+.source-advanced-config summary {
+  padding: .6rem .65rem;
+  color: #515154;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.source-advanced-config[open] summary { border-bottom: 1px solid #e1e3e6; }
+.source-json-grid { margin: 0; padding: .65rem; }
+.source-primary-action,
+.source-form-actions,
+.form-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.source-primary-action { margin-top: .65rem; }
+.source-form-actions { grid-column: 1 / -1; }
+.source-primary-action .btn,
+.source-form-actions .btn { min-height: 32px; padding: .35rem .65rem; font-size: 10px; }
+</style>

@@ -9,9 +9,7 @@ import {
   focusAnomalousData,
   focusShellMode,
   shellAlerts,
-  shellCounts,
   shellLoading,
-  shellStatus,
   selectShellFeature,
 } from '../gis/mapShell'
 
@@ -56,8 +54,8 @@ onMounted(async () => {
   if (!user.value) return
   try {
     const [tasks, plats] = await Promise.all([
-      api.listTasks().catch(() => ({ data: [] })),
-      api.listPlatforms('?pageSize=50').catch(() => ({ data: [] })),
+      api.listTasks(),
+      api.listPlatforms('?pageSize=50'),
     ])
     const taskRows = asList(tasks.data)
     const activeTasks = taskRows.filter((t) => {
@@ -71,7 +69,7 @@ onMounted(async () => {
         )
       })
     runningTaskTotal.value = activeTasks.length
-    runningTasks.value = activeTasks.slice(0, 5)
+    runningTasks.value = activeTasks.slice(0, 3)
     offlineRows.value = asList(plats.data)
       .filter((p) => {
         const st = String(p.status || '').toLowerCase()
@@ -83,9 +81,9 @@ onMounted(async () => {
           st.includes('维护')
         )
       })
-      .slice(0, 5)
-  } catch {
-    /* ignore list failures */
+      .slice(0, 3)
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '首页业务数据加载失败'
   }
 })
 
@@ -129,35 +127,33 @@ async function filterMap(mode: 'sensors' | 'data' | 'tasks' | 'all' | 'alerts' |
       </div>
     </header>
 
-    <div class="mission-route-head"><strong>一项监测任务怎么做</strong><small>通常从应用中心开始</small></div>
-    <nav class="center-guide" aria-label="四中心使用顺序">
-      <RouterLink v-for="item in centerEntries" :key="item.name" :to="item.to" class="center-entry">
-        <span class="center-mark">{{ item.mark }}</span>
-        <span><strong>{{ item.name }}</strong><small>{{ item.question }}</small><em>{{ item.detail }}</em></span>
-      </RouterLink>
-    </nav>
+    <section class="quick-start">
+      <div class="quick-start-primary">
+        <div><strong>开始一项监测任务</strong><p>填写目标、区域和时间，后续按需配置指标与方案。</p></div>
+        <RouterLink :to="centerEntries[0]!.to" class="quick-start-button">填写监测需求</RouterLink>
+      </div>
+      <nav aria-label="其他常用工作入口">
+        <RouterLink v-for="item in centerEntries.slice(1)" :key="item.name" :to="item.to">
+          {{ item.question }}<span aria-hidden="true">›</span>
+        </RouterLink>
+      </nav>
+    </section>
 
-    <p class="hint">{{ shellLoading ? '图层加载中…' : shellStatus }}</p>
     <p v-if="mapHint" class="ok-text">{{ mapHint }}</p>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="!user" class="error">业务图层需登录。请先 <RouterLink to="/login">登录</RouterLink>。</p>
 
     <section class="situation-readout" :class="{ warning: alertTotal > 0 }">
-      <header><div><span>运行判读</span><strong>{{ alertTotal > 0 ? `${alertTotal} 项需要关注` : '当前运行平稳' }}</strong></div><small>{{ shellLoading ? '正在核对图层' : '点击下方项目联动地图' }}</small></header>
+      <header><strong>{{ alertTotal > 0 ? `${alertTotal} 项需要关注` : '当前运行平稳' }}</strong><button type="button" :disabled="shellLoading" @click="filterMap('all')">显示全部</button></header>
       <div>
-        <button type="button" :disabled="shellLoading" @click="filterMap('sensors')"><span>传感资源</span><strong>{{ shellCounts.sensors }}</strong><small>{{ shellAlerts.offlineSensors + shellAlerts.faultSensors }} 个异常</small></button>
-        <button type="button" :disabled="shellLoading" @click="filterMap('data')"><span>监测数据</span><strong>{{ shellCounts.data }}</strong><small>{{ shellAlerts.anomalousData }} 条质量异常</small></button>
-        <button type="button" :disabled="shellLoading" @click="filterMap('tasks')"><span>观测任务</span><strong>{{ shellCounts.tasks }}</strong><small>{{ runningTaskTotal }} 个活跃</small></button>
+        <button type="button" :disabled="shellLoading" @click="filterMap(shellAlerts.offlineSensors + shellAlerts.faultSensors > 0 ? 'alerts' : 'sensors')"><span>传感资源</span><strong>{{ shellAlerts.offlineSensors + shellAlerts.faultSensors }} 个异常</strong><small aria-hidden="true">›</small></button>
+        <button type="button" :disabled="shellLoading" @click="filterMap(shellAlerts.anomalousData > 0 ? 'anomaly' : 'data')"><span>监测数据</span><strong>{{ shellAlerts.anomalousData }} 条质量异常</strong><small aria-hidden="true">›</small></button>
+        <button type="button" :disabled="shellLoading" @click="filterMap('tasks')"><span>观测任务</span><strong>{{ runningTaskTotal }} 个待处理</strong><small aria-hidden="true">›</small></button>
       </div>
-      <button v-if="alertTotal > 0" type="button" class="attention-action" :disabled="shellLoading" @click="filterMap('alerts')">在地图查看异常资源</button>
     </section>
-    <div class="home-map-actions">
-      <button type="button" class="btn ghost tiny" :disabled="shellLoading" @click="filterMap('all')">显示全部图层</button>
-      <button type="button" class="btn ghost tiny" :disabled="shellLoading" @click="filterMap('anomaly')">数据质量关注</button>
-    </div>
 
     <div v-if="runningTasks.length" class="panel home-block">
-      <h3>执行中 / 活跃任务</h3>
+      <h3>待处理任务</h3>
       <ul class="home-list">
         <li v-for="t in runningTasks" :key="'t'+t.id">
           <button type="button" class="linkish" @click="locateTask(t.id)">
@@ -169,7 +165,7 @@ async function filterMap(mode: 'sensors' | 'data' | 'tasks' | 'all' | 'alerts' |
     </div>
 
     <div v-if="offlineRows.length" class="panel home-block">
-      <h3>异常 / 离线资源</h3>
+      <h3>异常资源</h3>
       <ul class="home-list">
         <li v-for="p in offlineRows" :key="'p'+p.id">
           <button type="button" class="linkish" @click="locateSensor(p.id)">
@@ -184,35 +180,31 @@ async function filterMap(mode: 'sensors' | 'data' | 'tasks' | 'all' | 'alerts' |
 </template>
 
 <style scoped>
-.mission-route-head { display: flex; align-items: baseline; justify-content: space-between; gap: .45rem; margin: .55rem 0 .3rem; }
-.mission-route-head strong { color: #173f43; font-size: 12px; }
-.mission-route-head small { color: #758581; font-size: 9px; }
-.center-guide { position: relative; display: grid; gap: 0.25rem; margin: 0 0 0.7rem; }
-.center-guide::before { content: ''; position: absolute; left: 1.45rem; top: 1.5rem; bottom: 1.5rem; width: 1px; background: #b9cbc7; }
-.center-entry { position: relative; display: grid; grid-template-columns: 2.5rem 1fr; gap: 0.55rem; padding: 0.5rem; color: #24343b; text-decoration: none; background: rgba(246, 249, 248, 0.94); border: 1px solid #d5dfdd; border-radius: 3px; }
-.center-entry:hover, .center-entry:focus-visible { border-color: #287b78; box-shadow: 0 0 0 2px rgba(40, 123, 120, 0.13); outline: none; }
-.center-mark { z-index: 1; display: grid; place-items: center; width: 2.35rem; min-height: 2.35rem; border: 1px solid #91b1ab; border-radius: 50%; background: #f7faf9; font: 700 0.58rem/1 ui-monospace, SFMono-Regular, Consolas, monospace; color: #176e66; }
-.center-entry strong, .center-entry small, .center-entry em { display: block; }
-.center-entry strong { font-size: 0.8rem; color: #173f48; }
-.center-entry small { margin-top: 0.06rem; font-size: 0.68rem; color: #287b78; }
-.center-entry em { margin-top: 0.12rem; font-size: 0.62rem; font-style: normal; color: #66757a; }
-.situation-readout { margin: .55rem 0; padding: .65rem; border: 1px solid #cbd8d5; border-top: 3px solid #287b78; background: #fff; }
-.situation-readout.warning { border-top-color: #b47b1c; }
-.situation-readout header { display: flex; align-items: flex-end; justify-content: space-between; gap: .4rem; padding-bottom: .45rem; border-bottom: 1px solid #e3e9e7; }
-.situation-readout header div { display: grid; gap: .08rem; }
-.situation-readout header span { color: #8a682a; font-size: 9px; }
-.situation-readout header strong { color: #173f43; font-size: 14px; }
-.situation-readout header small { color: #748582; font-size: 9px; text-align: right; }
-.situation-readout > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: .45rem; }
-.situation-readout > div button { display: grid; gap: .08rem; min-width: 0; padding: .35rem; border: 0; border-right: 1px solid #e0e8e6; background: transparent; color: #536966; text-align: left; cursor: pointer; }
-.situation-readout > div button:last-child { border-right: 0; }
-.situation-readout button span { font-size: 9px; }
-.situation-readout button strong { color: #173f43; font-size: 18px; font-variant-numeric: tabular-nums; }
-.situation-readout button small { color: #758581; font-size: 8px; }
-.attention-action { width: 100%; margin-top: .45rem; padding: .35rem; border: 1px solid #d9bd8c; background: #fff8ec; color: #8d5a12; font-size: 10px; cursor: pointer; }
-.home-map-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.55rem; }
+.quick-start { margin: .35rem 0 .65rem; overflow: hidden; border: 1px solid #e1e3e6; border-radius: 16px; background: #fff; box-shadow: 0 1px 2px rgba(29,29,31,.025), 0 8px 24px rgba(29,29,31,.035); }
+.quick-start-primary { display: flex; align-items: center; justify-content: space-between; gap: .65rem; padding: .7rem; }
+.quick-start-primary div { min-width: 0; }
+.quick-start-primary strong { color: #3a3a3c; font-size: 13px; }
+.quick-start-primary p { margin: .12rem 0 0; color: #6e6e73; font-size: 10px; line-height: 1.45; }
+.quick-start-button { flex: 0 0 auto; padding: .42rem .65rem; border-radius: 8px; background: var(--brand); color: #fff; font-size: 11px; }
+.quick-start nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid #e1e3e6; }
+.quick-start nav a { display: flex; align-items: center; justify-content: space-between; gap: .25rem; min-width: 0; padding: .48rem .55rem; border-right: 1px solid #e1e3e6; color: #515154; font-size: 10px; }
+.quick-start nav a:last-child { border-right: 0; }
+.quick-start nav a:hover { background: var(--brand-soft); color: var(--brand); }
+.quick-start nav span { color: #86868b; font-size: 15px; line-height: 1; }
+.situation-readout { margin: .55rem 0; padding: .7rem; border: 1px solid #e1e3e6; border-radius: 16px; background: #fff; box-shadow: 0 1px 2px rgba(29,29,31,.025), 0 8px 24px rgba(29,29,31,.035); }
+.situation-readout.warning { border-color: #ead3a7; }
+.situation-readout header { display: flex; align-items: center; justify-content: space-between; gap: .4rem; padding-bottom: .45rem; border-bottom: 1px solid #e1e3e6; }
+.situation-readout header strong { color: #3a3a3c; font-size: 14px; }
+.situation-readout header > button { padding: .2rem .35rem; border: 0; background: transparent; color: var(--brand); font-size: 9px; cursor: pointer; }
+.situation-readout > div { display: grid; margin-top: .25rem; }
+.situation-readout > div button { display: grid; grid-template-columns: minmax(0, 1fr) auto 12px; gap: .35rem; align-items: center; min-width: 0; padding: .38rem .15rem; border: 0; border-bottom: 1px solid #eceef1; background: transparent; color: #515154; text-align: left; cursor: pointer; }
+.situation-readout > div button:last-child { border-bottom: 0; }
+.situation-readout > div button:hover { color: var(--brand); }
+.situation-readout button span { font-size: 10px; }
+.situation-readout button strong { color: #3a3a3c; font-size: 10px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.situation-readout button small { color: #86868b; font-size: 14px; line-height: 1; }
 .home-block { margin: 0.5rem 0; }
-.home-block h3 { margin: 0 0 0.35rem; font-size: 13px; color: #0F3D66; }
+.home-block h3 { margin: 0 0 0.35rem; font-size: 13px; color: #3a3a3c; }
 .home-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
 .home-list li { display: flex; justify-content: space-between; gap: 0.4rem; font-size: 12px; }
 .linkish {
