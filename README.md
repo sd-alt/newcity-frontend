@@ -2,6 +2,8 @@
 
 地学传感网前端（Vue 3 + TypeScript + Cesium），严格对齐《系统建设任务清单与工作量表》第一阶段 **34 项**。
 
+当前发布分支为 `main`，前端仓库为 `sd-alt/newcity-frontend`。本地默认通过 Vite 将 `/api` 代理到 `http://127.0.0.1:8001`。
+
 ## 34 项入口
 
 | 中心 | 路由 | 页内 Tab | 文档功能项 |
@@ -26,7 +28,7 @@
 
 ```powershell
 cd F:\aidata\newcity
-.\.venv\Scripts\python.exe manage.py runserver 127.0.0.1:8000
+.\.venv\Scripts\python.exe manage.py runserver 127.0.0.1:8001
 
 cd F:\aidata\newcity-frontend
 npm install
@@ -35,7 +37,7 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 演示账号：`demo` / `demo-pass`
 
-代理：`/api` → `http://127.0.0.1:8000`
+代理：`/api` → `http://127.0.0.1:8001`
 
 ## 验证
 
@@ -45,6 +47,10 @@ npm run build
 ```
 
 浏览器：登录后从首页 34 项矩阵进入各中心，按 Tab 验收。
+
+GIS 综合展示的快速定位可选择首颗卫星或首架无人机。卫星轨迹来自后端活动 TLE/SGP4 推演并显示公里高度；无人机轨迹来自后端位置遥测并显示米制高度。没有轨迹数据的平台只显示登记位置和原因，前端不生成模拟路线。地图详情、图例、聚合和视角规则见 [`docs/四中心与智能任务规划前端说明.md`](docs/四中心与智能任务规划前端说明.md)。
+
+后端端口、位置源协议、演示遥测边界和部署说明见后端仓库的 [卫星与移动平台位置接入及服务器运行说明](https://github.com/sd-alt/newcity/blob/main/docs/%E5%8D%AB%E6%98%9F%E4%B8%8E%E7%A7%BB%E5%8A%A8%E5%B9%B3%E5%8F%B0%E4%BD%8D%E7%BD%AE%E6%8E%A5%E5%85%A5%E5%8F%8A%E6%9C%8D%E5%8A%A1%E5%99%A8%E8%BF%90%E8%A1%8C%E8%AF%B4%E6%98%8E.md)。
 
 ## 数据中心 · 多源协议接入
 

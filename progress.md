@@ -890,3 +890,23 @@
   - `progress.md`：追加本轮实施、验证与回滚记录。
 - 本轮使用 `agent-browser` 验证真实页面；按用户要求未使用 `frontend-design` skill。前端不生成模拟轨迹，缺少后端轨迹时只显示登记位置和原因。
 - 回滚点：本条日志之前的“统一地图点线面表达并处理重叠要素”状态。先执行 `git diff -- src/gis/mapLayers.ts src/gis/mapShell.ts src/components/MapBasemap.vue src/pages/ApplicationsCenter.vue docs/四中心与智能任务规划前端说明.md progress.md > flight-track-frontend.patch` 保存当前补丁，再对同一文件清单执行 `git restore -p -- <文件>`，只选择本日志描述的动态轨迹、快速定位、视角规则和文档追加修改。
+
+## 2026-07-31 - Task: 更新 README 与主分支联调笔记
+
+### What was done
+- 更新前端 README 与四中心说明，统一本地后端代理为 `8001`，补充 `main` 发布分支、GIS 卫星/无人机轨迹验收步骤和后端文档链接。
+- 确认 GitHub 前端仓库只保留 `main` 分支，页面运行说明与当前本地服务一致。
+
+### Testing
+- `git diff --check -- README.md docs/四中心与智能任务规划前端说明.md progress.md`：通过，无空白错误。
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过，Vite 成功生成生产包。
+- `GET http://127.0.0.1:5173/`：返回 HTTP `200`；后端健康检查返回 `status=ok`。
+
+### Notes
+- 改动文件：
+  - `README.md`：更新端口、发布分支、GIS 轨迹验收和跨仓库文档链接。
+  - `docs/四中心与智能任务规划前端说明.md`：增加发布与联调章节。
+  - `progress.md`：追加本轮文档更新、验证和回滚记录。
+- 本轮未修改业务代码、地图数据、需求 Word 或前端 `.make` 临时资料。
+- 回滚点：本条日志之前的 README 与四中心说明状态。先执行 `git diff -- README.md docs/四中心与智能任务规划前端说明.md progress.md > readme-notes-frontend.patch` 保存补丁，再对同一文件清单执行 `git restore -p -- <文件>`，只选择本轮文档改动。
