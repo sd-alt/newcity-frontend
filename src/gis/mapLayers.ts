@@ -2,6 +2,11 @@ import * as Cesium from 'cesium'
 import { wktToGeoJson } from './wkt'
 import type { BasemapKey } from './mapConfig'
 import { getMapConfigSync } from './mapConfig'
+import {
+  createMapMarkerDataUri,
+  platformMapSymbol,
+  type MapSymbolKind,
+} from './mapSymbols'
 
 const COLORS = {
   sensors: Cesium.Color.fromCssColorString('#22C55E').withAlpha(0.9),
@@ -16,6 +21,88 @@ const COLORS = {
   tasksDone: Cesium.Color.fromCssColorString('#22C55E').withAlpha(0.45),
   tasksFail: Cesium.Color.fromCssColorString('#EF4444').withAlpha(0.5),
   targets: Cesium.Color.fromCssColorString('#7c3aed').withAlpha(0.7),
+}
+
+function colorHex(color: Cesium.Color): string {
+  const channel = (value: number) => Math.round(Math.max(0, Math.min(1, value)) * 255).toString(16).padStart(2, '0')
+  return `#${channel(color.red)}${channel(color.green)}${channel(color.blue)}`
+}
+
+function markerBillboard(
+  kind: MapSymbolKind,
+  color: Cesium.Color,
+  heightReference: Cesium.HeightReference = Cesium.HeightReference.CLAMP_TO_GROUND,
+) {
+  return {
+    image: createMapMarkerDataUri(kind, colorHex(color)),
+    width: 30,
+    height: 30,
+    verticalOrigin: Cesium.VerticalOrigin.CENTER,
+    heightReference,
+    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+  }
+}
+
+const clusterMarkerCache = new Map<string, HTMLCanvasElement>()
+
+function clusterMarkerCanvas(count: number, color: string) {
+  const label = count > 99 ? '99+' : String(count)
+  const cacheKey = `${label}:${color}`
+  const cached = clusterMarkerCache.get(cacheKey)
+  if (cached) return cached
+  const canvas = document.createElement('canvas')
+  canvas.width = 72
+  canvas.height = 72
+  const context = canvas.getContext('2d')
+  if (!context) return canvas
+  context.scale(2, 2)
+  context.beginPath()
+  context.arc(18, 18, 16, 0, Math.PI * 2)
+  context.fillStyle = 'rgba(255,255,255,0.96)'
+  context.fill()
+  context.strokeStyle = '#CBD5E1'
+  context.lineWidth = 1
+  context.stroke()
+  context.beginPath()
+  context.arc(18, 18, 12.5, 0, Math.PI * 2)
+  context.fillStyle = color
+  context.fill()
+  context.fillStyle = '#FFFFFF'
+  context.font = `700 ${label.length > 2 ? 9 : 11}px Arial, sans-serif`
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  context.fillText(label, 18, 18.5)
+  clusterMarkerCache.set(cacheKey, canvas)
+  return canvas
+}
+
+function enablePointClustering(
+  dataSource: Cesium.CustomDataSource,
+  color: string,
+  pixelOffsetX = 0,
+) {
+  const clustering = dataSource.clustering
+  clustering.enabled = true
+  clustering.pixelRange = 38
+  clustering.minimumClusterSize = 2
+  clustering.clusterBillboards = true
+  clustering.clusterPoints = true
+  clustering.clusterLabels = false
+  clustering.clusterEvent.addEventListener((entities, cluster) => {
+    cluster.point.show = false
+    cluster.label.show = false
+    cluster.billboard.show = true
+    cluster.billboard.id = entities
+    cluster.billboard.setImage(
+      `cluster-${entities.length > 99 ? '99+' : entities.length}-${color}`,
+      clusterMarkerCanvas(entities.length, color),
+    )
+    cluster.billboard.width = 36
+    cluster.billboard.height = 36
+    cluster.billboard.verticalOrigin = Cesium.VerticalOrigin.CENTER
+    cluster.billboard.pixelOffset = new Cesium.Cartesian2(pixelOffsetX, 0)
+    cluster.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY
+  })
 }
 
 function sensorColor(status: unknown): Cesium.Color {
@@ -73,11 +160,17 @@ function addGeometryEntity(
   wkt: string,
   color: Cesium.Color,
   description: string,
-  options?: { quiet?: boolean },
+  options?: {
+    quiet?: boolean
+    markerKind?: MapSymbolKind
+    polygonAlpha?: number
+    fitGroup?: 'ground' | 'space'
+  },
 ) {
   const geometry = wktToGeoJson(wkt)
   if (!geometry) return
   const quiet = options?.quiet === true
+  const markerKind = options?.markerKind
 
   if (geometry.type === 'Point') {
     const [lon, lat] = geometry.coordinates as [number, number]
@@ -85,15 +178,19 @@ function addGeometryEntity(
       id,
       name,
       description,
+      properties: options?.fitGroup ? { fitGroup: options.fitGroup } : undefined,
       position: Cesium.Cartesian3.fromDegrees(lon, lat),
-      point: {
-        pixelSize: 12,
-        color,
-        outlineColor: Cesium.Color.WHITE,
-        outlineWidth: 2,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
+      billboard: markerKind ? markerBillboard(markerKind, color) : undefined,
+      point: markerKind
+        ? undefined
+        : {
+            pixelSize: 12,
+            color,
+            outlineColor: Cesium.Color.WHITE,
+            outlineWidth: 2,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
       label: {
         text: name,
         font: '12px "Microsoft YaHei", "PingFang SC", sans-serif',
@@ -134,21 +231,11 @@ function addGeometryEntity(
         : undefined,
       polygon: {
         hierarchy: Cesium.Cartesian3.fromDegreesArray(degrees),
-        material: color.withAlpha(0.32),
+        material: color.withAlpha(options?.polygonAlpha ?? Math.min(color.alpha, 0.18)),
         outline: true,
         outlineColor: color.withAlpha(0.95),
         height: 0,
       },
-      point: center && !quiet
-        ? {
-            pixelSize: 10,
-            color: color.withAlpha(0.95),
-            outlineColor: Cesium.Color.WHITE,
-            outlineWidth: 2,
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          }
-        : undefined,
       label: center && !quiet
         ? {
             text: name,
@@ -272,6 +359,7 @@ function addDynamicTrajectory(
   item: Record<string, unknown>,
   color: Cesium.Color,
   description: string,
+  markerKind: MapSymbolKind,
 ) {
   const trajectory = (item.trajectory || {}) as {
     available?: boolean
@@ -286,6 +374,17 @@ function addDynamicTrajectory(
     Number.isFinite(Date.parse(String(point.time))),
   )
   if (!trajectory.available || points.length < 1) return false
+  const isSatellite = markerKind === 'satellite'
+  const trajectoryColor = isSatellite
+    ? Cesium.Color.fromCssColorString('#38BDF8')
+    : markerKind === 'uav'
+      ? Cesium.Color.fromCssColorString('#14B8A6')
+      : color
+  const trajectoryLabel = isSatellite
+    ? '实时轨道'
+    : markerKind === 'uav'
+      ? '飞行轨迹'
+      : '移动轨迹'
   const altitudeMeters = (point: SatelliteTrajectoryPoint) =>
     Number.isFinite(Number(point.altitudeKm))
       ? Number(point.altitudeKm) * 1000
@@ -304,8 +403,9 @@ function addDynamicTrajectory(
     if (segment.length < 2) continue
     dataSource.entities.add({
       id: `sensor-track-${id}-${index}`,
-      name: `${name} 真实轨道`,
+      name: `${name} ${trajectoryLabel}`,
       description,
+      properties: { fitGroup: isSatellite ? 'space' : 'ground' },
       polyline: {
         positions: segment.map((point) =>
           Cesium.Cartesian3.fromDegrees(
@@ -314,10 +414,10 @@ function addDynamicTrajectory(
             altitudeMeters(point),
           ),
         ),
-        width: 3,
+        width: isSatellite ? 3 : 4,
         material: new Cesium.PolylineGlowMaterialProperty({
-          color: Cesium.Color.fromCssColorString('#38BDF8').withAlpha(0.9),
-          glowPower: 0.18,
+          color: trajectoryColor.withAlpha(0.92),
+          glowPower: isSatellite ? 0.18 : 0.12,
         }),
         clampToGround: false,
         arcType: Cesium.ArcType.NONE,
@@ -349,24 +449,20 @@ function addDynamicTrajectory(
     id: `sensor-${id}`,
     name,
     description: currentDescription,
+    properties: { fitGroup: isSatellite ? 'space' : 'ground' },
     position: Cesium.Cartesian3.fromDegrees(
       Number(current.longitude),
       Number(current.latitude),
       altitudeMeters(current),
     ),
-    point: {
-      pixelSize: 13,
-      color: Cesium.Color.fromCssColorString('#F8FAFC'),
-      outlineColor: color,
-      outlineWidth: 4,
-      heightReference: Cesium.HeightReference.NONE,
-      disableDepthTestDistance: Number.POSITIVE_INFINITY,
-    },
+    billboard: markerBillboard(markerKind, color, Cesium.HeightReference.NONE),
     label: {
-      show: false,
+      show: true,
       text: Number.isFinite(Number(current.altitudeKm))
         ? `${name} · ${Number(current.altitudeKm).toFixed(0)} km`
-        : name,
+        : Number.isFinite(Number(current.altitudeM))
+          ? `${name} · ${Number(current.altitudeM).toFixed(0)} m`
+          : name,
       font: '12px "Microsoft YaHei", "PingFang SC", sans-serif',
       fillColor: Cesium.Color.WHITE,
       outlineColor: Cesium.Color.BLACK,
@@ -376,8 +472,12 @@ function addDynamicTrajectory(
       pixelOffset: new Cesium.Cartesian2(0, -16),
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
       showBackground: true,
-      backgroundColor: Cesium.Color.fromCssColorString('#082F49').withAlpha(0.78),
+      backgroundColor: trajectoryColor.withAlpha(0.78),
       backgroundPadding: new Cesium.Cartesian2(7, 4),
+      distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
+        0,
+        isSatellite ? 30000000 : 600000,
+      ),
     },
   })
   return true
@@ -415,6 +515,20 @@ export async function loadSensorLayer(
     )
     const status = item.status
     const color = sensorColor(status)
+    const markerKind = platformMapSymbol(typeCode)
+    const trajectory = (item.trajectory || {}) as {
+      available?: boolean
+      source?: string
+      message?: string
+      points?: unknown[]
+    }
+    const trajectoryStatus = trajectory.available
+      ? `轨迹: 已加载 ${Array.isArray(trajectory.points) ? trajectory.points.length : 0} 个位置点 · ${trajectory.source || '轨迹接口'}`
+      : typeCode === 'satellite'
+        ? `轨迹: ${trajectory.message || '缺少活动 TLE，仅显示登记位置'}`
+        : typeCode === 'uav'
+          ? '轨迹: 暂无位置遥测，仅显示登记位置'
+          : ''
     const desc = [
       `类型: ${item.typeName || item.typeCode || '-'}`,
       `状态: ${status || '-'}`,
@@ -422,22 +536,33 @@ export async function loadSensorLayer(
       `平台ID: ${id}`,
       wkt ? '位置: 已加载' : '',
       coverage ? '覆盖范围: 已加载' : '',
+      trajectoryStatus,
     ]
       .filter(Boolean)
       .join('<br/>')
     if (typeCode === 'satellite') {
-      addDynamicTrajectory(ds, id, name, item, color, desc)
+      const dynamicTrack = addDynamicTrajectory(ds, id, name, item, color, desc, markerKind)
+      if (!dynamicTrack && wkt) {
+        addGeometryEntity(ds, `sensor-${id}`, name, wkt, color, desc, {
+          markerKind,
+          fitGroup: 'space',
+        })
+      }
       continue
     }
-    const dynamicTrack = addDynamicTrajectory(ds, id, name, item, color, desc)
-    if (!dynamicTrack && wkt) addGeometryEntity(ds, `sensor-${id}`, name, wkt, color, desc)
+    const dynamicTrack = addDynamicTrajectory(ds, id, name, item, color, desc, markerKind)
+    if (!dynamicTrack && wkt) {
+      addGeometryEntity(ds, `sensor-${id}`, name, wkt, color, desc, { markerKind })
+    }
     if (track) addGeometryEntity(ds, `sensor-track-${id}`, `${name}-档案轨迹`, track, color, desc)
     if (coverage) {
       addGeometryEntity(ds, `sensor-cov-${id}`, `${name}-覆盖`, coverage, color.withAlpha(0.22), desc, {
         quiet: true,
+        polygonAlpha: 0.1,
       })
     }
   }
+  enablePointClustering(ds, '#0F766E', -20)
   await viewer.dataSources.add(ds)
   return ds
 }
@@ -469,7 +594,7 @@ export async function loadDataLayer(
     ]
       .filter(Boolean)
       .join('<br/>')
-    addGeometryEntity(ds, `data-${id}`, name, wkt, color, desc)
+    addGeometryEntity(ds, `data-${id}`, name, wkt, color, desc, { markerKind: 'data' })
 
     // 收集点位，用于简易热力/聚合示意（Word C2/D4）
     const geometry = wktToGeoJson(wkt)
@@ -481,7 +606,7 @@ export async function loadDataLayer(
     }
   }
 
-  // 0.05° 网格聚合热力圈
+  // 0.05° 网格聚合热力圈；单点不绘制热力面，避免与点图标重复表达
   const bins = new Map<string, { lon: number; lat: number; count: number }>()
   for (const p of points) {
     const key = `${(Math.floor(p.lon / 0.05) * 0.05).toFixed(2)},${(Math.floor(p.lat / 0.05) * 0.05).toFixed(2)}`
@@ -491,9 +616,9 @@ export async function loadDataLayer(
   }
   let bi = 0
   for (const bin of bins.values()) {
-    if (bin.count < 1) continue
-    const radius = Math.min(12000, 2500 + bin.count * 1500)
-    const alpha = Math.min(0.55, 0.15 + bin.count * 0.08)
+    if (bin.count < 2) continue
+    const radius = Math.min(7500, 1400 + Math.sqrt(bin.count) * 600)
+    const alpha = Math.min(0.3, 0.1 + Math.log2(bin.count) * 0.03)
     ds.entities.add({
       id: `data-heat-${bi++}`,
       name: `热力聚合 x${bin.count}`,
@@ -509,6 +634,7 @@ export async function loadDataLayer(
     })
   }
 
+  enablePointClustering(ds, '#1677FF')
   await viewer.dataSources.add(ds)
   return ds
 }
@@ -518,6 +644,13 @@ export async function loadTaskLayer(
   features: Array<Record<string, unknown>>,
 ) {
   const ds = new Cesium.CustomDataSource('tasks')
+  const areaCounts = new Map<string, number>()
+  for (const item of features) {
+    const wkt = String(item.geometryWkt || '')
+    if (!/^\s*polygon/i.test(wkt)) continue
+    const key = wkt.replace(/\s+/g, '').toUpperCase()
+    areaCounts.set(key, (areaCounts.get(key) || 0) + 1)
+  }
   for (const item of features) {
     const id = String(item.id ?? Math.random())
     const props = (item.properties || {}) as Record<string, unknown>
@@ -538,7 +671,11 @@ export async function loadTaskLayer(
     ]
       .filter(Boolean)
       .join('<br/>')
-    addGeometryEntity(ds, `task-${id}`, name, wkt, color, desc)
+    const areaCount = areaCounts.get(wkt.replace(/\s+/g, '').toUpperCase()) || 1
+    addGeometryEntity(ds, `task-${id}`, name, wkt, color, desc, {
+      markerKind: 'task',
+      polygonAlpha: 0.2 / areaCount,
+    })
 
     const targets = (item.targets || []) as Array<Record<string, unknown>>
     for (const target of targets) {
@@ -553,9 +690,11 @@ export async function loadTaskLayer(
         twkt,
         COLORS.targets,
         `任务: ${name}<br/>目标类型: ${tprops.targetType || '-'}`,
+        { markerKind: 'target' },
       )
     }
   }
+  enablePointClustering(ds, '#0F3D66', 20)
   await viewer.dataSources.add(ds)
   return ds
 }
@@ -569,6 +708,7 @@ export function flyToChina(viewer: Cesium.Viewer) {
 
 export async function flyToDataSources(viewer: Cesium.Viewer) {
   const all: Cesium.Entity[] = []
+  const ground: Cesium.Entity[] = []
   for (let i = 0; i < viewer.dataSources.length; i += 1) {
     const ds = viewer.dataSources.get(i)
     if (!ds || ds.show === false) continue
@@ -576,6 +716,8 @@ export async function flyToDataSources(viewer: Cesium.Viewer) {
       // 跳过无几何实体，降低 Cesium flyTo DeveloperError
       if (ent.position || ent.polygon || ent.polyline || ent.rectangle || ent.ellipse || ent.corridor) {
         all.push(ent)
+        const fitGroup = ent.properties?.getValue(viewer.clock.currentTime)?.fitGroup
+        if (fitGroup !== 'space') ground.push(ent)
       }
     }
   }
@@ -583,10 +725,11 @@ export async function flyToDataSources(viewer: Cesium.Viewer) {
     flyToChina(viewer)
     return
   }
+  const targets = ground.length ? ground : all
   try {
     // headless/部分环境下 flyTo Promise 可能不 resolve，必须超时兜底，避免业务按钮长期“加载中”
     await Promise.race([
-      viewer.flyTo(all, { duration: 0.8 }),
+      viewer.flyTo(targets, { duration: 0.8 }),
       new Promise<void>((resolve) => {
         window.setTimeout(resolve, 1800)
       }),
@@ -611,6 +754,8 @@ export async function loadWktFeatureLayer(
     getWkt?: (item: Record<string, unknown>) => string
     getName?: (item: Record<string, unknown>) => string
     getDescription?: (item: Record<string, unknown>) => string
+    markerKind?: MapSymbolKind
+    polygonAlpha?: number
   },
 ) {
   const prefix = options?.idPrefix || "feat"
@@ -638,7 +783,10 @@ export async function loadWktFeatureLayer(
     const id = String(item.id ?? Math.random())
     const wkt = getWkt(item)
     if (!wkt) continue
-    addGeometryEntity(ds, `${prefix}-${id}`, getName(item), wkt, color, getDescription(item))
+    addGeometryEntity(ds, `${prefix}-${id}`, getName(item), wkt, color, getDescription(item), {
+      markerKind: options?.markerKind,
+      polygonAlpha: options?.polygonAlpha,
+    })
   }
   await viewer.dataSources.add(ds)
   return ds
@@ -699,17 +847,8 @@ export async function loadAssociationLinksLayer(
         (link.fromLon + link.toLon) / 2,
         (link.fromLat + link.toLat) / 2,
       ),
-      point: {
-        pixelSize: 6,
-        color,
-        outlineColor: Cesium.Color.WHITE,
-        outlineWidth: 1,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
     })
   }
   await viewer.dataSources.add(ds)
   return ds
 }
-

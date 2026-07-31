@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
+import CardPager from '../components/CardPager.vue'
 import {
   showShellAndFit,
   drawAlgoRegionOverlay,
@@ -16,6 +17,7 @@ import {
 } from '../gis/mapShell'
 import { canByStatus, errMessage, pickId } from '../utils/errors'
 import { mapDrawGeometry } from '../gis/mapTools'
+import { tablePager as vTablePager } from '../utils/tablePager'
 
 const route = useRoute()
 const router = useRouter()
@@ -30,6 +32,10 @@ const selectedTask = ref<Record<string, unknown> | null>(null)
 const mappedCompletedIds = ref<Set<string>>(new Set())
 const pollTimer = ref<number | null>(null)
 const autoRefresh = ref(true)
+const modelPage = ref(1)
+const resultPage = ref(1)
+const modelPages = ['创建模型', '模型列表', '注册版本', '版本列表']
+const resultPages = ['结果列表', '业务关联']
 
 function isGeoJsonGeometry(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
@@ -278,7 +284,7 @@ const activeVersions = computed(() =>
 
 async function setTab(key: string) {
   tab.value = key
-  await router.replace({ path: '/algorithms', query: { tab: key } })
+  await router.replace({ path: route.path, query: { tab: key } })
 }
 function syncTab() {
   const t = route.query.tab
@@ -922,12 +928,13 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
       <div>
         <p class="eyebrow">算法处理中心</p>
         <h1>算法模型与处理任务</h1>
-        <p class="muted">闭环：创建模型 → 注册并发布版本 → 创建处理任务 → 调度执行 → 监控 → 查看结果</p>
+        <p class="muted">使用顺序：创建模型 → 注册并发布版本 → 创建处理任务 → 调度执行 → 监控 → 查看结果</p>
       </div>
-      <div class="form-row">
+      <div class="plan-map-actions panel soft dense page-head-toolbar">
+        <strong>地图联动</strong>
         <button class="btn ghost" type="button" :disabled="pending" @click="showAlgoMap" data-map-action="algo-layers">相关图层上图</button>
-      <button class="btn ghost" type="button" :disabled="pending" @click="locateLinkedOnMap((selectedTask || {}))">关联对象上图</button>
-      <button class="btn ghost" type="button" @click="clearAlgoRegionOnMap">清除算法区域</button>
+        <button class="btn ghost" type="button" :disabled="pending" @click="locateLinkedOnMap((selectedTask || {}))">关联对象上图</button>
+        <button class="btn ghost" type="button" @click="clearAlgoRegionOnMap">清除算法区域</button>
       </div>
     </header>
 
@@ -947,6 +954,8 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
 
     <section v-if="tab === 'models'" class="panel">
       <h2>算法增删改查 + 版本管理</h2>
+      <template v-if="modelPage === 1">
+      <h3>创建算法模型</h3>
       <div class="form-row">
         <label>编码<input v-model="modelForm.code" placeholder="ALG-DEMO-01" /></label>
         <label>名称<input v-model="modelForm.name" placeholder="覆盖分析" /></label>
@@ -969,8 +978,10 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
         <label class="check"><input v-model="modelForm.autoPublish" type="checkbox" /> 创建后自动发布版本</label>
         <button class="btn" type="button" :disabled="pending" @click="createModel">创建模型</button>
       </div>
-
-      <table class="table">
+      </template>
+      <template v-if="modelPage === 2">
+      <h3>算法模型列表</h3>
+      <table v-table-pager="{ label: '算法模型分页' }" class="table">
         <thead><tr><th>ID</th><th>编码</th><th>名称</th><th>版本</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="m in models" :key="String(m.id)">
@@ -987,7 +998,9 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
           </tr>
         </tbody>
       </table>
+      </template>
 
+      <template v-if="modelPage === 3">
       <h3>注册算法版本</h3>
       <div class="form-row">
         <label>模型
@@ -1008,8 +1021,10 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
         <label class="check"><input v-model="versionForm.autoPublish" type="checkbox" /> 创建后发布</label>
         <button class="btn" type="button" :disabled="pending" @click="createVersionOnly">创建版本</button>
       </div>
-
-      <table class="table">
+      </template>
+      <template v-if="modelPage === 4">
+      <h3>算法版本列表</h3>
+      <table v-table-pager="{ label: '算法版本分页' }" class="table">
         <thead><tr><th>ID</th><th>模型</th><th>版本</th><th>状态</th><th>实现</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="v in versions" :key="'v'+v.id">
@@ -1025,6 +1040,8 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
           </tr>
         </tbody>
       </table>
+      </template>
+      <CardPager v-model:page="modelPage" :pages="modelPages" label="算法模型与版本分页" />
     </section>
 
     <section v-if="tab === 'tasks'" class="panel">
@@ -1045,7 +1062,7 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
         <button class="btn ghost" type="button" @click="applyMapDrawToAlgoInput">写入地图绘制范围</button>
         <button class="btn" type="button" :disabled="pending" @click="createTask">创建任务</button>
       </div>
-      <table class="table">
+      <table v-table-pager="{ label: '算法任务分页' }" class="table">
         <thead><tr><th>ID</th><th>编码</th><th>状态</th><th>版本</th><th>进度</th></tr></thead>
         <tbody>
           <tr v-if="!tasks.length"><td colspan="8" class="muted">暂无处理任务。请先创建算法任务。</td></tr>
@@ -1063,7 +1080,7 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
     <section v-if="tab === 'run'" class="panel">
       <h2>任务调度与执行</h2>
       <p class="muted">支持：启动执行、暂停、恢复、终止、重新排队（对应文档：提交/排队/启动/暂停/恢复/终止/重新执行）。</p>
-      <table class="table">
+      <table v-table-pager="{ label: '任务调度分页' }" class="table">
         <thead><tr><th>ID</th><th>编码</th><th>状态</th><th>进度</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-if="!tasks.length"><td colspan="8" class="muted">暂无处理任务。请先创建算法任务。</td></tr>
@@ -1092,7 +1109,7 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
         <button class="btn ghost" type="button" @click="load">刷新状态</button>
         <label class="check"><input v-model="autoRefresh" type="checkbox" @change="autoRefresh ? startPolling() : stopPolling()" /> 自动刷新</label>
       </div>
-      <table class="table">
+      <table v-table-pager="{ label: '任务监控分页' }" class="table">
         <thead><tr><th>ID</th><th>编码</th><th>状态</th><th>进度</th><th>开始</th><th>结束</th><th>异常</th><th>详情</th></tr></thead>
         <tbody>
           <tr v-if="!tasks.length"><td colspan="8" class="muted">暂无处理任务。请先创建算法任务。</td></tr>
@@ -1135,7 +1152,8 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
     <section v-if="tab === 'results'" class="panel">
       <h2>处理结果管理</h2>
       <p class="muted">文档要求：查看、校验、下载、发布、归档，并与监测数据/观测任务/指标实例建立关联。执行路径：成功 → 校验 → 发布 →（可选）归档。</p>
-      <table class="table">
+      <template v-if="resultPage === 1">
+      <table v-table-pager="{ label: '处理结果分页' }" class="table">
         <thead><tr><th>ID</th><th>编码</th><th>状态</th><th>结果管理</th><th>输出摘要</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-if="!tasks.length"><td colspan="8" class="muted">暂无处理任务。请先创建算法任务。</td></tr>
@@ -1156,7 +1174,8 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
           </tr>
         </tbody>
       </table>
-
+      </template>
+      <template v-if="resultPage === 2">
       <h3>建立业务关联</h3>
       <div class="form-row">
         <label>处理任务ID<input v-model="linkForm.taskId" placeholder="选中任务后自动填入" /></label>
@@ -1166,7 +1185,12 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
         <label>外发渠道备注<input v-model="linkForm.externalChannel" placeholder="如：内部目录/业务系统（记录备注，非自动推送）" /></label>
         <button class="btn" type="button" @click="linkResultContext">保存关联</button>
       </div>
-      <pre v-if="selectedTask" class="result-pre">{{ JSON.stringify(withoutWktFields(selectedTask), null, 2) }}</pre>
+      <details v-if="selectedTask">
+        <summary>查看所选任务原始结果</summary>
+        <pre class="result-pre">{{ JSON.stringify(withoutWktFields(selectedTask), null, 2) }}</pre>
+      </details>
+      </template>
+      <CardPager v-model:page="resultPage" :pages="resultPages" label="处理结果内容分页" />
     </section>
   </section>
 </template>

@@ -2,12 +2,15 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
 import HomeView from '../pages/HomeView.vue'
 import LoginView from '../pages/LoginView.vue'
-import IndicatorsCenter from '../pages/IndicatorsCenter.vue'
 import ResourcesCenter from '../pages/ResourcesCenter.vue'
 import DataCenter from '../pages/DataCenter.vue'
 import PlanningCenter from '../pages/PlanningCenter.vue'
 import AlgorithmsCenter from '../pages/AlgorithmsCenter.vue'
 import ApplicationsCenter from '../pages/ApplicationsCenter.vue'
+import TaskCenterView from '../pages/TaskCenterView.vue'
+import ResourceKnowledgeView from '../pages/ResourceKnowledgeView.vue'
+import BusinessExecutionView from '../pages/BusinessExecutionView.vue'
+import AgentTaskWorkspace from '../pages/AgentTaskWorkspace.vue'
 import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
@@ -19,17 +22,33 @@ const router = createRouter({
       component: AppLayout,
       children: [
         { path: '', name: 'home', component: HomeView, meta: { requiresAuth: true } },
-        { path: 'indicators', name: 'indicators', component: IndicatorsCenter, meta: { requiresAuth: true } },
-        { path: 'resources', name: 'resources', component: ResourcesCenter, meta: { requiresAuth: true } },
-        { path: 'data', name: 'data', component: DataCenter, meta: { requiresAuth: true } },
-        { path: 'planning', name: 'planning', component: PlanningCenter, meta: { requiresAuth: true } },
-        { path: 'algorithms', name: 'algorithms', component: AlgorithmsCenter, meta: { requiresAuth: true } },
-        { path: 'applications', name: 'applications', component: ApplicationsCenter, meta: { requiresAuth: true } },
+        { path: 'tasks', name: 'task-center', component: TaskCenterView, meta: { requiresAuth: true } },
+        { path: 'resources/sensors', name: 'resource-sensors', component: ResourcesCenter, meta: { requiresAuth: true } },
+        {
+          path: 'resources/metadata',
+          redirect: (to) => ({
+            name: 'resource-sensors',
+            query: { ...to.query, tab: 'crud' },
+          }),
+        },
+        { path: 'resources/data', name: 'resource-data', component: DataCenter, meta: { requiresAuth: true } },
+        { path: 'resources/algorithms', name: 'resource-algorithms', component: AlgorithmsCenter, meta: { requiresAuth: true } },
+        { path: 'resources/knowledge', name: 'resource-knowledge', component: ResourceKnowledgeView, meta: { requiresAuth: true } },
+        { path: 'business', name: 'business-center', component: PlanningCenter, meta: { requiresAuth: true } },
+        { path: 'business/execution', name: 'business-execution', component: BusinessExecutionView, meta: { requiresAuth: true } },
+        { path: 'application', name: 'application-center', component: ApplicationsCenter, meta: { requiresAuth: true } },
+        { path: 'application/tasks', name: 'application-agent-tasks', component: AgentTaskWorkspace, meta: { requiresAuth: true } },
+        { path: 'indicators', redirect: { name: 'task-center' } },
+        { path: 'resources', redirect: { name: 'resource-sensors' } },
+        { path: 'data', redirect: { name: 'resource-data' } },
+        { path: 'planning', redirect: { name: 'business-center' } },
+        { path: 'algorithms', redirect: { name: 'resource-algorithms' } },
+        { path: 'applications', redirect: { name: 'application-center' } },
         {
           path: 'gis',
           name: 'gis',
           redirect: (to) => ({
-            name: 'applications',
+            name: 'application-center',
             query: {
               ...to.query,
               tab: typeof to.query.tab === 'string' ? to.query.tab : 'gis',

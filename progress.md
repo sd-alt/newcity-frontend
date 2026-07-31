@@ -1,0 +1,892 @@
+# Progress
+
+## 2026-07-28 - Task: 按完整方案改造四中心与智能任务规划前端
+
+### What was done
+- 将一级导航、首页功能目录和全局搜索统一为任务、资源、业务、应用四中心，旧六中心 URL 仅保留重定向兼容，不再重复建设入口。
+- 新增任务中心手工指标建模与任务指标体系、传感器八元组、知识库、执行成果、应用中心三模式 Agent 工作区，并保留 Cesium 地图公共工作区。
+- 手动模式支持地图多边形 WKT、立即任务草案、跳转并绑定任务指标；AI/多 Agent 模式展示阶段轨迹、人工确认、工具来源、工件、补充信息和暂停/恢复/重试/取消/接管。
+- 按地学作业台方向使用岩层灰、测绘青和预警琥珀，流程轨迹作为唯一强视觉元素；补齐加载、空数据、错误、校验、反馈、搜索、分页与确认交互。
+- 新增前端路由、页面与运行说明，并把既有资源、数据、规划、算法、应用页面接入四中心规范路径。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 80 个模块并生成生产包。
+- 规范路径静态核对：功能目录和全局搜索不再输出 `/indicators`、`/data`、`/planning`、`/algorithms`、`/applications` 旧路径；`AppLayout` 仅定义任务、资源、业务、应用四个一级中心。
+- Chrome/Playwright 本地真实浏览器验收：使用演示账号登录后，一级入口精确为“任务中心、资源中心、业务中心、应用中心”；应用任务页显示“手动创建、AI辅助、多Agent自动规划”和地图绘制入口，页面无横向溢出、无运行时 `pageerror`。截图位于系统临时目录，未写入仓库。
+- `git diff --check`：通过，无空白错误。
+
+### Notes
+- 改动文件：
+  - `src/router/index.ts`：建立四中心规范路由与旧路径重定向。
+  - `src/components/AppLayout.vue`：将顶部和左侧导航收敛为四中心，并统一搜索、详情跳转与地图对象定位路径。
+  - `src/features/catalog.ts`：用四中心功能清单替换旧六中心目录。
+  - `src/pages/HomeView.vue`：新增四中心业务入口与职责说明。
+  - `src/api/endpoints.ts`：增加四中心模型、业务动作与 Agent 运行 API。
+  - `src/gis/mapShell.ts`：让四中心新路径复用既有 Cesium 图层模式。
+  - `src/pages/TaskCenterView.vue`：实现基础指标、六层建模、任务指标绑定/确认与版本追溯。
+  - `src/pages/SensorMetadataView.vue`：实现传感器八元组统一详情、编辑和敏感凭据隔离。
+  - `src/pages/ResourceKnowledgeView.vue`：实现知识检索、分页和维护。
+  - `src/pages/BusinessExecutionView.vue`：实现执行进度、模拟推进、成果汇集与查看。
+  - `src/pages/AgentTaskWorkspace.vue`：实现手动、AI 辅助、多 Agent 任务入口与运行轨迹工作区。
+  - `src/pages/ResourcesCenter.vue`、`DataCenter.vue`、`PlanningCenter.vue`、`AlgorithmsCenter.vue`、`ApplicationsCenter.vue`：将既有页面的地图刷新与内部跳转改为当前四中心路径。
+  - `docs/四中心与智能任务规划前端说明.md`：记录入口、路由、三模式流程、视觉约束和验证命令。
+  - `progress.md`：新增并记录本轮实施、验证与回滚点。
+- 回滚方式：本仓库本轮改动均未提交；确认需要整体回滚后，可对上述已跟踪文件执行 `git restore -- <文件>`，再删除本轮新增的五个 Vue 页面、`docs/四中心与智能任务规划前端说明.md` 和 `progress.md`。回滚前建议先用 `git diff > four-center-frontend.patch` 保存补丁。
+
+## 2026-07-28 - Task: 展示多指标共同覆盖与传感资源协同关系
+
+### What was done
+- 在现有规划工作台第 8 步内增加多指标共同覆盖、总体并集覆盖、覆盖错位和指标满足情况，不新增一级中心或重复页面。
+- 增加“共同覆盖—覆盖错位—未覆盖”空间比例带，并展示竞争、互补、增强、协作关系数量、资源组合与计算依据。
+- 多指标评估完成后，Cesium 地图优先绘制共同覆盖和共同缺口；单指标任务保持原有覆盖展示行为。
+- 保留完整计算证据入口并继续过滤内部 WKT 字段，更新四中心前端说明。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 80 个模块并生成生产包。
+- 协同评估针对性类型检查：通过，多指标与单指标返回结构均兼容。
+
+### Notes
+- 改动文件：
+  - `src/pages/PlanningCenter.vue`：增加协同评估摘要、空间比例带、关系表和共同覆盖地图选择。
+  - `docs/四中心与智能任务规划前端说明.md`：记录多指标协同评估展示与地图行为。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- `frontend-design` 技能用于复核信息层级，并将通用数字卡片补充为直接表达空间关系的覆盖比例带；未改变既有地学作业台配色和页面结构。
+- 回滚方式：先执行 `git diff -- src/pages/PlanningCenter.vue docs/四中心与智能任务规划前端说明.md progress.md > collaborative-planning-frontend.patch` 保存补丁；确认这些文件没有本轮之后的新改动，再对同一文件清单执行 `git restore -- <文件清单>`。
+
+## 2026-07-28 - Task: 复审并收敛规划评价区视觉
+
+### What was done
+- 按实际 339px 业务面板修正协同指标布局，四项指标由强制单行改为随容器宽度自动换列，消除侧栏横向溢出。
+- 单指标任务使用“指标有效覆盖”语义，多指标任务保留“多指标共同覆盖”；覆盖比例统一显示至最多两位小数。
+- 将窄面板中需要横向拖动的五列资源关系表改为紧凑资源组合记录，完整保留协同类型、空间交叠、新增覆盖和计算依据。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 80 个模块并生成生产包。
+- Chrome/Playwright 真实浏览器验收：以 `demo` 演示任务完成优化、增补和满足度评估；1440×1000 与 1024×768 视口下，业务侧栏、评价面板、指标网格和资源组合记录均无横向溢出；单指标文案与 `7.13%` 数值精度正确；无 `pageerror` 和失败请求。截图保存在系统临时目录，未写入仓库。
+- `git diff --check`：通过，无空白错误；仅提示既有 LF/CRLF 工作区转换信息。
+
+### Notes
+- 改动文件：
+  - `src/pages/PlanningCenter.vue`：收敛协同评价布局、单指标文案、百分比精度与资源关系呈现。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- `frontend-design` 用于保持现有地学作业台的青灰配色、紧凑密度和信息层级；浏览器技能的 CLI 在本机不可用，改用项目已安装的 Playwright 和本机 Chrome 完成等价实机验收。
+- 回滚方式：由于 `PlanningCenter.vue` 已含此前未提交改动，请执行 `git restore -p -- src/pages/PlanningCenter.vue progress.md`，仅选择本条记录描述的自动换列、单指标文案/精度、`relation-list` 模板与样式以及本日志块，避免整文件回退覆盖既有工作。
+
+## 2026-07-28 - Task: 增加可隐藏业务引导并融合传感器八类档案
+
+### What was done
+- 新增可复用的上下文引导组件：首次展示业务阅读顺序，可隐藏、刷新后保持隐藏，并通过轻量入口重新展开。
+- 在规划满足度评估中按“任务判定、空间质量、资源组合”解释指标与资源关系，避免用户面对结果数字时缺少行动依据。
+- 将“传感器八元组”调整为“传感器详情”：资源列表可携带传感器 ID 直接进入档案，页面先显示当前资源、所属平台、状态与八类档案完整度，再按业务含义维护八类并列信息。
+- 移除容易被理解成八步流程的圆形数字和编号页签，改用完成状态点及“身份、能力、位置、维护”等自然语言说明；同步更新导航、搜索目录和使用文档。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 83 个模块并生成生产包。
+- Chrome/Playwright 真实浏览器验收：从传感器资源列表点击“详情档案”正确进入 `/resources/metadata?sensorId=24`；选中资源、导航名称和档案完整度正确；引导隐藏后刷新保持隐藏，重新展开可用；规划评价引导可隐藏并保留恢复入口。
+- 浏览器运行检查：传感器详情页与规划评价页在 339px 业务侧栏均无横向溢出，无 `pageerror` 和失败请求。
+- 运行状态：前端 HTTP 200；后端 `/api/health/` HTTP 200，返回 `status=ok`。
+- `git diff --check`：通过，无空白错误；仅提示既有 LF/CRLF 工作区转换信息。
+
+### Notes
+- 改动文件：
+  - `src/components/ContextGuide.vue`：新增可持久隐藏、可恢复的作业导线组件。
+  - `src/pages/PlanningCenter.vue`：为协同评估增加业务判读引导。
+  - `src/pages/SensorMetadataView.vue`：将八元组重组为带资源上下文、完整度和业务说明的传感器详情档案。
+  - `src/pages/ResourcesCenter.vue`：在传感器列表增加指定资源的详情档案入口。
+  - `src/components/AppLayout.vue`：导航名称由“传感器八元组”调整为“传感器详情”。
+  - `src/features/catalog.ts`：同步全局搜索目录名称。
+  - `docs/四中心与智能任务规划前端说明.md`：记录引导隐藏规则和八类档案使用方式。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- `frontend-design` 用于把通用教程改造成符合地学作业台的内嵌判读导线，并依据“八类并列档案而非八步流程”的真实结构调整导航和视觉层级。
+- 回滚方式：这些文件包含此前未提交工作，请执行 `git restore -p -- src/components/AppLayout.vue src/features/catalog.ts src/pages/PlanningCenter.vue src/pages/ResourcesCenter.vue src/pages/SensorMetadataView.vue docs/四中心与智能任务规划前端说明.md progress.md`，仅选择本条记录对应修改；再执行 `git clean -n -- src/components/ContextGuide.vue` 核对目标，确认后用 `git clean -f -- src/components/ContextGuide.vue` 删除本轮新增组件。
+
+## 2026-07-28 - Task: 完成四中心全局引导、信息层级收敛与 AI 设置
+
+### What was done
+- 增加覆盖整套系统的任务闭环引导，按“应用发起—任务定义—资源准备—业务规划—成果回到应用”说明当前阶段、下一步动作和跨中心入口；支持隐藏、刷新记忆、恢复展开与窄屏无障碍名称。
+- 首页四中心按真实业务闭环重排，将通用数字卡片收敛为资源、数据、任务三类运行判读；资源中心把卫星和移动轨迹接入折叠为高级入口，使平台与传感器日常管理优先出现。
+- 应用中心 GIS 去除重复统计和重复图层开关，只保留一份图层账本；统计标题去除开发编号与实现术语。
+- AI 助手增加与现有地学作业台一致的设置视图，只读展示模型服务状态，并保存默认任务方式与技术运行记录显隐；设置实时同步到综合感知任务入口，浏览器不保存 API Key 或服务地址。
+- 更新四中心前端说明，明确全局引导、中心信息层级、AI 偏好和密钥边界。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 89 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误；仅提示既有 LF/CRLF 工作区转换信息。
+- 本机服务检查：前端 `http://127.0.0.1:5173/` 与后端 `http://127.0.0.1:8001/api/health/` 均返回 HTTP 200。
+- agent-browser 本机 Chrome 实机验收：覆盖 `/`、`/tasks`、`/resources/sensors?tab=crud`、`/business`、`/application`、`/application/tasks`；1440×1000 与 1024×768 均无横向溢出或页面异常。
+- 交互验收：全局引导首次展开、隐藏后刷新保持、重新打开和跨中心跳转均正常；资源高级接入默认折叠；应用 GIS 仅有一份图层账本；AI 设置保存“手动创建”后任务页主操作立即同步，偏好正确写入浏览器本地存储。
+- 验收截图保存在 `F:\aidata\qa-newcity-20260728\screenshots`，未写入仓库。
+
+### Notes
+- 改动文件：
+  - `src/components/WorkspaceGuide.vue`：新增可隐藏、可恢复、可跨中心跳转的全局任务闭环引导。
+  - `src/components/AppLayout.vue`：在登录后的全局顶部接入使用引导。
+  - `src/pages/HomeView.vue`：重排四中心业务闭环并将统计改为运行判读。
+  - `src/pages/ResourcesCenter.vue`：将卫星和移动轨迹接入改为默认折叠的高级入口。
+  - `src/pages/ApplicationsCenter.vue`：去除重复统计与开发术语，合并为单一图层账本。
+  - `src/components/AssistantPanel.vue`：增加模型服务状态和安全的 AI 设置视图。
+  - `src/pages/AgentTaskWorkspace.vue`：读取并实时应用默认任务方式和技术详情偏好。
+  - `src/utils/aiPreferences.ts`：新增不含密钥的本地 AI 偏好读写与同步事件。
+  - `src/styles.css`：将 AI 助手融入测绘青、岩层灰、预警琥珀视觉并补充设置控件样式。
+  - `docs/四中心与智能任务规划前端说明.md`：记录业务闭环、中心信息层级和 AI 配置边界。
+  - `progress.md`：追加本轮实施、验证和回滚记录。
+- `frontend-design` 用于把全局引导、运行判读和 AI 设置统一为地学监测作业语言；`agent-browser` 用于真实浏览器双尺寸交互与页面错误验收。
+- 回滚方式：先执行 `git diff -- src/components/AppLayout.vue src/components/AssistantPanel.vue src/pages/AgentTaskWorkspace.vue src/pages/ApplicationsCenter.vue src/pages/HomeView.vue src/pages/ResourcesCenter.vue src/styles.css docs/四中心与智能任务规划前端说明.md progress.md > four-center-guidance-ai-settings.patch` 保存补丁；再用 `git restore -p -- <上述已跟踪文件>` 仅选择本日志块对应改动。新增文件先用 `git clean -n -- src/components/WorkspaceGuide.vue src/utils/aiPreferences.ts` 核对，确认后再执行同一命令的 `-f` 版本删除。
+
+## 2026-07-28 - Task: 去除抽象流程文案并调整顶部搜索图标
+
+### What was done
+- 将首页、全局使用引导和算法页面中的“闭环”及成果回流表述改为直接操作语言，统一使用“填写需求、配置指标、检查资源、制定方案”等用户可执行动作。
+- 全局引导改用“需求、指标、资源、方案”标记当前用途，不再使用“发起、定义、准备、规划”等方案汇报式阶段名称。
+- 顶部搜索框删除左侧重复放大镜和右侧箭头，将唯一的标准搜索图标放进右侧提交按钮，并调整输入区留白与加载状态。
+- 同步更新四中心前端说明中的使用顺序描述。
+
+### Testing
+- `rg -n "闭环" src docs/四中心与智能任务规划前端说明.md`：无匹配，正式页面源码与使用说明不再出现该词。
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 89 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误；仅提示既有 LF/CRLF 工作区转换信息。
+- agent-browser 本机 Chrome 验收：首页和全局引导使用直接操作文案；搜索框在 1440×1000 与 1024×768 下均无横向溢出，图标在右侧按钮内居中，输入和点击搜索可用，无页面异常。
+- 验收截图：`F:\aidata\qa-newcity-20260728\screenshots\copy-search-1440.png`、`copy-search-1024.png`，未写入仓库。
+
+### Notes
+- 改动文件：
+  - `src/components/WorkspaceGuide.vue`：将抽象流程说明改为直接操作提示。
+  - `src/pages/HomeView.vue`：将四中心入口名称和说明改为用户动作语言。
+  - `src/pages/AlgorithmsCenter.vue`：将模型处理说明中的“闭环”改为“使用顺序”。
+  - `src/components/AppLayout.vue`：移除搜索输入框左侧重复图标。
+  - `src/styles.css`：将标准放大镜绘制在右侧搜索按钮并调整输入留白。
+  - `docs/四中心与智能任务规划前端说明.md`：同步页面使用顺序和文案规则。
+  - `progress.md`：追加本轮实施、验证和回滚记录。
+- `frontend-design` 用于删去方案汇报式表达并把搜索控件收敛为单一明确动作；`agent-browser` 用于验证真实顶栏尺寸、搜索交互和页面文案。
+- 回滚方式：执行 `git revert <本轮提交号>` 可整体回滚；提交前可先用 `git diff -- src/components/WorkspaceGuide.vue src/pages/HomeView.vue src/pages/AlgorithmsCenter.vue src/components/AppLayout.vue src/styles.css docs/四中心与智能任务规划前端说明.md progress.md > copy-search-fix.patch` 保存补丁，再对同一文件清单执行 `git restore -- <文件清单>`。
+
+## 2026-07-28 - Task: 参考本地 Make 方案收敛前端视觉
+
+### What was done
+- 参考仓库根目录的 Make 设计文件，将前端统一为浅灰应用外壳、白色业务面板和测绘青操作色，地图改为带留白和大圆角的主画布。
+- 将深色渐变导航和地图工具改为浅色业务控件，统一按钮、输入框、卡片、下拉菜单、详情抽屉和浮层的圆角与阴影层级。
+- 收敛首页四中心入口、任务运行区和全局引导的卡片装饰；AI 助手改为白色浮层和普通对话图标，保留设置、对话和可收起能力。
+- 登录页移除渐变光晕，改为灰色背景、深测绘青品牌区和白色表单；同步记录后续页面应遵守的视觉约束。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 89 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- agent-browser 实机验收：使用 `demo` 账号检查首页、任务中心、指标体系管理、手工指标建模、全局引导、AI 助手和登录页；1262×568 与 1024×768 下地图、侧栏、浮层和顶部搜索无横向溢出。
+- 浏览器错误检查：无页面错误；控制台只有 Vite 连接与热更新调试信息。
+- 服务检查：`http://127.0.0.1:5173/` 与 `http://127.0.0.1:8001/api/health/` 均返回 HTTP 200。
+
+### Notes
+- 改动文件：
+  - `src/styles.css`：统一全局视觉变量、浅色框架、圆角地图、地图工具、详情抽屉、助手与登录页样式。
+  - `src/components/WorkspaceGuide.vue`：将全局引导改为克制的白色圆角浮层。
+  - `src/components/AssistantPanel.vue`：将助手入口由星光图标改为普通对话图标。
+  - `src/pages/HomeView.vue`：收敛四中心入口和态势判读卡片层级。
+  - `src/pages/AgentTaskWorkspace.vue`：统一任务方式、草案、运行状态和记录区的圆角与边框。
+  - `docs/四中心与智能任务规划前端说明.md`：补充地图主画布、圆角、阴影和禁用装饰的协作规范。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- `frontend-design` 用于把 Make 参考中的灰色外壳、白色面板和地图主次关系适配到现有 Vue/GIS 业务结构；Figma 读取因当前连接账号无文件编辑权限未返回设计结构，随后直接读取用户放在仓库中的 Make 文件及完整预览图完成视觉核对。
+- 用户提供的 `Beautify design page (new.make` 保持未跟踪、未修改，不纳入本轮代码交付。
+- 回滚方式：执行 `git diff -- src/styles.css src/components/WorkspaceGuide.vue src/components/AssistantPanel.vue src/pages/HomeView.vue src/pages/AgentTaskWorkspace.vue docs/四中心与智能任务规划前端说明.md progress.md > make-style-refresh.patch` 保存补丁，再对同一文件清单执行 `git restore -p -- <文件清单>`，仅选择本日志块对应修改。
+
+## 2026-07-28 - Task: 收敛前端冗余层级与低频地图工具
+
+### What was done
+- 顶部在左侧业务面板展开时只保留系统名称，当前中心和页面由侧栏标题与选中标签表达；收起侧栏后才恢复顶部位置提示，避免两处重复。
+- 首页将四张中心卡片合并为一个“填写监测需求”主入口和三个轻量去向；资源、数据和任务总数改为异常与待处理事项列表，任务和异常资源各保留前三条。
+- 左侧页面隐藏重复页标题，二级标签改为单行紧凑排列，指标体系管理和手工指标建模在窄侧栏中仍可直接切换。
+- 地图默认只显示视图、底图、图层和图例；测量、绘制、框选、清除、刷新及全屏进入“更多地图工具”，功能保留并可随时展开或收起。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 89 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- agent-browser 实机验收：1262×720 检查首页、全局引导隐藏状态和任务中心；1024×768 检查手工指标建模，地图仍为主画布，左侧表单和四个二级标签无横向溢出。
+- 交互验收：“更多地图工具”展开后完整出现测量、绘制、框选、清除、刷新和全屏，收起后恢复八个常用入口；左侧面板收起和重新展开正常。
+- 浏览器错误检查：无页面错误；控制台只有 Vite 连接与热更新调试信息。
+- 服务检查：`http://127.0.0.1:5173/` 与 `http://127.0.0.1:8001/api/health/` 均返回 HTTP 200。
+
+### Notes
+- 改动文件：
+  - `src/components/AppLayout.vue`：按左侧面板状态控制顶部位置提示，减少重复导航信息。
+  - `src/components/MapBasemap.vue`：增加低频地图工具展开与收起状态。
+  - `src/pages/HomeView.vue`：将四中心卡片和数字统计收敛为主入口、轻量去向和待处理列表。
+  - `src/styles.css`：隐藏侧栏重复页标题并压缩二级标签密度。
+  - `docs/四中心与智能任务规划前端说明.md`：记录首页信息收敛和地图工具分级规则。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- `frontend-design` 用于依据“每个元素只承担一个任务”的原则删除重复标题、重复状态数字和同时展开的低频操作，没有增加新的装饰层。
+- 回滚方式：执行 `git diff -- src/components/AppLayout.vue src/components/MapBasemap.vue src/pages/HomeView.vue src/styles.css docs/四中心与智能任务规划前端说明.md progress.md > redundancy-reduction.patch` 保存补丁，再对同一文件清单执行 `git restore -p -- <文件清单>`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 明确并优化左侧二级标题层级
+
+### What was done
+- 将中心内功能入口由圆角按钮改为纯文字二级导航，以当前项文字和底部线表达位置，避免与内容区操作按钮混淆。
+- 短导航保持单行；资源中心和业务中心等项目较多的导航自动换行完整展示，避免入口被无提示地藏在横向滚动区域。
+- 明确中心名称、功能导航和内容标题的三级信息关系，后续页面沿用同一规则。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 89 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- agent-browser 实机验收：在 1024×768 下检查任务中心、资源中心和业务中心；任务中心四项保持单行，资源中心七项与业务中心五项完整换行展示，当前项状态清楚且内容区无横向溢出。
+- 浏览器错误检查：无页面错误；控制台只有 Vite 连接与热更新调试信息。
+- `git diff --check`：通过，无空白错误。
+
+### Notes
+- 改动文件：
+  - `src/styles.css`：将左侧二级导航改为文字下划线样式，并允许项目较多时自然换行。
+  - `docs/四中心与智能任务规划前端说明.md`：补充一级中心、二级功能导航和内容标题的层级规则。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- `frontend-design` 用于校准标题层级和导航密度；实际页面验收后放弃不可发现的隐藏横向滚动，改为按项目数量自然换行。
+- 回滚方式：执行 `git diff -- src/styles.css docs/四中心与智能任务规划前端说明.md progress.md > secondary-heading.patch` 保存补丁，再对同一文件清单执行 `git restore -p -- <文件清单>`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 将左侧导航改为传统两级结构
+
+### What was done
+- 将四中心导航改为常驻一级入口，点击中心后在同一侧栏展开所属二级功能，切换中心时上一组二级功能自动收起。
+- 一级入口采用名称、简短说明、状态点和展开方向提示；当前二级使用浅色底与文字强调，路由状态与导航选中状态保持一致。
+- 移除业务面板顶部横向二级导航，面板只保留当前功能提示、收起控制和实际业务内容；同步平衡导航与业务面板宽度，避免额外挤压地图。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 89 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- agent-browser 实机验收：在 1024×768 下检查任务中心和资源中心；一级切换后只展开对应二级功能，资源中心七个二级入口完整显示，点击“传感器详情”后路由与选中状态同步。
+- 页面控制台仅有 Vite 连接调试信息；`git diff --check` 通过，无空白错误。
+
+### Notes
+- 改动文件：
+  - `src/components/AppLayout.vue`：增加中心说明和树状二级导航，移除业务面板顶部横向二级入口并调整默认面板宽度。
+  - `src/styles.css`：实现传统侧栏的一级卡片、二级缩进列表、选中状态与展开方向样式。
+  - `docs/四中心与智能任务规划前端说明.md`：将左侧导航规范更新为传统两级结构。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- `frontend-design` 用于将参考图的白色选中卡、状态点和简短说明收敛到现有测绘青视觉体系；没有照搬参考图的页面结构或新增重复首页入口。
+- 回滚方式：执行 `git diff -- src/components/AppLayout.vue src/styles.css docs/四中心与智能任务规划前端说明.md progress.md > traditional-left-navigation.patch` 保存补丁，再对同一文件清单执行 `git restore -p -- <文件清单>`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 合并传感器详情并保持地图持续工作
+
+### What was done
+- 将“传感器详情”从独立二级入口并入“传感器资源”：点击列表中的“详情档案”后，在地图右侧浮层查看和编辑八类档案，关闭后保留原资源页面与列表上下文。
+- 保留旧详情地址兼容跳转；功能搜索同步指向合并后的传感器资源页面。
+- 修正顶层路由按子路径重建整个工作台的问题，使四中心子路由复用同一个 AppLayout 与 Cesium 实例。
+- 地图路由切换改为保留已加载图层和相机视角，仅显示当前页面需要的图层、隐藏离开页面的图层，缺少的图层按需补载；业务数据实际变更时仍允许明确刷新。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 89 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- agent-browser 实机验收：1262×720 下从传感器资源列表打开 #24 档案，右侧浮层完整显示资源摘要、八类入口和通用信息编辑区；关闭后 URL 移除 `sensorId` 并保留资源列表。
+- 地图持续性验证：在浏览器中保存 Cesium canvas 对象引用，从“传感器资源”切换到“观测数据库”后对象引用仍一致，确认工作台与地图未卸载重建；页面控制台无业务错误。
+- `git diff --check`：通过，无空白错误。
+
+### Notes
+- 改动文件：
+  - `src/App.vue`：顶层路由 key 改为顶层匹配路径，避免子路由切换重建工作台。
+  - `src/components/AppLayout.vue`：移除独立详情二级入口，在全局右侧浮层承载传感器档案，并按地图业务类型监听路由。
+  - `src/gis/mapShell.ts`：增加地图图层配置识别和保留既有图层的路由同步方式，按业务中心控制辅助图层可见性。
+  - `src/pages/ResourcesCenter.vue`：资源列表中的详情操作改为在当前页面打开档案浮层。
+  - `src/pages/SensorMetadataView.vue`：支持嵌入右侧浮层并收敛嵌入态标题、引导和对象选择控件。
+  - `src/router/index.ts`：旧详情地址改为兼容重定向。
+  - `src/features/catalog.ts`：功能搜索入口改为合并后的资源与档案页面。
+  - `docs/四中心与智能任务规划前端说明.md`：记录详情合并与地图持续工作规则。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- `frontend-design` 用于把八类档案收进地图右侧白色浮层，保留资源列表和地图作为主上下文，没有再增加新的卡片层或独立页面。
+- 回滚方式：执行 `git diff -- src/App.vue src/components/AppLayout.vue src/gis/mapShell.ts src/pages/ResourcesCenter.vue src/pages/SensorMetadataView.vue src/router/index.ts src/features/catalog.ts docs/四中心与智能任务规划前端说明.md progress.md > merged-detail-persistent-map.patch` 保存补丁，再对同一文件清单执行 `git restore -p -- <文件清单>`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 优化合并详情的窄屏地图空间
+
+### What was done
+- 视口不超过 1100 像素时，打开传感器档案自动临时收起业务面板，为地图和档案浮层保留可读空间；关闭档案后恢复原面板状态。
+- 修正窄屏收起面板后顶部遗留单独路径分隔符的问题。
+
+### Testing
+- agent-browser 在 1024×768 下通过旧详情地址打开 #24 档案：旧地址正确转入资源页面，业务面板自动收起，地图、八类档案和编辑区均可见。
+- 关闭档案后 `sensorId` 参数移除、业务面板自动恢复；顶部路径分隔符计算样式为隐藏。
+- `npm.cmd run typecheck`、`npm.cmd run build` 通过；前端首页与后端健康接口均返回 HTTP 200。
+
+### Notes
+- 改动文件：
+  - `src/components/AppLayout.vue`：增加窄屏档案浮层打开与关闭时的业务面板状态恢复。
+  - `src/styles.css`：隐藏窄屏下无对应路径文字的分隔符。
+  - `docs/四中心与智能任务规划前端说明.md`：补充窄屏详情浮层的地图空间规则。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 回滚方式：执行 `git diff -- src/components/AppLayout.vue src/styles.css docs/四中心与智能任务规划前端说明.md progress.md > responsive-sensor-profile.patch` 保存补丁，再对同一文件清单执行 `git restore -p -- <文件清单>`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 统一传感器资源与档案卡片样式
+
+### What was done
+- 将传感器档案浮层中的资源摘要、八类档案入口和编辑区统一为白底、细灰边、12 像素圆角、无阴影的同一套卡片样式。
+- 移除摘要卡顶部粗色条；状态改为小型边框标签，当前档案只用测绘青边框和浅色底表达选中，不产生尺寸变化。
+- 将传感器资源页的普通面板与高级接入卡统一到相同圆角和边框规则，保留原有折叠与业务操作。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 89 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误。
+- agent-browser 实机验收：1262×720 下确认资源列表、地图和右侧档案浮层布局正常；1024×768 下重新打开 #24 档案后业务面板自动收起，地图与档案入口均保持可读。
+- 浏览器计算样式检查：资源摘要、八类入口和编辑卡均为 12px 圆角、`rgb(220, 221, 225)` 边框、无阴影；“属性信息”选中态为浅青底与测绘青边框。页面无业务错误，控制台仅有 Vite 连接调试信息。
+
+### Notes
+- 改动文件：
+  - `src/pages/ResourcesCenter.vue`：统一资源页普通面板与高级接入卡的边框、圆角、状态标签和展开态。
+  - `src/pages/SensorMetadataView.vue`：统一档案摘要、八类入口、编辑区及内部信息块的卡片样式。
+  - `docs/四中心与智能任务规划前端说明.md`：补充传感器资源与档案卡片的视觉约束。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- `frontend-design` 用于收敛卡片层级，只保留测绘青作为选中与完成状态提示，没有新增装饰层或动效。
+- 回滚方式：执行 `git diff -- src/pages/ResourcesCenter.vue src/pages/SensorMetadataView.vue docs/四中心与智能任务规划前端说明.md progress.md > sensor-card-unification.patch` 保存补丁，再对同一文件清单执行 `git restore -p -- <文件清单>`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 将二级业务页面与详情合并到右侧工作浮窗
+
+### What was done
+- 将应用主体由“左导航、左业务面板、地图”三列改为“左侧两级导航、地图”两列，二级功能内容统一放入地图右侧可收起工作浮窗。
+- 传感器资源列表与八类档案改为在同一个右侧浮窗内切换；进入详情后不再保留另一块左侧业务内容，返回时恢复资源列表。
+- 地图对象详情复用相同的右侧位置并临时替换业务浮窗，关闭对象详情后恢复原业务页面，避免两个右侧面板重叠。
+- 修正缺少 `tab` 参数时二级导航选中第一项的问题，改为使用当前中心默认功能；直接打开传感器档案时仍正确选中“传感器资源”。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 89 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误。
+- agent-browser 在 1262×720 下验证“传感器资源”只显示在地图右侧工作浮窗；点击 #24“详情档案”后，同一浮窗切换为八类档案，URL 为 `/resources/sensors?tab=crud&sensorId=24`。
+- 点击“返回资源列表”后 URL 恢复为 `/resources/sensors?tab=crud`；进入详情、返回列表及切换“观测数据库”前后 Cesium canvas 引用一致，地图未卸载重建。
+- 1024×768 下右侧工作浮窗、地图和左侧导航均可读；直接打开 `/resources/sensors?sensorId=24` 时当前二级标题为“传感器资源”。页面无业务错误，控制台仅有 Vite 连接调试信息。
+
+### Notes
+- 改动文件：
+  - `src/components/AppLayout.vue`：将二级业务内容改为右侧工作浮窗，统一业务页与地图对象详情的显示位置，并修正缺省二级选中状态。
+  - `src/pages/ResourcesCenter.vue`：让资源列表和传感器档案在同一页面容器内切换，并提供返回列表操作。
+  - `src/styles.css`：将应用网格改为左导航加地图，并实现右侧工作浮窗、尺寸调整和地图工具避让。
+  - `docs/四中心与智能任务规划前端说明.md`：更新二级页面与详情的统一承载规则。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- `frontend-design` 用于把左侧导航、地图和业务操作收敛为三个明确层级；右侧只保留一个工作表面，不再并排展示列表和详情。
+- 回滚方式：执行 `git diff -- src/components/AppLayout.vue src/pages/ResourcesCenter.vue src/styles.css docs/四中心与智能任务规划前端说明.md progress.md > right-workspace-merge.patch` 保存补丁，再对同一文件清单执行 `git restore -p -- <文件清单>`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 按参考页面统一工作台视觉风格
+
+### What was done
+- 将应用外壳、导航、地图、右侧工作浮窗和 AI 设置统一为浅灰、白色与蓝色强调体系，移除本轮可见区域中残留的青绿色状态。
+- 将地图与右侧工作浮窗统一为 24 像素圆角和轻阴影，内部普通面板、资源接入卡及八类档案卡统一为 16 像素圆角和细灰边。
+- 将顶部搜索图标移到输入框左侧，并统一首次使用引导的颜色、边框、圆角和阴影；引导隐藏与重新打开逻辑保持不变。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 89 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误。
+- Playwright 实机验收：1262×720 下资源列表、地图与右侧工作浮窗无重叠；传感器档案在同一浮窗完整显示资源摘要、八类入口和编辑区；1024×768 下左侧导航、地图和观测数据库工作浮窗仍可读。
+- 浏览器计算样式检查：左侧导航宽度 216px，地图和右侧工作浮窗圆角均为 24px；进入档案、返回列表并切换观测数据库前后 Cesium canvas 引用一致，控制台无错误。
+- 本地服务检查：Django `manage.py check` 通过，`/api/health/` 返回 HTTP 200；前端 `http://127.0.0.1:5173` 与后端 `http://127.0.0.1:8000` 均已运行。
+
+### Notes
+- 改动文件：
+  - `src/components/AppLayout.vue`：将顶部搜索按钮移到输入框左侧。
+  - `src/components/WorkspaceGuide.vue`：统一使用引导的蓝色强调、边框、圆角和浮层阴影。
+  - `src/styles.css`：统一全局颜色变量、圆角、应用外壳、导航、地图、右侧工作浮窗和 AI 设置样式。
+  - `src/pages/ResourcesCenter.vue`：统一资源页普通面板与高级接入卡的 16 像素圆角和蓝色展开态。
+  - `src/pages/SensorMetadataView.vue`：统一资源摘要、八类档案入口、编辑卡和完成状态颜色。
+  - `docs/四中心与智能任务规划前端说明.md`：记录本轮视觉颜色、圆角、搜索和引导规范。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill；视觉判断直接依据本地 `.make` 参考和实际页面截图。
+- 回滚方式：执行 `git diff -- src/components/AppLayout.vue src/components/WorkspaceGuide.vue src/styles.css src/pages/ResourcesCenter.vue src/pages/SensorMetadataView.vue docs/四中心与智能任务规划前端说明.md progress.md > reference-style-polish.patch` 保存当前补丁，再对同一文件清单执行 `git restore -p -- <文件清单>`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 统一二级页面卡片与标题字号
+
+### What was done
+- 将二级导航对应的右侧工作区统一为 12 像素基础字号，解决无标签输入框和普通状态文字继承 16 像素字号的问题。
+- 将业务主卡、状态卡、时间轴、对比卡和图层卡统一为白底、细灰边、16 像素圆角且无阴影；地图联动和当前操作提示统一为浅蓝底、14 像素圆角。
+- 将卡片内 H2、H3、H4 分别收敛到 15、13、12 像素，并统一体系记录、知识条目、执行任务和结果卡的边框、圆角及浅蓝选中态。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 89 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误。
+- Playwright 实机验收：1262×720 下检查传感器资源、观测数据库和任务中心；可见主卡为 16px 圆角白底，联动提示卡为 14px 圆角浅蓝底，均无阴影。
+- 浏览器计算样式检查：H2、H3 实际字号分别为 15px、13px；三类页面均无横向溢出、无控制台错误。1024×768 下任务中心表单与记录卡仍完整可读且无横向溢出。
+
+### Notes
+- 改动文件：
+  - `src/styles.css`：新增右侧工作区统一卡片、标题、基础字号和重复记录卡规则。
+  - `docs/四中心与智能任务规划前端说明.md`：记录二级页面卡片层级和字号规范。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill。
+- 回滚方式：执行 `git diff -- src/styles.css docs/四中心与智能任务规划前端说明.md progress.md > secondary-card-unification.patch` 保存当前补丁，再对同一文件清单执行 `git restore -p -- <文件清单>`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 统一表格分页并将规划步骤改为流水线卡片
+
+### What was done
+- 为四中心及观测规划中的本地数据表统一增加每页 6 条的分页，总数和前后翻页集中显示在表格下方；资源查询与监测数据查询保留原有服务端分页。
+- 将观测规划的 9 张纵向步骤卡合并为“需求、指标、资源、规划、执行、成果”六段横向流水线，并在下方一次展示一个实际步骤卡片。
+- 将当前操作、步骤说明、任务状态和执行按钮合并到同一张步骤卡；已解锁步骤可前后翻看，已完成步骤可重新执行，未来步骤继续锁定。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 90 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- 表格覆盖检查：共 43 张表，41 张本地表接入统一分页，2 张服务端查询表保留原分页；资源表实际翻页从 `1 / 6` 正常切换到 `2 / 6`。
+- Playwright 使用本机 Edge 在 1262×720 和 1024×768 下验收：六段流水线完整显示，步骤卡高度稳定，未出现全局横向溢出、旧步骤卡残留或控制台错误。
+- 前端 `http://127.0.0.1:5173` 与后端健康接口 `http://127.0.0.1:8000/api/health/` 均返回 HTTP 200；`git diff --check` 通过。
+
+### Notes
+- 改动文件：
+  - `src/utils/tablePager.ts`：新增不改动源数据的通用表格分页指令。
+  - `src/pages/ResourcesCenter.vue`：为本地资源表增加分页，并统一服务端资源查询分页样式。
+  - `src/pages/IndicatorsCenter.vue`：为指标体系、实例和版本相关表格增加分页。
+  - `src/pages/DataCenter.vue`：为本地数据表增加分页，并统一服务端监测数据查询分页样式。
+  - `src/pages/AlgorithmsCenter.vue`：为模型、版本、任务、调度、监控和结果表格增加分页。
+  - `src/pages/ApplicationsCenter.vue`：为统计明细和图层目录表格增加分页。
+  - `src/pages/PlanningCenter.vue`：为规划表格增加分页，并将步骤区改为六段流水线和单步骤卡片。
+  - `src/styles.css`：增加统一分页控件样式并移除已停用的纵向步骤卡样式。
+  - `docs/四中心与智能任务规划前端说明.md`：记录分页规则和规划步骤交互。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill。
+- 回滚方式：执行 `git diff -- src/utils/tablePager.ts src/pages/ResourcesCenter.vue src/pages/IndicatorsCenter.vue src/pages/DataCenter.vue src/pages/AlgorithmsCenter.vue src/pages/ApplicationsCenter.vue src/pages/PlanningCenter.vue src/styles.css docs/四中心与智能任务规划前端说明.md progress.md > table-pagination-planning-pipeline.patch` 保存当前补丁，再对同一文件清单执行 `git restore -p -- <文件清单>`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 优化地图对象详情浮窗
+
+### What was done
+- 将地图对象详情从原始文本展示改为对象摘要、概览、空间和关联三层信息结构，状态直接显示在摘要中，移除内容重复的独立状态页。
+- 将对象属性改为字段名和值逐行展示，并把任务类型等内部值转换为业务中文；空间与关联只表达已有信息，不展示原始几何文本或虚构关联数量。
+- 将底部操作调整为对象类型对应的业务入口和主要地图定位操作；进入业务页面时关闭对象详情并恢复业务工作浮窗。
+- 将页签改为标准按钮和页签语义，支持方向键、Home 和 End 键切换；原有编辑、保存校验与地图同步逻辑保持不变。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- Playwright 使用本机 Edge 验证任务对象：1262×720 和 1024×768 下详情无横向溢出，底部操作完整可见，概览字段、空间状态和关联内容均正确显示。
+- 键盘验证：概览页按右方向键切换到空间页；任务“打开任务规划”后详情关闭、业务工作浮窗恢复，URL 更新为 `/business?tab=tasks`。
+- 传感器对象验证：正确显示“传感器”、名称、启用状态、空间状态、类型、资源标识和平台 ID，并提供“打开资源管理、地图定位、编辑资料”。
+- `npm.cmd run build` 与 `git diff --check`：通过；构建仅保留现有大于 500 kB 的单包体积提示。
+
+### Notes
+- 改动文件：
+  - `src/components/AppLayout.vue`：重组地图对象详情结构、字段解析、状态表达、页签键盘交互和业务入口行为。
+  - `src/styles.css`：增加对象摘要、状态、字段列表、标准页签、空间提示和固定操作区样式。
+  - `docs/四中心与智能任务规划前端说明.md`：记录地图对象详情的信息结构和交互规则。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill；`ui-ux-pro-max` 仅用于约束信息层级、状态非颜色单一表达、页签键盘操作和窄屏无溢出。
+- 回滚方式：执行 `git diff -- src/components/AppLayout.vue src/styles.css docs/四中心与智能任务规划前端说明.md progress.md > map-object-detail-polish.patch` 保存当前补丁，再对同一文件清单执行 `git restore -p -- <文件清单>`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 优化二级页面卡片层级与字号
+
+### What was done
+- 将二级导航对应的右侧工作区调整为“白色主分区、浅灰内容组”两层结构，取消步骤、统计、高级入口和重复记录的多重白底描边，减少卡片套卡片的生硬感。
+- 将主分区、分组和辅助标题分别收敛到 13、12 和 11 像素，统计数字收敛到 15—16 像素，并同步压缩卡片留白与间距。
+- 统一资源高级接入、任务体系记录、规划步骤与协同结果、应用统计和图层账本的圆角与选中反馈，保留表单、表格和地图操作逻辑不变。
+
+### Testing
+- `npm.cmd --prefix .\newcity-frontend run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd --prefix .\newcity-frontend run build`：通过，Vite 7.3.6 成功转换 90 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误。
+- Playwright 使用本机 Edge 在 1262×720 和 1024×768 下验收传感器资源、观测规划、指标体系和场景统计页面；页面与右侧工作区均无横向溢出，无非底图网络原因的控制台错误。
+- 浏览器计算样式检查：主分区 H2 为 13px、分组 H3 为 12px；高级入口、规划步骤和重复记录实际为浅灰底、透明边框、10px 圆角，选中记录保留蓝色边框。
+
+### Notes
+- 改动文件：
+  - `src/styles.css`：重整右侧工作区主分区、嵌套内容组、标题、统计数字和重复记录的公共样式。
+  - `src/pages/ResourcesCenter.vue`：将高级接入入口改为紧凑的浅灰内容组。
+  - `src/pages/TaskCenterView.vue`：统一任务体系记录的浅灰底、圆角和字号。
+  - `src/pages/PlanningCenter.vue`：弱化步骤、协同指标和关联结果的嵌套卡片边界。
+  - `src/pages/ApplicationsCenter.vue`：统一统计摘要和图层账本的内容组样式，并降低统计数字字号。
+  - `docs/四中心与智能任务规划前端说明.md`：更新右侧工作区的卡片层级和字号规范。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill；`ui-ux-pro-max` 用于核对数据密集型工作台的层级、密度和可读性，`browser-use` 命令在本机不可用，因此页面验证改用项目现有 Playwright 与 Edge。
+- 回滚方式：执行 `git diff -- src/styles.css src/pages/ResourcesCenter.vue src/pages/TaskCenterView.vue src/pages/PlanningCenter.vue src/pages/ApplicationsCenter.vue docs/四中心与智能任务规划前端说明.md progress.md > secondary-card-density-polish.patch` 保存当前补丁，再对同一文件清单执行 `git restore -p -- <文件清单>`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 修正右侧工作区拥挤与布局错位
+
+### What was done
+- 取消地图联动区的固定高度和内部滚动，将数据、规划、算法与应用页面的地图操作按标题分组并自然换行，移除资源页重复的“资源上图”入口。
+- 将右侧表单校正为 144 像素最小列宽的自适应双列布局，增加纵向间距，并把数据源端点地址等长字段改为整行，解决数据接入页横向溢出。
+- 修复表格操作单元格被弹性布局撑高的问题；知识总数移动到搜索框旁，移除执行页无业务依据的悬空状态点，并恢复重复记录之间的稳定间距和白底分隔。
+- 调整算法页、场景统计页和 Agent 任务页的工具区与表单节奏，保留全部原操作、路由和地图逻辑不变。
+
+### Testing
+- `npm.cmd --prefix .\newcity-frontend run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd --prefix .\newcity-frontend run build`：通过，Vite 7.3.6 成功转换 90 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误。
+- Playwright 使用本机 Edge 在 1262×720 下验收数据接入、规划流程、方案管理、知识库、执行成果、算法管理、场景统计、场景任务和指标体系页面：工作区均无横向溢出，地图联动区无裁切，方案表格行高由约 182px 降至约 45px。
+- Playwright 在 1024×768 下复测数据接入、规划流程、方案管理、知识库、算法管理和场景统计：长字段宽度与内容区一致，双列表单保持两列，页面无横向溢出、工具区无裁切、无应用脚本错误。
+
+### Notes
+- 改动文件：
+  - `src/styles.css`：修正右侧表单列宽、间距、地图工具区、提示信息、表格操作列、分页按钮和重复记录布局。
+  - `src/pages/DataCenter.vue`：将数据地图入口合并到工具区，并把端点地址调整为整行字段。
+  - `src/pages/ResourcesCenter.vue`：移除重复的页面级资源上图按钮，保留统一地图工具区。
+  - `src/pages/PlanningCenter.vue`：为多操作地图工具区启用完整分组布局。
+  - `src/pages/AlgorithmsCenter.vue`：将悬空的页面操作改为带标题的地图工具区。
+  - `src/pages/ApplicationsCenter.vue`：统一应用页面顶部地图操作的分组方式。
+  - `src/pages/ResourceKnowledgeView.vue`：将知识数量放到搜索区，并改善列表操作间距。
+  - `src/pages/BusinessExecutionView.vue`：移除悬空状态点并改善任务列表节奏。
+  - `src/pages/TaskCenterView.vue`：扩大节点删除按钮的有效操作区域。
+  - `src/pages/AgentTaskWorkspace.vue`：增加任务方式、需求表单和运行操作之间的间距。
+  - `docs/四中心与智能任务规划前端说明.md`：补充地图工具、表单、表格和数量信息的布局规范。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill；`ui-ux-pro-max` 用于核对操作间距、数据密度与可读性，页面验证继续使用项目现有 Playwright 和 Edge。
+- 回滚方式：执行 `git diff -- src/styles.css src/pages/DataCenter.vue src/pages/ResourcesCenter.vue src/pages/PlanningCenter.vue src/pages/AlgorithmsCenter.vue src/pages/ApplicationsCenter.vue src/pages/ResourceKnowledgeView.vue src/pages/BusinessExecutionView.vue src/pages/TaskCenterView.vue src/pages/AgentTaskWorkspace.vue docs/四中心与智能任务规划前端说明.md progress.md > workspace-spacing-layout-fix.patch` 保存当前补丁，再对同一文件清单执行 `git restore -p -- <文件清单>`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 统一表格结构、密度与分页样式
+
+### What was done
+- 修正表格自身承担横向滚动后按内容收缩的问题，将原生表格布局、滚动容器和分页区拆分，使同一区域内的简单表格等宽铺满。
+- 统一四中心表格的浅灰表头、字号、行距、分隔线和分页间距；普通数据行约 33 像素，带操作按钮的业务行约 44 像素。
+- 将资源查询和监测数据查询两张服务端分页表接入相同表格区域，宽表只在表格内部横向滚动，分页统一放在表格下方。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 90 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误。
+- Playwright 使用本机 Edge 在 1262×720 和 1024×768 下验收传感器类型、数据查询、资源查询、方案管理、算法模型和场景统计页面：简单表格与滚动区均为 306 像素并完整铺满，分页与表格等宽，宽表只在自身区域滚动，页面和右侧工作区均无横向溢出。
+- 分页交互实测：平台类型从第 1 页正常切换到第 2 页；资源查询和监测数据查询执行服务端查询后分页均显示在表格下方，宽度与表格区域一致；多页面验证无应用脚本错误。
+
+### Notes
+- 改动文件：
+  - `src/utils/tablePager.ts`：为客户端分页表增加统一表格区域与横向滚动容器，并在卸载时清理生成结构。
+  - `src/styles.css`：统一表头、数据行、操作行、滚动区与分页样式，恢复原生表格布局。
+  - `src/pages/ResourcesCenter.vue`：将服务端资源查询表及分页合并为统一表格区域，并修正空数据列跨度。
+  - `src/pages/DataCenter.vue`：将服务端监测数据查询表及分页合并为统一表格区域，并修正空数据列跨度。
+  - `docs/四中心与智能任务规划前端说明.md`：补充表格密度、滚动范围和分页衔接规范。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill；浏览器验证原计划使用的 `browser-use` 命令在本机不可用，因此改用项目现有 Playwright 与 Edge。
+- 回滚方式：对 `src/styles.css`、`src/pages/ResourcesCenter.vue`、`src/pages/DataCenter.vue`、`docs/四中心与智能任务规划前端说明.md` 和 `progress.md` 执行 `git restore -p -- <文件清单>` 并仅选择本日志块对应修改；`src/utils/tablePager.ts` 当前为未跟踪文件，需将本轮 `table-region`/`table-scroll` 包装逻辑恢复为直接在表格后插入分页节点，不删除该文件中既有分页实现。
+
+## 2026-07-29 - Task: 统一二级页面主卡片与内容分组
+
+### What was done
+- 全面统一四个中心 19 个二级页面的卡片语言：主业务卡使用白底、细灰边、16 像素圆角和极轻阴影，地图联动区继续使用无阴影的浅灰蓝提示样式。
+- 将任务中心的指标体系、节点、任务指标草案和版本快照分别整理为有明确标题的主卡片，移除右侧工作区顶部孤立的编码标签。
+- 将知识库的检索、列表、分页和关联资源合成一张知识资源卡；将执行与成果拆为任务选择和执行详情；将场景任务方式与需求表单合成一张任务创建卡。
+- 为列表、时间线和运行记录统一增加 12 像素浅灰内容组，为长页面的三级、四级分组增加轻分隔线与稳定留白，避免连续堆叠大段表单。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 90 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误。
+- Playwright 使用本机 Edge 在 1262×720 下通过左侧真实导航逐项验收全部 19 个二级页面：所有主业务卡均为 16 像素圆角，未发现页面或右侧工作区横向溢出，也未出现控制台或页面脚本错误。
+- Playwright 在 1024×768 下复测指标体系、数据接入、规划流程、场景统计和场景任务发起：主卡与内容组层级保持清楚，长页面分隔正常，页面与右侧工作区均无横向溢出。
+- 页面截图与计算样式复核：任务、知识、执行、场景任务四类改造页面的主卡均使用细边框和极轻阴影，列表与方式选择内容组均为 12 像素圆角浅灰底；传感器类型页的局部阴影覆盖已修正。
+
+### Notes
+- 改动文件：
+  - `src/styles.css`：统一主卡片圆角、边框、阴影、正文对比度、长页面分隔和内部内容组样式。
+  - `src/pages/TaskCenterView.vue`：为四个任务二级页面增加清晰的列表、节点、草案和版本卡片结构。
+  - `src/pages/ResourceKnowledgeView.vue`：将知识检索、列表、分页和关联资源整合为完整主卡片。
+  - `src/pages/BusinessExecutionView.vue`：将任务选择和执行详情整理为两张层级明确的主卡片。
+  - `src/pages/AgentTaskWorkspace.vue`：将任务方式与需求表单整合为一张任务创建卡片。
+  - `src/pages/ResourcesCenter.vue`：移除传感器页面对统一主卡阴影的局部覆盖。
+  - `docs/四中心与智能任务规划前端说明.md`：更新主卡片、内容组和长页面分组规范。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill；`ui-ux-pro-max` 用于核对数据密集型工作台的卡片层级、正文对比度、悬停稳定性和圆角尺度，页面验证使用项目现有 Playwright 与 Edge。
+- 回滚方式：执行 `git restore -p -- src/styles.css src/pages/TaskCenterView.vue src/pages/ResourceKnowledgeView.vue src/pages/BusinessExecutionView.vue src/pages/AgentTaskWorkspace.vue src/pages/ResourcesCenter.vue docs/四中心与智能任务规划前端说明.md progress.md`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 统一卡片颜色、边框与交互状态
+
+### What was done
+- 将四中心普通卡片收口为白色主卡、浅灰内容组和深灰文字，移除指标记录、知识条目、执行任务、成果、图层账本和协同指标中遗留的青绿色边条、浅绿底色与金棕色装饰文字。
+- 将可点击记录、任务方式和当前任务统一为浅蓝底与蓝色边框的选中态；普通记录使用细灰边，静态结果卡不再提供误导性的整卡悬停反馈。
+- 重新区分业务状态颜色：运行和当前步骤使用蓝色，完成或成功使用绿色，等待人工确认或预警使用琥珀色，失败或异常使用红色；任务草案、编码、分类和来源等非状态信息恢复为中性色。
+- 同步统一首页入口卡、应用统计、图层账本、规划协同指标及关联记录的边框、圆角、文字和底色，保持地图及业务逻辑不变。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 90 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误；卡片相关旧青绿、金棕和装饰性左边条定向扫描无命中。
+- Playwright 使用本机 Edge 在 1262×720 下登录一次并通过左侧导航逐项验收全部 19 个二级页面：浏览器最终计算样式统一为白色 16 像素主卡、白色 10 像素记录卡、浅灰内容组和蓝色选中态，未发现旧配色、横向溢出、页面脚本错误或控制台错误。
+- Playwright 在 1024×768 下再次逐项验收全部 19 个二级页面：无横向溢出，无页面脚本或控制台错误；并人工复核指标体系、知识库、执行成果、场景统计、场景任务和方案管理截图，卡片层级与选中态一致。
+
+### Notes
+- 改动文件：
+  - `src/styles.css`：统一重复记录的细灰边框，并将悬停反馈限定到真正可点击的记录。
+  - `src/pages/TaskCenterView.vue`：统一指标记录、节点、编码、标签和空状态的中性色及蓝色选中态。
+  - `src/pages/ResourceKnowledgeView.vue`：移除知识条目的青绿边条与金棕统计色，统一条目、标签和操作色。
+  - `src/pages/BusinessExecutionView.vue`：统一任务与成果卡片，并按运行、成功状态校正时间线颜色。
+  - `src/pages/AgentTaskWorkspace.vue`：统一任务方式、草案、运行摘要、审计与成果卡，并按真实状态保留语义色。
+  - `src/pages/ApplicationsCenter.vue`：统一统计摘要与图层账本的边框、底色和文字颜色。
+  - `src/pages/PlanningCenter.vue`：统一任务编码、协同指标和关联记录，保留覆盖错位与预警的语义色。
+  - `src/pages/HomeView.vue`：将首页入口和态势卡统一到同一中性卡片与蓝色操作体系。
+  - `docs/四中心与智能任务规划前端说明.md`：补充卡片边框、悬停和状态颜色使用规则。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill；`ui-ux-pro-max` 用于核对专业数据工作台的中性色、文字对比度、选中反馈和状态色边界。
+- 回滚方式：执行 `git restore -p -- src/styles.css src/pages/TaskCenterView.vue src/pages/ResourceKnowledgeView.vue src/pages/BusinessExecutionView.vue src/pages/AgentTaskWorkspace.vue src/pages/ApplicationsCenter.vue src/pages/PlanningCenter.vue src/pages/HomeView.vue docs/四中心与智能任务规划前端说明.md progress.md`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 统一二级卡片分页并缩短长卡片
+
+### What was done
+- 新增统一卡片分页组件，为重复记录提供页码、总数和前后翻页，为有业务顺序的长卡提供步骤标题与上一步/下一步。
+- 将任务、知识、执行成果、资源、数据、算法、规划和场景统计中的重复列表及长流程按实际业务动作拆页；资源维护、数据维护、多源接入、算法模型与统计分布不再将表单和多张列表堆在同一张长卡中。
+- 将客户端表格默认每页记录数统一为 4 条；资源与监测数据查询使用同样的条件页、结果页和服务端分页样式，资源宽表在自身区域横向滚动，不再把单条记录撑成高卡片。
+- 卡片切页只替换右侧工作区内容，保留未提交表单和当前地图实例；服务端查询成功后自动进入结果页，重置后返回条件页。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 93 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误。
+- 真实浏览器在 1262×720 下逐页操作资源、数据、算法、规划、任务、知识、执行成果和场景统计：页面无横向溢出，卡片分页切换期间地图画布实例均保持不变。资源摘要由约 1020px 缩短到 545px，资源维护各页约 244–438px；数据接入原约 1287px 的长卡拆为 11 个业务页，多数页面约 341–672px；算法结果页由约 825px 拆为 458px 与 625px。
+- 1024×768 下复测 11 步数据接入分页：页码轨迹完整显示且未横向溢出；在“数据源基础”填写内容后切换到其他页再返回，输入值仍保留；浏览器未发现业务脚本错误。
+
+### Notes
+- 改动文件：
+  - `src/components/CardPager.vue`：新增统一的卡片页码、当前步骤和前后翻页组件。
+  - `src/utils/tablePager.ts`：将客户端表格默认分页密度调整为每页 4 条。
+  - `src/pages/TaskCenterView.vue`：将四类任务二级页拆为编辑与列表页，并限制重复记录数量。
+  - `src/pages/ResourceKnowledgeView.vue`：拆分知识编辑与资源浏览，并对知识记录分页。
+  - `src/pages/BusinessExecutionView.vue`：拆分任务选择、执行进度和任务成果，并对三类记录分页。
+  - `src/pages/AgentTaskWorkspace.vue`：为工具调用和阶段成果增加统一分页。
+  - `src/pages/ResourcesCenter.vue`：拆分类型、平台、传感器、查询和可视化长卡，并修正类型分页位置与资源宽表行高。
+  - `src/pages/DataCenter.vue`：拆分数据维护、多源接入、查询和可视化长卡，将接入流程整理为 11 个可连续翻页的业务步骤。
+  - `src/pages/AlgorithmsCenter.vue`：拆分模型创建、模型列表、版本注册、版本列表及结果关联。
+  - `src/pages/PlanningCenter.vue`：拆分任务配置步骤、资源关系记录和规划步骤结果，收起非主路径操作。
+  - `src/pages/ApplicationsCenter.vue`：将资源、数据和任务统计的概览与分布拆为 8 页。
+  - `docs/四中心与智能任务规划前端说明.md`：补充卡片分页边界、默认表格密度和地图持续工作规则。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill；`ui-ux-pro-max` 用于校准分页密度与信息边界，`agent-browser` 用于真实页面尺寸、状态保持和地图实例验证。
+- 回滚方式：先执行 `git diff -- src/components/CardPager.vue src/utils/tablePager.ts src/pages/TaskCenterView.vue src/pages/ResourceKnowledgeView.vue src/pages/BusinessExecutionView.vue src/pages/AgentTaskWorkspace.vue src/pages/ResourcesCenter.vue src/pages/DataCenter.vue src/pages/AlgorithmsCenter.vue src/pages/PlanningCenter.vue src/pages/ApplicationsCenter.vue docs/四中心与智能任务规划前端说明.md progress.md > card-pagination-rework.patch` 保存补丁；再对所有已跟踪文件执行 `git restore -p -- <文件清单>`，只选择本日志块对应修改。完成引用回滚后可删除本轮新增的 `src/components/CardPager.vue`；`src/utils/tablePager.ts` 为既有未跟踪文件，只需把本轮默认值 4 恢复为 6，不删除文件。
+
+## 2026-07-29 - Task: 将大量页码改为窗口式分页
+
+### What was done
+- 将统一卡片分页从“全部页码平铺”改为窗口式分页；总页数超过 7 页时，只显示首页、末页、当前页及相邻页，其余区间使用省略号。
+- 页码轨迹改为单行居中布局，固定按钮宽度和间距，避免 20 页以上时换成两三行数字；当前页、已访问页、上一页和下一页的状态保持原样。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 93 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误。
+- `agent-browser` 在 1024×768 的 21 页监测数据上验证：首页显示 `1 2 3 4 5 … 21`，第 10 页显示 `1 … 9 10 11 … 21`，末页显示 `1 … 17 18 19 20 21`；页码轨迹始终为单行 26px，高度和页面宽度均无溢出，切页期间地图实例保持不变。
+
+### Notes
+- 改动文件：
+  - `src/components/CardPager.vue`：增加页码窗口计算、省略号节点及单行页码布局。
+  - `docs/四中心与智能任务规划前端说明.md`：补充大量页码必须折叠显示的交互规则。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill；`ui-ux-pro-max` 用于校准当前页反馈和页码间距，`agent-browser` 用于真实 21 页边界验证。
+- 回滚方式：执行 `git restore -p -- docs/四中心与智能任务规划前端说明.md progress.md` 并只选择本日志块对应修改；`src/components/CardPager.vue` 当前为未跟踪文件，将 `visiblePages` 计算和省略号模板删除，并恢复原先对全部 `pages` 的直接循环及网格样式。
+
+## 2026-07-29 - Task: 重做记录分页与业务卡片切换逻辑
+
+### What was done
+- 将分页明确拆成两类：数据记录使用“总数、页码下拉、总页数、前后翻页”，业务卡片使用“当前业务标题下拉、上一项/下一项”；连续配置流程保留“上一步/下一步”。
+- 移除数字页码轨迹、省略号窗口和将业务步骤伪装成页码的交互；页数较多时可从下拉框直接跳转，只有一页的独立记录卡只显示总数，不再显示无效翻页按钮。
+- 将自动表格分页同步为相同的记录分页逻辑，并为 12 处独立记录列表显式指定记录模式；切换仅替换右侧卡片内容，不重建地图，也不清空未提交表单。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 93 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误；另对两个未跟踪分页实现文件检查行尾空白，未发现问题。
+- `agent-browser` 在 1024×768 下验证 83 条、21 页监测数据：记录分页保持单行，可直接跳到第 10 页并显示 4 条记录、第 21 页显示 3 条记录，页面无横向溢出，地图 canvas 引用保持不变。
+- `agent-browser` 验证 11 项数据接入卡片：可通过业务标题下拉切换；在“数据源基础”填写内容后切到第 4 项再返回，输入值仍保留；浏览器未发现页面脚本错误。
+
+### Notes
+- 改动文件：
+  - `src/components/CardPager.vue`：以显式记录模式和业务卡片模式替代数字页码窗口，并收起单页记录的无效控制按钮。
+  - `src/utils/tablePager.ts`：将自动表格的静态页码文字改为可直接跳页的页码下拉。
+  - `src/styles.css`：统一自动表格分页与独立记录分页的按钮、下拉和间距。
+  - `src/pages/TaskCenterView.vue`：为指标体系、体系节点和任务指标草案指定记录分页。
+  - `src/pages/ResourcesCenter.vue`：为资源查询指定记录分页。
+  - `src/pages/ResourceKnowledgeView.vue`：为知识资源列表指定记录分页。
+  - `src/pages/DataCenter.vue`：为监测数据查询指定记录分页。
+  - `src/pages/BusinessExecutionView.vue`：为观测任务、执行进度和任务成果指定记录分页。
+  - `src/pages/AgentTaskWorkspace.vue`：为工具调用和阶段成果指定记录分页。
+  - `src/pages/PlanningCenter.vue`：为资源关系列表指定记录分页。
+  - `docs/四中心与智能任务规划前端说明.md`：记录两类分页的适用边界、交互和地图状态保持规则。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill；`ui-ux-pro-max` 用于校准两类分页的密度与信息边界，`agent-browser` 用于真实页面跳页、状态保持和地图实例验证。
+- 回滚点：本条日志之前的“将大量页码改为窗口式分页”状态；回滚已跟踪文件时执行 `git restore -p -- src/styles.css src/pages/TaskCenterView.vue src/pages/ResourcesCenter.vue src/pages/ResourceKnowledgeView.vue src/pages/DataCenter.vue src/pages/BusinessExecutionView.vue src/pages/AgentTaskWorkspace.vue src/pages/PlanningCenter.vue docs/四中心与智能任务规划前端说明.md progress.md`，仅选择本日志块对应修改；`src/components/CardPager.vue` 与 `src/utils/tablePager.ts` 当前为未跟踪文件，应恢复到上述回滚点记录的窗口页码组件与静态页码表格实现，不删除文件。
+
+## 2026-07-29 - Task: 精简观测数据库地图联动卡片
+
+### What was done
+- 移除观测数据库地图联动区的大面积浅蓝背景和九个并列按钮，将工具区收口为白底细边的轻量卡片。
+- 将数据展示方式整理为“点 + 热力、热力图、采样点”三段选择，将四个质量按钮合并为单一下拉；图层管理改为文字入口，地图状态单独放在底部状态行。
+- 为展示方式和质量筛选补充明确的当前状态；时间筛选未启用时禁用清除操作，避免无效按钮与主要操作争夺注意力。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 94 个模块并生成生产包；仅保留现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误。
+- `agent-browser` 在 1024×768 的观测数据库查询结果页验证：地图工具区为白底且高度 159px，页面无横向溢出；展示方式可在三种模式间切换，质量下拉可选择告警与未检，选中状态与实际操作一致。
+- 切换展示方式和质量筛选前后 Cesium canvas 引用保持不变，浏览器未发现页面脚本错误。
+
+### Notes
+- 改动文件：
+  - `src/pages/DataCenter.vue`：重构地图联动工具区的结构、交互状态和局部样式。
+  - `docs/四中心与智能任务规划前端说明.md`：更新地图工具的背景、分组、状态和蓝色使用规则。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill；`ui-ux-pro-max` 用于核对紧凑 GIS 工作台的渐进展示、语义控件和选中反馈，`agent-browser` 用于真实页面视觉与交互复核。
+- 回滚方式：执行 `git restore -p -- src/pages/DataCenter.vue docs/四中心与智能任务规划前端说明.md progress.md`，仅选择本日志块对应修改。
+
+## 2026-07-29 - Task: 收敛右侧工作区布局与完整任务操作
+
+### What was done
+- 扩大大屏业务工作区和顶部搜索空间，并为地图详情与 AI 助手设置独立停靠位；1024 像素视口继续使用紧凑宽度，浮层同时打开时不再重叠。
+- 将 GIS 操作、场景任务方式、Agent 运行控制和规划高级维护动作分别收口为单行工具条、模式选择及按状态出现的操作，消除按钮成排堆叠，同时保留原有业务入口。
+- 将新建规划任务整理为“任务与时间、指标与尺度、空间与约束、评分权重”四段连续配置；新建任务会重置上一任务数据，任务载入和步骤执行不再自动弹出详情打断操作。
+- 统一二级页面的卡片宽度、留白和控件密度，并确认切换标题、业务卡片或规划步骤时继续复用当前 Cesium 地图实例。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 94 个模块并生成生产包；仅有现有大于 500 kB 的单包体积提示。
+- `git diff --check`：通过，无空白错误；仅提示既有工作区文件后续可能进行 LF/CRLF 转换。
+- `agent-browser` 完成全部 19 个二级入口分批检查：未发现横向溢出、大面积旧蓝色卡片或页面脚本错误；1024×768 下业务浮窗为 360 像素，1920×1080 下为 440 像素且搜索框为 520 像素，地图详情与 AI 助手间距为 15 像素。
+- 交互复核通过：二级标题切换前后地图 canvas 引用保持不变；规划四段表单可连续进入，空间配置、任务配置、五项评分权重和保存入口均可用；场景任务三种方式、方案维护动作、数据接入高级 JSON 配置及执行成果切换入口均保留。
+
+### Notes
+- 改动文件：
+  - `src/components/AppLayout.vue`：调整顶部与右侧业务工作区尺寸，并分离详情和 AI 助手停靠位。
+  - `src/styles.css`：统一浮窗、工具条、卡片及响应式布局的尺寸和间距。
+  - `src/pages/ApplicationsCenter.vue`：将 GIS 操作整理为单行工具条。
+  - `src/pages/AgentTaskWorkspace.vue`：收口任务方式选择和按状态可用的运行控制。
+  - `src/pages/PlanningCenter.vue`：整理规划维护操作与四段新任务配置，并修正新建任务及地图联动行为。
+  - `docs/四中心与智能任务规划前端说明.md`：补充业务浮窗、操作收口、规划配置和详情触发规则。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill；`ui-ux-pro-max` 用于核对 GIS 工作区层级、控件密度和浮层避让，`agent-browser` 用于真实尺寸、完整入口及地图实例验证。
+- 回滚点：本条日志之前的“精简观测数据库地图联动卡片”状态。由于相关文件含有此前未提交修改，先执行 `git diff -- src/components/AppLayout.vue src/styles.css src/pages/ApplicationsCenter.vue src/pages/AgentTaskWorkspace.vue src/pages/PlanningCenter.vue docs/四中心与智能任务规划前端说明.md progress.md > workspace-flow-convergence.patch` 保存补丁，再执行 `git restore -p -- <上述文件>`，仅选择本日志块描述的修改。
+
+## 2026-07-30 - Task: 核对后端数据来源并区分地图对象图标
+
+### What was done
+- 审计当前实际路由下的四中心页面、公共详情和地图模块，确认业务记录的读取、写入与状态操作均经由 Django API；保留页签、卡片切换、未提交表单和地图显隐等必要前端状态，不将其伪装为业务数据。
+- 资源和监测数据查询的“重置”改为清空条件后重新请求服务端；首页不再吞掉任务或平台接口错误并以空列表代替失败结果。
+- 地图实体和图例统一使用 SVG 类型图标，区分卫星、无人机、地面站、移动平台、其他传感资源、监测数据、观测任务、指标实例、任务目标、资源关联、覆盖范围和算法结果；颜色继续表达后端返回的运行或质量状态。
+- 为 Cesium 点、线、面中心和动态轨迹接入类型图标，并让地图选中高亮兼容 billboard 图标；图例按对象、空间结果和运行状态分组，在 1024 像素视口内保持可读且不产生横向溢出。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 98 个模块并生成生产包；仅有现有大于 500 kB 的单包体积提示。
+- `uv run python manage.py check`：通过，Django 系统检查无问题；`/api/health/` 返回 HTTP 200 和 `status=ok`。
+- `git diff --check`：通过，无空白错误；仅提示既有工作区文件后续可能进行 LF/CRLF 转换。
+- `agent-browser` 实机验证图例共 12 类 SVG 图标，Cesium 实体加载对应类型的 SVG billboard，浏览器无页面脚本错误；图形和状态颜色均与图例一致。
+- 网络验证通过：资源查询重置请求 `GET /api/v1/observations/platforms?page=1&pageSize=4` 并返回 200；监测数据查询重置请求 `GET /api/v1/observations/data?includeQuarantined=true&page=1&pageSize=4` 并返回 200；首页、四类 GIS 图层和指标范围请求均返回 200。
+- 1024×768 验证：图例面板为 286×448.78 像素，12 个类型图标完整渲染，页面无横向溢出。
+
+### Notes
+- 改动文件：
+  - `src/gis/mapSymbols.ts`：新增地图类型图形、平台类型映射和 SVG marker 生成缓存。
+  - `src/components/MapLegendIcon.vue`：新增与 Cesium 标记共用图形语义的图例组件。
+  - `src/components/MapBasemap.vue`：将圆点图例改为按业务对象、空间结果和状态分组的类型图例。
+  - `src/gis/mapLayers.ts`：为传感资源、数据、任务、目标和通用 WKT 图层绘制类型图标。
+  - `src/gis/mapShell.ts`：为指标实例指定图标，并让对象高亮兼容 billboard。
+  - `src/pages/HomeView.vue`：业务接口失败时显示错误，不再静默回退为空列表。
+  - `src/pages/ResourcesCenter.vue`：资源查询重置后重新请求服务端并移除“本地列表”文案。
+  - `src/pages/DataCenter.vue`：监测数据查询重置后重新请求服务端并移除“本地缓存”文案。
+  - `src/styles.css`：补充图例分组、双列布局和状态说明样式。
+  - `docs/四中心与智能任务规划前端说明.md`：记录业务数据来源边界和地图图标规则。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill；`ui-ux-pro-max` 用于确定“图形表示类型、颜色与文字表示状态”的无障碍边界，`agent-browser` 用于实际页面、网络请求、窄屏尺寸和错误复核。后端接口与数据库结构未修改。
+- 回滚点：本条日志之前的“收敛右侧工作区布局与完整任务操作”状态。相关文件包含此前未提交修改，先执行 `git diff -- src/components/MapBasemap.vue src/gis/mapLayers.ts src/gis/mapShell.ts src/pages/HomeView.vue src/pages/ResourcesCenter.vue src/pages/DataCenter.vue src/styles.css docs/四中心与智能任务规划前端说明.md progress.md > backend-data-map-symbols.patch` 保存补丁，再执行 `git restore -p -- <上述文件>` 仅选择本日志块对应修改；完成引用回滚后执行 `Remove-Item -LiteralPath src/components/MapLegendIcon.vue,src/gis/mapSymbols.ts` 删除本轮新增文件。
+
+## 2026-07-30 - Task: 完成 19 个二级入口逐页收敛与规划卡片修正
+
+### What was done
+- 在同一浏览器会话中串行复查四中心全部 19 个二级入口，只处理仍影响理解和操作的规划页面，不重做已经清楚的业务卡片。
+- 将规划方案管理拆为“方案列表、方案对比、当前结果”三个职责明确的内容页；保留方案记录分页、行内操作、对比和结果查看的完整入口，避免列表与对比内容堆成一张长卡片。
+- 去除六段观测规划进度条的无效横向滚动，保持所有阶段及文字状态在右侧工作区内一次可见。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 98 个模块并生成生产包；仅有现有大于 500 kB 的单包体积提示。
+- `git diff --check -- src/pages/PlanningCenter.vue docs/四中心与智能任务规划前端说明.md progress.md`：通过，无空白错误；仅提示既有工作区文件后续可能进行 LF/CRLF 转换。
+- `agent-browser` 在 1024×768 下串行验证 19/19 个二级入口：页面级和左侧工作区横向溢出均为 0，未出现大面积旧蓝色内容块，切换前后始终保持同一 Cesium canvas，对象详情均未自动打开，浏览器无页面脚本错误。
+- 规划方案三个内容页逐页验证通过：方案列表约 435px、方案对比约 428px、当前结果约 248px，内容切换和各自空状态正常，卡片横向溢出为 0；六段规划进度横向溢出为 0。
+- 1920×1080 抽查通过：页面和规划进度无横向溢出，地图详情与 AI 助手入口不重叠，对象详情未自动打开；后端 `/api/health/` 返回 HTTP 200。
+
+### Notes
+- 改动文件：
+  - `src/pages/PlanningCenter.vue`：拆分规划方案内容页并修正六段规划进度的窄工作区排布。
+  - `docs/四中心与智能任务规划前端说明.md`：补充方案分页、进度排布和连续场景任务表单的交互边界。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill；`ui-ux-pro-max` 用于校准密集 GIS 工作台的卡片职责、按钮层级和溢出边界，`agent-browser` 用于 19 个入口的真实页面串行回归、内容翻页和地图实例验证。
+- 回滚点：本条日志之前的“核对后端数据来源并区分地图对象图标”状态。相关文件包含此前未提交修改，先执行 `git diff -- src/pages/PlanningCenter.vue docs/四中心与智能任务规划前端说明.md progress.md > final-19-entry-ui.patch` 保存当前补丁，再执行 `git restore -p -- src/pages/PlanningCenter.vue docs/四中心与智能任务规划前端说明.md progress.md`，仅选择本日志块描述的方案内容分页、进度排布和文档追加修改。
+
+## 2026-07-30 - Task: 将业务资料编辑改为后端真实持久化
+
+### What was done
+- 为基础指标体系、指标节点、草稿任务指标体系、观测平台、传感器、监测数据和协议数据源补齐“编辑、保存修改、取消编辑”，保存后重新请求后端数据，不使用前端临时状态伪装成功。
+- 任务指标体系只允许编辑后端实际支持的名称和所选指标；场景、基础体系和关联任务在编辑时明确保持不变，已确认记录保持只读。
+- 修正可选字段清空与数值 0 的提交语义：平台标识和所属单位可真正清空，数据源可解除平台绑定，传感器精度 0 不再被当成未填写。
+- 保留数据源“基础信息、鉴权与参数”的两步编辑流程，并将高级 JSON 放在折叠区，常用编辑不需要理解内部参数。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 98 个模块并生成生产包；仅有现有大于 500 kB 的单包体积提示。
+- `git diff --check -- src/pages/TaskCenterView.vue src/pages/ResourcesCenter.vue src/pages/DataCenter.vue docs/四中心与智能任务规划前端说明.md progress.md`：通过，无空白错误；仅提示既有 LF/CRLF 转换。
+- `agent-browser` 使用 demo 会话完成真实保存、刷新读取和原值恢复：指标体系 `PATCH /api/v1/task/indicator-systems/4`、平台 `PATCH /api/v1/observations/platforms/50`、传感器 `PATCH /api/v1/observations/sensors/24`、监测数据 `PATCH /api/v1/observations/data/6`、数据源 `PATCH /api/v1/observations/data-sources/3` 均返回 200；测试名称全部恢复，平台所属单位恢复为空，数据源平台绑定恢复为 `null`。
+- 1024×768 下串行复核 19 个二级入口：页面横向溢出均为 0、可见按钮重叠均为 0、各入口始终保留 1 个 Cesium canvas；任务指标体系截图抽查中右侧表单、地图和分页无遮挡。
+
+### Notes
+- 改动文件：
+  - `src/pages/TaskCenterView.vue`：增加三类指标资料编辑并限制任务指标草稿的可编辑字段和状态。
+  - `src/pages/ResourcesCenter.vue`：增加平台、传感器编辑并修正空值和精度 0 的提交。
+  - `src/pages/DataCenter.vue`：增加监测数据、数据源编辑并支持解除数据源平台绑定。
+  - `docs/四中心与智能任务规划前端说明.md`：说明可编辑资料、只读结果及真实持久化边界。
+  - `progress.md`：追加本轮实现、验证与回滚记录。
+- 本轮按用户要求未使用 `frontend-design` skill；`agent-browser` 用于真实保存、刷新、恢复和 19 个入口串行页面验收。
+- 回滚点：本条日志之前的“完成 19 个二级入口逐页收敛与规划卡片修正”状态。相关文件含有此前未提交修改，先执行 `git diff -- src/pages/TaskCenterView.vue src/pages/ResourcesCenter.vue src/pages/DataCenter.vue docs/四中心与智能任务规划前端说明.md progress.md > real-editing-frontend.patch` 保存补丁，再执行 `git restore -p -- <上述文件>`，仅选择本日志块描述的编辑持久化修改。
+
+## 2026-07-31 - Task: 移除面对象中心的点状类型图标
+
+### What was done
+- 按几何类型收敛地图符号：点对象继续显示类型图标，Polygon 面对象只显示半透明填充、边界和缩放后名称。
+- 保留面对象的中心位置用于名称布局、对象定位和详情交互，不再创建容易被误解为独立设备的 `billboard` 或 `point`。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 98 个模块并生成生产包；仅有现有大于 500 kB 的单包体积提示。
+- `git diff --check -- src/gis/mapLayers.ts`：通过，无空白错误；仅提示既有 LF/CRLF 转换。
+- `agent-browser` 登录 GIS 综合展示并切换“仅指标范围”：12 个指标面正常显示填充和边界，面中心不再出现点状类型图标，地图与右侧工作区正常，浏览器无页面脚本错误。
+
+### Notes
+- 改动文件：
+  - `src/gis/mapLayers.ts`：停止为 Polygon 实体创建中心 billboard 或 point。
+  - `docs/四中心与智能任务规划前端说明.md`：补充点、线、面地图符号的使用边界。
+  - `progress.md`：追加本轮实现、验证与回滚记录。
+- 本轮使用 `agent-browser` 验证实际地图显示；未使用用户明确排除的 `frontend-design` skill。
+- 回滚点：本条日志之前的“将业务资料编辑改为后端真实持久化”状态。先执行 `git diff -- src/gis/mapLayers.ts docs/四中心与智能任务规划前端说明.md progress.md > polygon-symbol-fix.patch` 保存补丁，再执行 `git restore -p -- src/gis/mapLayers.ts docs/四中心与智能任务规划前端说明.md progress.md`，仅选择本日志块描述的面中心图标修改。
+
+## 2026-07-31 - Task: 统一地图点线面表达并处理重叠要素
+
+### What was done
+- 按实际 GIS 数据重做拥挤点位的显示：同一图层的临近点合并为带数量的聚合标记，传感资源、监测数据和任务聚合标记使用不同颜色与水平错位，避免跨图层完全遮盖。
+- 聚合点点击后逐级放大，并在右侧对象详情列出该位置的对象摘要；同坐标记录继续保持聚合，不再把无法空间分开的数据伪装成可自动散开的点。
+- 线对象去除中点圆形锚点，面对象继续只显示填充和边界；监测热力面只统计至少两个采样点的网格，重复任务范围按记录数降低单层透明度，避免单点重复表达和范围叠成深色块。
+- 图例改为“点对象、范围与连线、运行状态”三组，分别使用类型图标、半透明面和线段表达，与地图实际几何一致。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功转换 98 个模块并生成生产包；仅有现有大于 500 kB 的单包体积提示。
+- `git diff --check -- src/gis/mapSymbols.ts src/gis/mapLayers.ts src/gis/mapShell.ts src/components/MapLegendIcon.vue src/components/MapBasemap.vue docs/四中心与智能任务规划前端说明.md`：通过，无空白错误；仅提示既有 LF/CRLF 转换。
+- `agent-browser` 在 GIS 综合展示验证真实后端数据：31 个传感资源、83 条监测数据、25 个任务和 12 个指标实例正常加载；81 个同坐标监测数据显示为单个“81”聚合标记，点击后地图放大且右侧列出对象摘要。
+- 分层截图复核通过：数据点不再堆叠，任务重复范围保持浅色可辨，指标面无中心点图标，图例中的点、线、面与地图表达一致；浏览器无页面脚本错误，页面和地图横向溢出均为 0，始终只有 1 个 Cesium canvas。
+
+### Notes
+- 改动文件：
+  - `src/gis/mapLayers.ts`：增加点聚合、跨图层错位和重复范围透明度处理，收敛热力面并移除线中点图标。
+  - `src/gis/mapShell.ts`：支持点击聚合点放大并在右侧查看对象摘要。
+  - `src/components/MapLegendIcon.vue`：让图例组件分别绘制点图标、线段和范围面。
+  - `src/components/MapBasemap.vue`：按真实几何重组图例并补充聚合点说明。
+  - `docs/四中心与智能任务规划前端说明.md`：记录聚合、点线面表达和重复范围显示规则。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮使用 `agent-browser` 做真实地图、聚合交互、图例和溢出验证；未使用用户明确排除的 `frontend-design` skill。后端接口、数据库结构和业务数据均未修改。
+- 回滚点：本条日志之前的“移除面对象中心的点状类型图标”状态。相关文件包含此前未提交修改，回滚前先保存当前工作区补丁，再对上述文件执行 `git restore -p -- <文件>`，只选择本日志描述的聚合、线中点、透明度、图例和聚合详情相关改动；`MapLegendIcon.vue` 为既有未跟踪文件，只撤销本轮新增的 `shape` 分支和线面样式，不删除该文件。
+
+## 2026-07-31 - Task: 展示卫星轨道与无人机空中轨迹
+
+### What was done
+- 卫星按后端 TLE/SGP4 点绘制浅蓝色非贴地轨道和当前位置，标签显示公里高度；轨迹不可用时保留登记位置，不再把卫星整体漏掉。
+- 无人机按后端位置遥测绘制青绿色非贴地飞行轨迹和当前位置，标签显示米制高度；详情明确展示轨迹点数和数据来源。
+- GIS 快速定位增加卫星与无人机入口；综合图层适应视角优先地面业务范围，不再被全球卫星轨道拉远，无人机定位改为城市级俯视高度以看到完整航迹。
+- 图例补充“卫星实时轨道”和“无人机飞行轨迹”，保持对象类型由图形表达、运行状态由颜色表达。
+
+### Testing
+- `npm.cmd run typecheck`：通过，无 TypeScript/Vue 类型错误。
+- `npm.cmd run build`：通过，Vite 7.3.6 成功生成生产包；仅有现有大于 500 kB 的单包体积提示。
+- `agent-browser` 使用真实 GIS 页面验证：综合视角落在中国地面业务范围；卫星定位显示 146 个点、浅蓝轨道和约 797 km 标签；无人机定位显示 6 个 `demo-telemetry` 点、完整航迹和 125 m 标签。
+- 浏览器页面脚本错误为空，文档横向溢出为 0，地图保持 1 个 Cesium canvas；GIS 接口返回 3 条可用卫星轨道和 2 条可用无人机轨迹。
+
+### Notes
+- 改动文件：
+  - `src/gis/mapLayers.ts`：绘制卫星/无人机空中轨迹、当前位置和高度标签，并区分地面与太空视角适配对象。
+  - `src/gis/mapShell.ts`：让无人机定位以完整航迹为范围保持可读俯视高度。
+  - `src/components/MapBasemap.vue`：在地图图例中说明卫星轨道和无人机飞行轨迹。
+  - `src/pages/ApplicationsCenter.vue`：增加卫星、无人机快速定位选择。
+  - `docs/四中心与智能任务规划前端说明.md`：记录动态平台轨迹、数据来源和视角规则。
+  - `progress.md`：追加本轮实施、验证与回滚记录。
+- 本轮使用 `agent-browser` 验证真实页面；按用户要求未使用 `frontend-design` skill。前端不生成模拟轨迹，缺少后端轨迹时只显示登记位置和原因。
+- 回滚点：本条日志之前的“统一地图点线面表达并处理重叠要素”状态。先执行 `git diff -- src/gis/mapLayers.ts src/gis/mapShell.ts src/components/MapBasemap.vue src/pages/ApplicationsCenter.vue docs/四中心与智能任务规划前端说明.md progress.md > flight-track-frontend.patch` 保存当前补丁，再对同一文件清单执行 `git restore -p -- <文件>`，只选择本日志描述的动态轨迹、快速定位、视角规则和文档追加修改。

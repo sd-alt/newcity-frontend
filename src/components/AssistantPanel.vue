@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
 import type { AssistantAction } from '../api/endpoints'
 import { selectShellFeature } from '../gis/mapShell'
+import { readAiPreferences, saveAiPreferences, type AiPreferences, type AiTaskMode } from '../utils/aiPreferences'
 
 type ChatMessage = {
   id: number
@@ -20,6 +21,10 @@ const input = ref('')
 const messages = ref<ChatMessage[]>([])
 const suggestions = ref<string[]>([])
 const statusLine = ref('')
+const assistantStatus = ref<api.AssistantStatusData | null>(null)
+const view = ref<'chat' | 'settings'>('chat')
+const preferences = ref<AiPreferences>(readAiPreferences())
+const settingsMessage = ref('')
 const unread = ref(false)
 const bodyEl = ref<HTMLElement | null>(null)
 let nextId = 0
@@ -33,6 +38,7 @@ onMounted(async () => {
   try {
     const res = await api.assistantStatus()
     const d = res.data
+    assistantStatus.value = d
     statusLine.value =
       d.mode === 'api'
         ? d.ready
@@ -41,6 +47,7 @@ onMounted(async () => {
         : '内置规则模式 · 无需联网'
   } catch {
     statusLine.value = ''
+    assistantStatus.value = null
   }
 })
 
@@ -50,6 +57,22 @@ function toggle() {
     unread.value = false
     void nextTick(scrollBottom)
   }
+}
+
+function openView(value: 'chat' | 'settings') {
+  view.value = value
+  settingsMessage.value = ''
+  if (value === 'settings') preferences.value = readAiPreferences()
+  else void nextTick(scrollBottom)
+}
+
+function chooseDefaultMode(value: AiTaskMode) {
+  preferences.value = { ...preferences.value, defaultTaskMode: value }
+}
+
+function saveSettings() {
+  saveAiPreferences(preferences.value)
+  settingsMessage.value = '已保存，并同步到综合感知任务入口。'
 }
 
 function scrollBottom() {
@@ -117,10 +140,14 @@ function actionLabel(action: AssistantAction) {
             <strong>AI 助手</strong>
             <span v-if="statusLine" class="assistant-status">{{ statusLine }}</span>
           </div>
-          <button type="button" class="assistant-close" aria-label="收起助手" @click="toggle">×</button>
+          <div class="assistant-head-actions">
+            <button type="button" class="assistant-head-button" :class="{ active: view === 'chat' }" @click="openView('chat')">对话</button>
+            <button type="button" class="assistant-head-button" :class="{ active: view === 'settings' }" @click="openView('settings')">设置</button>
+            <button type="button" class="assistant-close" aria-label="收起助手" @click="toggle">×</button>
+          </div>
         </header>
 
-        <div ref="bodyEl" class="assistant-body">
+        <div v-if="view === 'chat'" ref="bodyEl" class="assistant-body">
           <div
             v-for="m in messages"
             :key="m.id"
@@ -149,7 +176,32 @@ function actionLabel(action: AssistantAction) {
           </div>
         </div>
 
-        <div v-if="suggestions.length && !sending" class="assistant-suggests">
+        <div v-else class="assistant-settings">
+          <section class="assistant-service-card">
+            <span>当前模型服务</span>
+            <strong>{{ assistantStatus?.model || '状态暂不可用' }}</strong>
+            <p v-if="assistantStatus">{{ assistantStatus.ready ? '服务已就绪' : '服务未就绪，系统会按后端策略回退' }} · {{ assistantStatus.mode === 'api' ? '外部模型' : '内置规则' }}</p>
+            <p v-else>未能读取服务状态，不影响保存本地运行偏好。</p>
+          </section>
+
+          <fieldset class="assistant-setting-group">
+            <legend>默认任务方式</legend>
+            <button type="button" :class="{ active: preferences.defaultTaskMode === 'manual' }" @click="chooseDefaultMode('manual')"><strong>手动创建</strong><small>直接保存需求与任务草案</small></button>
+            <button type="button" :class="{ active: preferences.defaultTaskMode === 'assisted' }" @click="chooseDefaultMode('assisted')"><strong>AI 辅助</strong><small>先生成草案，再由人工确认</small></button>
+            <button type="button" :class="{ active: preferences.defaultTaskMode === 'agent' }" @click="chooseDefaultMode('agent')"><strong>多 Agent</strong><small>专业 Agent 协同，关键节点人工确认</small></button>
+          </fieldset>
+
+          <label class="assistant-detail-toggle">
+            <input v-model="preferences.showTechnicalDetails" type="checkbox" />
+            <span><strong>显示技术运行记录</strong><small>在任务页展示工具调用、数据来源和耗时</small></span>
+          </label>
+
+          <p class="assistant-security-note">模型、服务地址和密钥由服务器环境管理。浏览器只保存以上偏好，不保存 API Key。</p>
+          <button type="button" class="assistant-save" @click="saveSettings">保存设置</button>
+          <p v-if="settingsMessage" class="assistant-settings-message">{{ settingsMessage }}</p>
+        </div>
+
+        <div v-if="view === 'chat' && suggestions.length && !sending" class="assistant-suggests">
           <button
             v-for="sg in suggestions"
             :key="sg"
@@ -161,7 +213,7 @@ function actionLabel(action: AssistantAction) {
           </button>
         </div>
 
-        <footer class="assistant-input">
+        <footer v-if="view === 'chat'" class="assistant-input">
           <input
             v-model="input"
             type="text"
@@ -184,8 +236,8 @@ function actionLabel(action: AssistantAction) {
       @click="toggle"
     >
       <svg v-if="!open" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M12 3l1.7 4.3L18 9l-4.3 1.7L12 15l-1.7-4.3L6 9l4.3-1.7z" />
-        <path d="M18.5 14.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z" />
+        <path d="M6 5h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7l-4.5 3v-3H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" />
+        <path d="M8 9h8M8 12h5" />
       </svg>
       <span v-else aria-hidden="true">×</span>
     </button>

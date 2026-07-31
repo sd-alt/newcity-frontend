@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import MapLegendIcon from './MapLegendIcon.vue'
 import type { BasemapKey } from '../gis/mapConfig'
+import type { MapSymbolKind } from '../gis/mapSymbols'
 import {
   closeShellBubble,
   closeShellContextMenu,
@@ -46,12 +48,54 @@ const route = useRoute()
 const router = useRouter()
 let host: HTMLDivElement | null = null
 const panel = ref<'none' | 'basemap' | 'legend' | 'layers'>('none')
+const toolsExpanded = ref(false)
 
 const basemapOptions: Array<{ key: BasemapKey; label: string }> = [
   { key: 'vector', label: '标准地图' },
   { key: 'imagery', label: '卫星影像' },
   { key: 'terrain', label: '地形地图' },
   { key: 'admin', label: '行政区划' },
+]
+
+type LegendItem = {
+  kind: MapSymbolKind
+  label: string
+  color: string
+  shape?: 'point' | 'line' | 'area'
+}
+const legendSections: Array<{ title: string; items: LegendItem[] }> = [
+  {
+    title: '点对象',
+    items: [
+      { kind: 'satellite', label: '卫星', color: '#64748B' },
+      { kind: 'uav', label: '无人机', color: '#64748B' },
+      { kind: 'station', label: '地面站', color: '#64748B' },
+      { kind: 'vehicle', label: '移动平台', color: '#64748B' },
+      { kind: 'sensor', label: '其他传感资源', color: '#64748B' },
+      { kind: 'data', label: '监测数据', color: '#1677FF' },
+      { kind: 'task', label: '任务点位', color: '#0F3D66' },
+      { kind: 'target', label: '任务目标', color: '#7C3AED' },
+    ],
+  },
+  {
+    title: '范围与连线',
+    items: [
+      { kind: 'task', label: '观测任务范围', color: '#0F3D66', shape: 'area' },
+      { kind: 'indicator', label: '指标实例范围', color: '#BE123C', shape: 'area' },
+      { kind: 'coverage', label: '资源覆盖范围', color: '#16A34A', shape: 'area' },
+      { kind: 'algorithm', label: '算法结果范围', color: '#C2410C', shape: 'area' },
+      { kind: 'association', label: '资源关联', color: '#64748B', shape: 'line' },
+      { kind: 'satellite', label: '卫星实时轨道', color: '#38BDF8', shape: 'line' },
+      { kind: 'uav', label: '无人机飞行轨迹', color: '#14B8A6', shape: 'line' },
+    ],
+  },
+]
+const legendStatuses = [
+  { label: '正常 / 在线', color: '#22C55E' },
+  { label: '运行 / 数据正常', color: '#1677FF' },
+  { label: '维护 / 告警', color: '#F59E0B' },
+  { label: '故障 / 失败', color: '#EF4444' },
+  { label: '离线 / 待开始', color: '#94A3B8' },
 ]
 
 const bubbleStyle = computed(() => {
@@ -414,10 +458,16 @@ function setHost(el: unknown) {
           <button type="button" class="map-tool" :class="{ active: panel === 'layers' }" title="业务图层" aria-label="业务图层" @click="togglePanel('layers')">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></svg>
           </button>
+        </div>
+        <div class="map-tool-group" aria-label="辅助工具">
           <button type="button" class="map-tool" :class="{ active: panel === 'legend' }" title="查看图例" aria-label="查看图例" @click="togglePanel('legend')">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="6" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="5" cy="18" r="1.5"/><path d="M9 6h11M9 12h11M9 18h11"/></svg>
           </button>
+          <button type="button" class="map-tool" :class="{ active: toolsExpanded }" :title="toolsExpanded ? '收起地图工具' : '更多地图工具'" :aria-label="toolsExpanded ? '收起地图工具' : '更多地图工具'" :aria-expanded="toolsExpanded" @click="toolsExpanded = !toolsExpanded">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="10" cy="17" r="1.5"/></svg>
+          </button>
         </div>
+        <template v-if="toolsExpanded">
         <div class="map-tool-group" aria-label="测量">
           <button type="button" class="map-tool" :class="{ active: mapToolMode === 'measure-line' }" title="测量距离" aria-label="测量距离" @click="activateTool('measure-line')">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16 12-12 4 4L8 20H4Z"/><path d="m13 7 4 4M10 10l2 2M7 13l2 2"/></svg>
@@ -448,6 +498,7 @@ function setHost(el: unknown) {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
           </button>
         </div>
+        </template>
       </div>
     </div>
     <button
@@ -493,25 +544,27 @@ function setHost(el: unknown) {
           指标实例 <span class="muted">{{ shellCounts.indicators }}</span>
         </label>
     </div>
-    <div v-if="panel === 'legend'" class="map-float-panel">
+    <div v-if="panel === 'legend'" class="map-float-panel map-legend-panel">
       <div class="map-float-title">图例</div>
-      <div class="map-float-item static"><i class="dot green" /> 传感器·在线</div>
-      <div class="map-float-item static"><i class="dot gray" /> 传感器·离线</div>
-      <div class="map-float-item static"><i class="dot red" /> 传感器·故障</div>
-      <div class="map-float-item static"><i class="dot blue" /> 监测数据·正常</div>
-      <div class="map-float-item static"><i class="dot orange" /> 监测数据·异常</div>
-      <div class="map-float-item static"><i class="dot purple" /> 观测任务</div>
-      <div class="map-float-item static"><i class="dot red" /> 指标实例范围</div>
-      <div class="map-float-item static"><i class="dot purple" /> 关联·候选</div>
-      <div class="map-float-item static"><i class="dot blue" /> 关联·基础</div>
-      <div class="map-float-item static"><i class="dot green" /> 关联·优化</div>
-      <div class="map-float-item static"><i class="dot orange" /> 关联·增补</div>
-      <div class="map-float-item static"><i class="dot blue" /> 指标范围</div>
-      <div class="map-float-item static"><i class="dot blue" /> 任务目标区域</div>
-      <div class="map-float-item static"><i class="dot green" /> 方案覆盖范围</div>
-      <div class="map-float-item static"><i class="dot red" /> 覆盖缺口</div>
-      <div class="map-float-item static"><i class="dot purple" /> 算法输入区域</div>
-      <div class="map-float-item static"><i class="dot orange" /> 算法结果区域</div>
+      <section v-for="section in legendSections" :key="section.title" class="map-legend-section">
+        <h4>{{ section.title }}</h4>
+        <div class="map-legend-grid">
+          <div v-for="item in section.items" :key="item.kind" class="map-float-item static map-legend-item">
+            <MapLegendIcon :kind="item.kind" :color="item.color" :shape="item.shape" />
+            <span>{{ item.label }}</span>
+          </div>
+        </div>
+      </section>
+      <section class="map-legend-section">
+        <h4>运行状态</h4>
+        <div class="map-legend-status-grid">
+          <div v-for="item in legendStatuses" :key="item.label" class="map-legend-status">
+            <i :style="{ backgroundColor: item.color }" />
+            <span>{{ item.label }}</span>
+          </div>
+        </div>
+      </section>
+      <p class="map-float-hint">图形区分对象类型，颜色表示状态；点击数字标记可放大并查看对象，同坐标记录会保持聚合。</p>
     </div>
 
     <div class="map-hud-bottom">

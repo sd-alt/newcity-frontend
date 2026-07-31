@@ -12,6 +12,7 @@ import {
 import { errMessage, isoNow, pickId } from '../utils/errors'
 import { mapDrawGeometry } from '../gis/mapTools'
 import type { SimpleGeometry } from '../gis/wkt'
+import { tablePager as vTablePager } from '../utils/tablePager'
 
 const route = useRoute()
 const router = useRouter()
@@ -650,7 +651,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
         <label>单位<input v-model="defForm.unit" /></label>
         <button class="btn" type="button" :disabled="pending" @click="createSample">新增样例</button>
       </div>
-      <table class="table">
+      <table v-table-pager="{ label: '指标样例分页' }" class="table">
         <thead><tr><th>ID</th><th>编码</th><th>名称</th><th>领域</th><th>主题</th><th></th></tr></thead>
         <tbody>
           <tr v-for="d in filteredSamples" :key="String(d.id)">
@@ -690,7 +691,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
         <label>目标精度<input v-model.number="instForm.targetAccuracy" type="number" /></label>
         <button class="btn" type="button" :disabled="pending" @click="createInst">生成实例</button>
       </div>
-      <table class="table">
+      <table v-table-pager="{ label: '指标实例分页' }" class="table">
         <thead><tr><th>ID</th><th>名称</th><th>样例</th><th>尺度</th><th>定义版本</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="i in instances" :key="String(i.id)" class="row-click" :class="{ selected: shellSelected && shellSelected.kind === 'indicator' && shellSelected.id === String(i.id) }" @click="locateInstanceOnMap(String(i.id))">
@@ -828,7 +829,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
         <button class="btn ghost" type="button" @click="queryHits = []; message = '已重置为本地列表'">重置</button>
       </div>
       <p class="muted">命中 {{ filteredInstances.length }} 条（服务端 {{ queryHits.length }} / 本地 {{ instances.length }}）</p>
-      <table class="table">
+      <table v-table-pager="{ label: '指标查询分页' }" class="table">
         <thead><tr><th>ID</th><th>名称</th><th>样例</th><th>尺度</th><th>状态</th><th>时间</th></tr></thead>
         <tbody>
           <tr v-for="i in filteredInstances" :key="'q'+i.id" class="row-click" :class="{ selected: shellSelected && shellSelected.kind === 'indicator' && shellSelected.id === String(i.id) }" @click="locateInstanceOnMap(String(i.id))">
@@ -857,7 +858,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
         </label>
         <button class="btn ghost" type="button" @click="loadInstanceVersions">刷新实例版本</button>
       </div>
-      <table class="table">
+      <table v-table-pager="{ label: '实例版本分页' }" class="table">
         <thead><tr><th>版本</th><th>状态快照</th><th>变更说明</th><th>时间</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="v in instanceVersions" :key="'iv'+v.id">
@@ -891,7 +892,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
             版本对比：v{{ asVersionObj(compareResult).fromVersion }} → v{{ asVersionObj(compareResult).toVersion }}
             · 变更字段 {{ asVersionObj(compareResult).changedFieldCount ?? versionDiffRows().length }}
           </p>
-          <table class="table">
+          <table v-table-pager="{ label: '版本差异分页' }" class="table">
             <thead><tr><th>字段</th><th>原值 (from)</th><th>新值 (to)</th></tr></thead>
             <tbody>
               <tr v-if="!versionDiffRows().length"><td colspan="3" class="muted">两版本字段一致，无差异</td></tr>
@@ -917,7 +918,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
         </label>
         <button class="btn ghost" type="button" @click="loadVersions">刷新定义版本（次要）</button>
       </div>
-      <table class="table">
+      <table v-table-pager="{ label: '定义版本分页' }" class="table">
         <thead><tr><th>版本</th><th>变更说明</th><th>时间</th></tr></thead>
         <tbody>
           <tr v-for="v in versions" :key="String(v.id || v.version)">
@@ -929,7 +930,7 @@ async function locateInstanceOnMap(id: string | number | unknown) {
       </table>
 
       <h3>4) 实例状态快捷操作</h3>
-      <table class="table">
+      <table v-table-pager="{ label: '实例状态分页' }" class="table">
         <thead><tr><th>实例ID</th><th>名称</th><th>定义版本</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="i in instances" :key="'ver'+i.id">

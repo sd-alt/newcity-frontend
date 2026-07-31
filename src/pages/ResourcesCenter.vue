@@ -2,8 +2,11 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
+import CardPager from '../components/CardPager.vue'
+import SensorMetadataView from './SensorMetadataView.vue'
 import {
   applyShellSensorStatusFilter,
+  closeShellRight,
   reloadShellLayers,
   applyShellSensorTypeFilter,
   setShellVisibility,
@@ -16,9 +19,15 @@ import {
 import { mapDrawGeometry } from '../gis/mapTools'
 import { errMessage, pickId } from '../utils/errors'
 import type { SimpleGeometry } from '../gis/wkt'
+import { tablePager as vTablePager } from '../utils/tablePager'
 
 const route = useRoute()
 const router = useRouter()
+const sensorProfileId = computed(() =>
+  route.path === '/resources/sensors' && typeof route.query.sensorId === 'string'
+    ? route.query.sensorId
+    : '',
+)
 const tab = ref('crud')
 const error = ref<string | null>(null)
 const message = ref<string | null>(null)
@@ -38,8 +47,19 @@ const qOwner = ref('')
 const queryHits = ref<Record<string, unknown>[]>([])
 const queryPending = ref(false)
 const queryPage = ref(1)
-const queryPageSize = ref(20)
+const queryPageSize = ref(4)
 const queryTotal = ref(0)
+const resourceQueryActive = ref(false)
+const typePage = ref(1)
+const crudPage = ref(1)
+const editingPlatformId = ref('')
+const editingSensorId = ref('')
+const queryViewPage = ref(1)
+const vizPage = ref(1)
+const typePages = ['平台类型', '传感器类型']
+const crudPages = computed(() => [editingPlatformId.value ? '编辑平台' : '新增平台', '平台列表', editingSensorId.value ? '编辑传感器' : '新增传感器', '传感器列表', '高级接入'])
+const queryViewPages = ['查询条件', '查询结果']
+const vizPages = ['筛选与上图', '资源摘要']
 
 const platformForm = ref({
   platformTypeId: '',
@@ -85,8 +105,8 @@ const tabs = [
 ]
 
 const filteredPlatforms = computed(() => {
-  // 本地预览：在未点“服务端查询”前仍可用
-  const base = queryHits.value.length ? queryHits.value : platforms.value
+  // 初始列表与查询结果都来自后端；筛选仅用于当前服务端结果的即时呈现。
+  const base = resourceQueryActive.value ? queryHits.value : platforms.value
   return base.filter((p) => {
     const name = String(p.name || '')
     const status = String(p.status || '')
@@ -103,6 +123,12 @@ const filteredPlatforms = computed(() => {
     return okName && okStatus && okType && okOwner
   })
 })
+const resourceQueryCount = computed(() => resourceQueryActive.value ? queryTotal.value : filteredPlatforms.value.length)
+const resourceQueryPageCount = computed(() => Math.max(1, Math.ceil(resourceQueryCount.value / queryPageSize.value)))
+const displayedPlatforms = computed(() => resourceQueryActive.value
+  ? filteredPlatforms.value
+  : filteredPlatforms.value.slice((queryPage.value - 1) * queryPageSize.value, queryPage.value * queryPageSize.value))
+const resourceQueryPageLabels = computed(() => Array.from({ length: resourceQueryPageCount.value }, (_, index) => `资源查询第 ${index + 1} 页`))
 
 async function runResourceQuery(resetPage = false) {
   queryPending.value = true
@@ -126,6 +152,8 @@ async function runResourceQuery(resetPage = false) {
     queryTotal.value = Number((res as { total?: number }).total ?? res.data.length)
     queryPage.value = Number((res as { page?: number }).page ?? queryPage.value)
     queryPageSize.value = Number((res as { pageSize?: number }).pageSize ?? queryPageSize.value)
+    resourceQueryActive.value = true
+    if (resetPage) queryViewPage.value = 2
     message.value =
       '服务端综合查询完成：本页 ' +
       res.data.length +
@@ -141,12 +169,24 @@ async function runResourceQuery(resetPage = false) {
   }
 }
 
-async function changeResourcePage(delta: number) {
-  const maxPage = Math.max(1, Math.ceil(queryTotal.value / queryPageSize.value) || 1)
-  const next = Math.min(maxPage, Math.max(1, queryPage.value + delta))
+async function setResourcePage(page: number) {
+  const next = Math.min(resourceQueryPageCount.value, Math.max(1, page))
   if (next === queryPage.value) return
   queryPage.value = next
-  await runResourceQuery(false)
+  if (resourceQueryActive.value) await runResourceQuery(false)
+}
+
+async function resetResourceQuery() {
+  qName.value = ''
+  qStatus.value = ''
+  qType.value = ''
+  qOwner.value = ''
+  queryHits.value = []
+  queryTotal.value = 0
+  queryPage.value = 1
+  resourceQueryActive.value = false
+  await runResourceQuery(true)
+  if (!error.value) message.value = '查询条件已重置，已重新读取服务端资源数据'
 }
 
 
@@ -172,7 +212,7 @@ async function setTab(key: string) {
   const q: Record<string, string> = { ...Object.fromEntries(
     Object.entries(route.query).filter(([, v]) => v != null && !Array.isArray(v)).map(([k, v]) => [k, String(v)]),
   ), tab: key }
-  await router.replace({ path: '/resources', query: q })
+  await router.replace({ path: route.path, query: q })
 }
 function syncTab() {
   const q = route.query.tab
@@ -260,23 +300,27 @@ async function createPlatform() {
     error.value = '请选择平台类型并填写名称（表单内容已保留）'
     return
   }
-  if (!platformForm.value.locationGeoJson) {
+  if (!editingPlatformId.value && !platformForm.value.locationGeoJson) {
     error.value = '请先在地图绘制平台位置或范围'
     return
   }
   pending.value = true
   error.value = null
   try {
-    const res = await api.createPlatform({
+    const body: Record<string, unknown> = {
       platformTypeId: Number(platformForm.value.platformTypeId),
       name: platformForm.value.name,
-      identifier: platformForm.value.identifier || undefined,
-      locationGeoJson: platformForm.value.locationGeoJson || undefined,
-      owner: platformForm.value.owner || undefined,
+      identifier: editingPlatformId.value ? platformForm.value.identifier : (platformForm.value.identifier || undefined),
+      owner: editingPlatformId.value ? platformForm.value.owner : (platformForm.value.owner || undefined),
       status: platformForm.value.status || 'active',
-    })
+    }
+    if (platformForm.value.locationGeoJson) body.locationGeoJson = platformForm.value.locationGeoJson
+    const res = editingPlatformId.value
+      ? await api.updatePlatform(editingPlatformId.value, body)
+      : await api.createPlatform(body)
     const newId = (res.data as any)?.id ?? (res as any)?.id
-    message.value = newId ? ('平台已创建 #' + newId) : '平台已创建'
+    message.value = editingPlatformId.value ? '平台资料修改已保存' : (newId ? ('平台已创建 #' + newId) : '平台已创建')
+    editingPlatformId.value = ''
     try { await reloadShellLayers('/resources', {}) } catch { /* map refresh optional */ }
     if (newId != null) {
       try { await locateOnMap('sensor', newId) } catch { /* optional */ }
@@ -290,6 +334,27 @@ async function createPlatform() {
   } finally {
     pending.value = false
   }
+}
+
+function editPlatform(item: Record<string, unknown>) {
+  editingPlatformId.value = String(item.id)
+  platformForm.value = {
+    platformTypeId: String(item.platformTypeId || ''),
+    name: String(item.name || ''),
+    identifier: String(item.identifier || ''),
+    locationGeoJson: (item.locationGeoJson as SimpleGeometry | null) || null,
+    owner: String(item.owner || ''),
+    status: String(item.status || 'active'),
+  }
+  crudPage.value = 1
+  message.value = `正在编辑平台“${item.name}”`
+}
+
+function cancelPlatformEdit() {
+  editingPlatformId.value = ''
+  platformForm.value.name = ''
+  platformForm.value.identifier = ''
+  platformForm.value.locationGeoJson = null
 }
 
 async function setPlatformStatus(id: unknown, status: string) {
@@ -329,14 +394,19 @@ async function createSensor() {
   pending.value = true
   error.value = null
   try {
-    await api.createSensor({
+    const body: Record<string, unknown> = {
       platformId: sensorForm.value.platformId ? Number(sensorForm.value.platformId) : undefined,
       sensorName: sensorForm.value.sensorName,
       sensorTypeId: sensorForm.value.sensorTypeId ? Number(sensorForm.value.sensorTypeId) : undefined,
-      accuracyPercent: Number(sensorForm.value.accuracyPercent) || undefined,
-      coverageGeoJson: sensorForm.value.coverageGeoJson || undefined,
-    })
-    message.value = '传感器已创建'
+      accuracyPercent: String(sensorForm.value.accuracyPercent).trim() === ''
+        ? null
+        : Number(sensorForm.value.accuracyPercent),
+    }
+    if (sensorForm.value.coverageGeoJson) body.coverageGeoJson = sensorForm.value.coverageGeoJson
+    if (editingSensorId.value) await api.updateSensor(editingSensorId.value, body)
+    else await api.createSensor(body)
+    message.value = editingSensorId.value ? '传感器资料修改已保存' : '传感器已创建'
+    editingSensorId.value = ''
     try { await reloadShellLayers('/resources', {}) } catch { /* map refresh optional */ }
     sensorForm.value.sensorName = ''
     await load()
@@ -345,6 +415,25 @@ async function createSensor() {
   } finally {
     pending.value = false
   }
+}
+
+function editSensor(item: Record<string, unknown>) {
+  editingSensorId.value = String(item.id)
+  sensorForm.value = {
+    platformId: String(item.platformId || ''),
+    sensorName: String(item.sensorName || item.name || ''),
+    sensorTypeId: String(item.sensorTypeId || ''),
+    accuracyPercent: Number(item.accuracyPercent ?? 90),
+    coverageGeoJson: (item.coverageGeoJson as SimpleGeometry | null) || null,
+  }
+  crudPage.value = 3
+  message.value = `正在编辑传感器“${sensorForm.value.sensorName}”`
+}
+
+function cancelSensorEdit() {
+  editingSensorId.value = ''
+  sensorForm.value.sensorName = ''
+  sensorForm.value.coverageGeoJson = null
 }
 
 async function removeSensor(id: unknown) {
@@ -539,6 +628,20 @@ async function locateOnMap(kind: 'sensor', id: string | number | unknown) {
   else error.value = null
 }
 
+async function openSensorProfile(id: string | number | unknown) {
+  closeShellRight()
+  await router.push({
+    name: 'resource-sensors',
+    query: { ...route.query, tab: 'crud', sensorId: String(id) },
+  })
+}
+
+async function closeSensorProfile() {
+  const query = { ...route.query }
+  delete query.sensorId
+  await router.replace({ name: 'resource-sensors', query: { ...query, tab: 'crud' } })
+}
+
 async function showOnMap() {
   const typeCode = String(vizFilter.value?.typeCode || '').trim()
   const status = String(vizFilter.value?.status || '').trim()
@@ -556,19 +659,26 @@ async function showOnMap() {
 
 <template>
   <section class="page">
+    <template v-if="sensorProfileId">
+      <header class="page-head profile-page-head">
+        <div><p class="eyebrow">资源档案</p><h1>传感器详情</h1></div>
+        <button class="btn ghost" type="button" @click="closeSensorProfile">返回资源列表</button>
+      </header>
+      <SensorMetadataView :sensor-id="sensorProfileId" embedded />
+    </template>
+    <template v-else>
     <header class="page-head">
       <div>
         <p class="eyebrow">传感资源中心</p>
         <h1>传感器类型、资源建模与查询</h1>
       </div>
-      <button class="btn" type="button" :disabled="pending" @click="showOnMap">资源上图</button>
     </header>
     <div class="tabs">
       <button v-for="t in tabs" :key="t.key" type="button" class="tab" :class="{ active: tab === t.key }" @click="setTab(t.key)">{{ t.label }}</button>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="message" class="ok-text">{{ message }}</p>
-      <div class="plan-map-actions panel soft" data-testid="resources-map-actions" style="margin:0.35rem 0;padding:0.45rem 0.55rem">
+      <div class="plan-map-actions panel soft" data-testid="resources-map-actions">
         <strong style="font-size:12px;margin-right:0.35rem">地图联动</strong>
         <button class="btn ghost" type="button" :disabled="pending" @click="showOnMap">资源上图</button>
         <span class="muted" style="font-size:12px">{{ shellStatus }}</span>
@@ -577,10 +687,10 @@ async function showOnMap() {
     <section v-if="tab === 'types'" class="panel">
       <h2>传感器类型维护</h2>
       <p class="muted">管理卫星/无人机/站点等类型的分类编码、属性模板与参数规范，供传感器建模引用。</p>
-      <div class="grid-2">
-        <div>
+      <div>
+        <div v-if="typePage === 1">
           <h3>平台类型（{{ platformTypes.length }}）</h3>
-          <table class="table">
+          <table v-table-pager="{ label: '平台类型分页' }" class="table">
             <thead><tr><th>ID</th><th>编码</th><th>名称</th></tr></thead>
             <tbody>
               <tr v-if="!platformTypes.length"><td colspan="3" class="muted">暂无平台类型</td></tr>
@@ -588,9 +698,9 @@ async function showOnMap() {
             </tbody>
           </table>
         </div>
-        <div>
+        <div v-else>
           <h3>传感器类型（{{ sensorTypes.length }}）</h3>
-          <table class="table">
+          <table v-table-pager="{ label: '传感器类型分页' }" class="table">
             <thead><tr><th>ID</th><th>编码</th><th>名称</th></tr></thead>
             <tbody>
               <tr v-if="!sensorTypes.length"><td colspan="3" class="muted">暂无传感器类型</td></tr>
@@ -599,18 +709,15 @@ async function showOnMap() {
           </table>
         </div>
       </div>
+      <CardPager v-model:page="typePage" :pages="typePages" label="传感器类型内容分页" />
     </section>
 
     <section v-if="tab === 'crud'" class="panel">
       <h2>平台与传感器增删改查</h2>
-      <div class="panel soft" style="margin-bottom:1rem">
-        <div class="section-head">
-          <div>
-            <h3>卫星在线接入</h3>
-            <p class="muted">卫星作为动态平台接入，位置由 TLE/SGP4 实时计算；星载传感器作为观测能力登记，不填写固定坐标。</p>
-          </div>
-          <span class="badge">真实在线数据</span>
-        </div>
+      <template v-if="crudPage === 5">
+      <details class="advanced-entry">
+        <summary><span><strong>卫星在线接入</strong><small>TLE / SGP4 动态轨道与星载传感器</small></span><em>高级接入</em></summary>
+        <div class="advanced-entry-body">
         <div class="form-row">
           <label>卫星名称<input v-model="satelliteAccessForm.name" placeholder="例如 Sentinel-2B" /></label>
           <label>NORAD 编号<input v-model="satelliteAccessForm.noradNumber" inputmode="numeric" placeholder="例如 42063" /></label>
@@ -643,15 +750,11 @@ async function showOnMap() {
           <button class="btn" type="button" :disabled="pending" @click="accessSatellite">验证并接入</button>
         </div>
         <p class="muted">轨道协议：HTTPS / CelesTrak TLE / SGP4。遥感影像及其覆盖面属于观测数据，需由真实产品元数据或文件导入，不会用卫星当前位置代替。</p>
-      </div>
-      <div class="panel soft" style="margin-bottom:1rem">
-        <div class="section-head">
-          <div>
-            <h3>移动平台位置 / 轨迹接入</h3>
-            <p class="muted">用于无人机、走航车和船舶的实时位置。设备私有协议先由网关转换成结构化时间、经纬度和高度，再写入统一轨迹接口。</p>
-          </div>
-          <span class="badge">实际运行轨迹</span>
         </div>
+      </details>
+      <details class="advanced-entry">
+        <summary><span><strong>移动平台位置 / 轨迹接入</strong><small>无人机、走航车和船舶实际运行轨迹</small></span><em>高级接入</em></summary>
+        <div class="advanced-entry-body">
         <div class="form-row">
           <label>移动平台
             <select v-model="positionSourceForm.platformId" @change="applyExistingPositionSource">
@@ -693,8 +796,11 @@ async function showOnMap() {
           <button class="btn" type="button" :disabled="pending" @click="savePositionSource">保存位置源</button>
         </div>
         <p class="muted">统一写入接口：<code>/api/v1/observations/platform-tracks/ingest</code>。地图展示的是实际位置轨迹；规划航线和观测覆盖范围使用独立图层。</p>
-      </div>
-      <h3>平台</h3>
+        </div>
+      </details>
+      </template>
+      <template v-if="crudPage === 1">
+      <h3>{{ editingPlatformId ? '编辑平台资料' : '新增平台' }}</h3>
       <div class="form-row">
         <label>平台类型
           <select v-model="platformForm.platformTypeId">
@@ -708,10 +814,13 @@ async function showOnMap() {
           <button class="btn ghost" type="button" @click="applyMapDrawToPlatform">采用地图绘制位置</button>
         </div>
         <label>所属单位<input v-model="platformForm.owner" /></label>
-        <label>状态<input v-model="platformForm.status" /></label>
-        <button class="btn" type="button" :disabled="pending" @click="createPlatform">新增平台</button>
+        <label>状态<select v-model="platformForm.status"><option value="active">启用</option><option value="inactive">停用</option></select></label>
+        <div class="form-actions"><button class="btn" type="button" :disabled="pending" @click="createPlatform">{{ editingPlatformId ? '保存修改' : '新增平台' }}</button><button v-if="editingPlatformId" class="btn ghost" type="button" @click="cancelPlatformEdit">取消编辑</button></div>
       </div>
-      <table class="table">
+      </template>
+      <template v-if="crudPage === 2">
+      <h3>平台列表</h3>
+      <table v-table-pager="{ label: '平台资源分页' }" class="table">
         <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>标识</th><th>状态</th><th></th></tr></thead>
         <tbody>
           <tr v-if="!platforms.length"><td colspan="6" class="muted">暂无平台/传感器资源，请先新增平台</td></tr>
@@ -719,6 +828,7 @@ async function showOnMap() {
             <td>{{ p.id }}</td><td>{{ p.name }}</td><td>{{ p.platformTypeId }}</td><td><code>{{ p.identifier }}</code></td><td>{{ p.status }}</td>
             <td class="ops">
               <button class="btn ghost" type="button" @click.stop="locateOnMap('sensor', String(p.id))">定位</button>
+              <button class="btn ghost" type="button" @click.stop="editPlatform(p)">编辑</button>
               <button class="btn ghost" type="button" @click.stop="setPlatformStatus(p.id, 'active')">启用</button>
               <button class="btn ghost" type="button" @click.stop="setPlatformStatus(p.id, 'inactive')">停用</button>
               <button class="btn ghost" type="button" @click.stop="removePlatform(p.id)">删除</button>
@@ -726,8 +836,9 @@ async function showOnMap() {
           </tr>
         </tbody>
       </table>
-
-      <h3>传感器</h3>
+      </template>
+      <template v-if="crudPage === 3">
+      <h3>{{ editingSensorId ? '编辑传感器资料' : '新增传感器' }}</h3>
       <div class="form-row">
         <label>平台
           <select v-model="sensorForm.platformId">
@@ -745,9 +856,12 @@ async function showOnMap() {
           <span>{{ sensorForm.coverageGeoJson ? '覆盖区域已设置' : '覆盖区域未设置' }}</span>
           <button class="btn ghost" type="button" @click="applyMapDrawToSensor">采用地图绘制覆盖</button>
         </div>
-        <button class="btn" type="button" :disabled="pending" @click="createSensor">新增传感器</button>
+        <div class="form-actions"><button class="btn" type="button" :disabled="pending" @click="createSensor">{{ editingSensorId ? '保存修改' : '新增传感器' }}</button><button v-if="editingSensorId" class="btn ghost" type="button" @click="cancelSensorEdit">取消编辑</button></div>
       </div>
-      <table class="table">
+      </template>
+      <template v-if="crudPage === 4">
+      <h3>传感器列表</h3>
+      <table v-table-pager="{ label: '传感器分页' }" class="table">
         <thead><tr><th>ID</th><th>名称</th><th>平台</th><th>类型</th><th>精度</th><th></th></tr></thead>
         <tbody>
           <tr v-if="!sensors.length"><td colspan="6" class="muted">暂无传感器记录</td></tr>
@@ -758,17 +872,22 @@ async function showOnMap() {
             <td>{{ s.sensorTypeId }}</td>
             <td>{{ s.accuracyPercent ?? '-' }}</td>
             <td class="ops">
+              <button class="btn ghost" type="button" @click.stop="openSensorProfile(s.id)">详情档案</button>
+              <button class="btn ghost" type="button" @click.stop="editSensor(s)">编辑</button>
               <button class="btn ghost" type="button" @click.stop="locateOnMap('sensor', String(s.platformId || s.id))">定位</button>
               <button class="btn ghost" type="button" @click.stop="removeSensor(s.id)">删除</button>
             </td>
           </tr>
         </tbody>
       </table>
+      </template>
+      <CardPager v-model:page="crudPage" :pages="crudPages" label="资源维护内容分页" />
     </section>
 
     <section v-if="tab === 'query'" class="panel">
       <h2>传感器综合查询</h2>
       <p class="muted">按类型、名称/编码、所属单位、运行状态组合筛选；优先走服务端过滤，结果可被规划中心候选筛选使用。</p>
+      <template v-if="queryViewPage === 1">
       <div class="form-row">
         <label>名称/编码关键字<input v-model="qName" placeholder="keyword" /></label>
         <label>状态<input v-model="qStatus" placeholder="active" /></label>
@@ -781,50 +900,57 @@ async function showOnMap() {
         </label>
         <label>每页
           <select v-model.number="queryPageSize" @change="runResourceQuery(true)">
-            <option :value="10">10</option>
-            <option :value="20">20</option>
-            <option :value="50">50</option>
+            <option :value="4">4</option>
+            <option :value="8">8</option>
+            <option :value="12">12</option>
           </select>
         </label>
         <button class="btn" type="button" :disabled="queryPending" @click="runResourceQuery(true)">服务端查询</button>
-        <button class="btn ghost" type="button" @click="queryHits = []; queryTotal = 0; queryPage = 1; message = '已清空服务端结果，回到本地列表'">重置</button>
+        <button class="btn ghost" type="button" @click="resetResourceQuery">重置</button>
       </div>
-      <p class="muted">显示 {{ filteredPlatforms.length }} · 服务端本页 {{ queryHits.length }} / 总计 {{ queryTotal || platforms.length }} · 本地 {{ platforms.length }}</p>
-      <div class="form-row" v-if="queryHits.length || queryTotal">
-        <button class="btn ghost" type="button" :disabled="queryPending || queryPage <= 1" @click="changeResourcePage(-1)">上一页</button>
-        <span class="muted">第 {{ queryPage }} 页</span>
-        <button class="btn ghost" type="button" :disabled="queryPending || queryPage * queryPageSize >= queryTotal" @click="changeResourcePage(1)">下一页</button>
+      </template>
+      <template v-if="queryViewPage === 2">
+      <p class="muted">显示 {{ filteredPlatforms.length }} · 服务端本页 {{ queryHits.length }} / 总计 {{ queryTotal }}</p>
+      <div class="table-region">
+        <div class="table-scroll">
+          <table class="table">
+            <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>标识</th><th>所属单位</th><th>位置</th><th>状态</th></tr></thead>
+            <tbody>
+              <tr v-if="!displayedPlatforms.length"><td colspan="7" class="muted">无匹配查询结果</td></tr>
+              <tr v-for="p in displayedPlatforms" :key="'f'+p.id" class="row-click" :class="{ selected: shellSelected && shellSelected.kind === 'sensor' && shellSelected.id === String(p.id) }" @click="locateOnMap('sensor', String(p.id))">
+                <td>{{ p.id }}</td>
+                <td>{{ p.name }}</td>
+                <td>{{ p.platformTypeName || p.platformTypeId || p.platformType || '-' }}</td>
+                <td>{{ p.identifier }}</td>
+                <td>{{ p.owner || '-' }}</td>
+                <td>{{ p.locationGeoJson || p.locationWkt ? '已定位' : '未定位' }}</td>
+                <td>{{ p.status }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <CardPager :page="queryPage" kind="records" :pages="resourceQueryPageLabels" :summary="`共 ${resourceQueryCount} 条`" label="资源查询分页" @update:page="setResourcePage" />
       </div>
-      <table class="table">
-        <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>标识</th><th>所属单位</th><th>位置</th><th>状态</th></tr></thead>
-        <tbody>
-          <tr v-if="!filteredPlatforms.length"><td colspan="6" class="muted">无匹配查询结果</td></tr>
-          <tr v-for="p in filteredPlatforms" :key="'f'+p.id" class="row-click" :class="{ selected: shellSelected && shellSelected.kind === 'sensor' && shellSelected.id === String(p.id) }" @click="locateOnMap('sensor', String(p.id))">
-            <td>{{ p.id }}</td>
-            <td>{{ p.name }}</td>
-            <td>{{ p.platformTypeName || p.platformTypeId || p.platformType || '-' }}</td>
-            <td>{{ p.identifier }}</td>
-            <td>{{ p.owner || '-' }}</td>
-            <td>{{ p.locationGeoJson || p.locationWkt ? '已定位' : '未定位' }}</td>
-            <td>{{ p.status }}</td>
-          </tr>
-        </tbody>
-      </table>
+      </template>
+      <CardPager v-model:page="queryViewPage" :pages="queryViewPages" label="资源查询内容分页" />
     </section>
 
     <section v-if="tab === 'viz'" class="panel">
       <h2>资源可视化</h2>
       <p class="muted">先按类型/状态摘要核对资源空间与能力信息，再进入 GIS 工作台做地图叠加。</p>
+      <template v-if="vizPage === 1">
       <div class="form-row">
         <label>类型编码<input v-model="vizFilter.typeCode" placeholder="station" /></label>
         <label>状态<input v-model="vizFilter.status" placeholder="active" /></label>
         <label>关键字<input v-model="vizFilter.keyword" /></label>
-        <button class="btn" type="button" @click="loadViz">刷新摘要</button>
+        <button class="btn" type="button" @click="loadViz(); vizPage = 2">刷新摘要</button>
         <button class="btn" type="button" :disabled="pending" @click="showOnMap">底图上图</button>
         <button class="btn ghost" type="button" :disabled="pending" @click="showOnMap">图层刷新上图</button>
       </div>
+      </template>
+      <template v-if="vizPage === 2">
       <p class="muted">摘要条数 {{ vizRows.length }}</p>
-      <table class="table" v-if="vizRows.length">
+      <table v-if="vizRows.length" v-table-pager="{ label: '资源摘要分页' }" class="table resource-summary-table">
         <thead>
           <tr>
             <th>ID</th><th>名称</th><th>类型</th><th>状态</th><th>单位</th><th>位置</th><th>轨迹数据</th><th>能力摘要</th><th></th>
@@ -848,6 +974,25 @@ async function showOnMap() {
         </tbody>
       </table>
       <p v-else class="muted">暂无可视化摘要，点击刷新或调整筛选。</p>
+      </template>
+      <CardPager v-model:page="vizPage" :pages="vizPages" label="资源可视化内容分页" />
     </section>
+    </template>
   </section>
 </template>
+
+<style scoped>
+.page > .panel { border-radius: 16px; }
+.form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.page .table.resource-summary-table { min-width: 920px; }
+.profile-page-head { margin-bottom: .55rem; }
+.advanced-entry { margin: .45rem 0; overflow: hidden; border: 1px solid transparent; border-radius: 10px; background: #f6f7f8; }
+.advanced-entry summary { display: flex; align-items: center; justify-content: space-between; gap: .45rem; padding: .55rem .65rem; cursor: pointer; list-style: none; }
+.advanced-entry summary::-webkit-details-marker { display: none; }
+.advanced-entry summary span { display: grid; gap: .08rem; }
+.advanced-entry summary strong { color: #1d1d1f; font-size: 12px; }
+.advanced-entry summary small { color: #86868b; font-size: 9px; }
+.advanced-entry summary em { flex: 0 0 auto; padding: .12rem .38rem; border: 1px solid #dcdde1; border-radius: 6px; background: #f5f5f7; color: #66666c; font-size: 9px; font-style: normal; line-height: 1.3; }
+.advanced-entry[open] summary { border-bottom: 1px solid #e5e5ea; background: #f0f7ff; }
+.advanced-entry-body { padding: .6rem; background: transparent; }
+</style>

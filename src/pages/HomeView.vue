@@ -9,9 +9,7 @@ import {
   focusAnomalousData,
   focusShellMode,
   shellAlerts,
-  shellCounts,
   shellLoading,
-  shellStatus,
   selectShellFeature,
 } from '../gis/mapShell'
 
@@ -19,7 +17,15 @@ const { user } = useAuthStore()
 const error = ref<string | null>(null)
 const mapHint = ref<string | null>(null)
 const runningTasks = ref<Array<Record<string, unknown>>>([])
+const runningTaskTotal = ref(0)
 const offlineRows = ref<Array<Record<string, unknown>>>([])
+
+const centerEntries = [
+  { name: '应用中心', question: '填写监测需求', detail: '选择手动、AI 辅助或多 Agent', to: '/application/tasks', mark: '需求' },
+  { name: '任务中心', question: '配置监测指标', detail: '把需求整理成正式指标体系', to: '/tasks', mark: '指标' },
+  { name: '资源中心', question: '检查可用资源', detail: '核对传感器、数据、算法与知识', to: '/resources/sensors', mark: '资源' },
+  { name: '业务中心', question: '制定并执行方案', detail: '完成匹配、评估、发布与执行', to: '/business', mark: '方案' },
+]
 
 const alertTotal = computed(
   () =>
@@ -48,12 +54,11 @@ onMounted(async () => {
   if (!user.value) return
   try {
     const [tasks, plats] = await Promise.all([
-      api.listTasks().catch(() => ({ data: [] })),
-      api.listPlatforms('?pageSize=50').catch(() => ({ data: [] })),
+      api.listTasks(),
+      api.listPlatforms('?pageSize=50'),
     ])
     const taskRows = asList(tasks.data)
-    runningTasks.value = taskRows
-      .filter((t) => {
+    const activeTasks = taskRows.filter((t) => {
         const st = String(t.status || '').toLowerCase()
         return (
           st.includes('run') ||
@@ -63,7 +68,8 @@ onMounted(async () => {
           st === 'draft'
         )
       })
-      .slice(0, 5)
+    runningTaskTotal.value = activeTasks.length
+    runningTasks.value = activeTasks.slice(0, 3)
     offlineRows.value = asList(plats.data)
       .filter((p) => {
         const st = String(p.status || '').toLowerCase()
@@ -75,9 +81,9 @@ onMounted(async () => {
           st.includes('维护')
         )
       })
-      .slice(0, 5)
-  } catch {
-    /* ignore list failures */
+      .slice(0, 3)
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '首页业务数据加载失败'
   }
 })
 
@@ -121,43 +127,33 @@ async function filterMap(mode: 'sensors' | 'data' | 'tasks' | 'all' | 'alerts' |
       </div>
     </header>
 
-    <p class="hint">{{ shellLoading ? '图层加载中…' : shellStatus }}</p>
+    <section class="quick-start">
+      <div class="quick-start-primary">
+        <div><strong>开始一项监测任务</strong><p>填写目标、区域和时间，后续按需配置指标与方案。</p></div>
+        <RouterLink :to="centerEntries[0]!.to" class="quick-start-button">填写监测需求</RouterLink>
+      </div>
+      <nav aria-label="其他常用工作入口">
+        <RouterLink v-for="item in centerEntries.slice(1)" :key="item.name" :to="item.to">
+          {{ item.question }}<span aria-hidden="true">›</span>
+        </RouterLink>
+      </nav>
+    </section>
+
     <p v-if="mapHint" class="ok-text">{{ mapHint }}</p>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="!user" class="error">业务图层需登录。请先 <RouterLink to="/login">登录</RouterLink>。</p>
 
-    <div class="cards compact home-stats">
-      <button type="button" class="card stat clickable" :disabled="shellLoading" @click="filterMap('sensors')">
-        <h3>传感资源</h3>
-        <p class="stat-num">{{ shellCounts.sensors }}</p>
-        <p class="muted tiny">点击仅显示</p>
-      </button>
-      <button type="button" class="card stat clickable" :disabled="shellLoading" @click="filterMap('data')">
-        <h3>监测数据</h3>
-        <p class="stat-num">{{ shellCounts.data }}</p>
-        <p class="muted tiny">点击仅显示</p>
-      </button>
-      <button type="button" class="card stat clickable" :disabled="shellLoading" @click="filterMap('tasks')">
-        <h3>观测任务</h3>
-        <p class="stat-num">{{ shellCounts.tasks }}</p>
-        <p class="muted tiny">点击仅显示</p>
-      </button>
-      <button type="button" class="card stat warn clickable" :disabled="shellLoading" @click="filterMap('alerts')">
-        <h3>当前告警</h3>
-        <p class="stat-num">{{ alertTotal }}</p>
-        <p class="muted tiny">
-          离线 {{ shellAlerts.offlineSensors }} · 故障/维护 {{ shellAlerts.faultSensors }} · 异常数据
-          {{ shellAlerts.anomalousData }}
-        </p>
-      </button>
-    </div>
-    <div class="home-map-actions">
-      <button type="button" class="btn ghost tiny" :disabled="shellLoading" @click="filterMap('all')">显示全部图层</button>
-      <button type="button" class="btn ghost tiny" :disabled="shellLoading" @click="filterMap('anomaly')">数据质量关注</button>
-    </div>
+    <section class="situation-readout" :class="{ warning: alertTotal > 0 }">
+      <header><strong>{{ alertTotal > 0 ? `${alertTotal} 项需要关注` : '当前运行平稳' }}</strong><button type="button" :disabled="shellLoading" @click="filterMap('all')">显示全部</button></header>
+      <div>
+        <button type="button" :disabled="shellLoading" @click="filterMap(shellAlerts.offlineSensors + shellAlerts.faultSensors > 0 ? 'alerts' : 'sensors')"><span>传感资源</span><strong>{{ shellAlerts.offlineSensors + shellAlerts.faultSensors }} 个异常</strong><small aria-hidden="true">›</small></button>
+        <button type="button" :disabled="shellLoading" @click="filterMap(shellAlerts.anomalousData > 0 ? 'anomaly' : 'data')"><span>监测数据</span><strong>{{ shellAlerts.anomalousData }} 条质量异常</strong><small aria-hidden="true">›</small></button>
+        <button type="button" :disabled="shellLoading" @click="filterMap('tasks')"><span>观测任务</span><strong>{{ runningTaskTotal }} 个待处理</strong><small aria-hidden="true">›</small></button>
+      </div>
+    </section>
 
     <div v-if="runningTasks.length" class="panel home-block">
-      <h3>执行中 / 活跃任务</h3>
+      <h3>待处理任务</h3>
       <ul class="home-list">
         <li v-for="t in runningTasks" :key="'t'+t.id">
           <button type="button" class="linkish" @click="locateTask(t.id)">
@@ -169,7 +165,7 @@ async function filterMap(mode: 'sensors' | 'data' | 'tasks' | 'all' | 'alerts' |
     </div>
 
     <div v-if="offlineRows.length" class="panel home-block">
-      <h3>异常 / 离线资源</h3>
+      <h3>异常资源</h3>
       <ul class="home-list">
         <li v-for="p in offlineRows" :key="'p'+p.id">
           <button type="button" class="linkish" @click="locateSensor(p.id)">
@@ -184,17 +180,31 @@ async function filterMap(mode: 'sensors' | 'data' | 'tasks' | 'all' | 'alerts' |
 </template>
 
 <style scoped>
-.home-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; margin: 0.6rem 0; }
-.home-stats .card.stat { padding: 0.5rem 0.55rem; text-align: left; width: 100%; border: 1px solid #E5E7EB; background: #fff; border-radius: 10px; cursor: pointer; }
-.home-stats .card.stat.clickable:hover { border-color: #1677FF; box-shadow: 0 0 0 2px rgba(22,119,255,0.12); }
-.home-stats .card.stat:disabled { opacity: 0.6; cursor: not-allowed; }
-.home-stats .warn .stat-num { color: #F59E0B; }
-.home-stats h3 { margin: 0; font-size: 12px; color: #6B7280; font-weight: 600; }
-.home-stats .stat-num { margin: 0.15rem 0; font-size: 1.35rem; font-weight: 700; color: #0F3D66; }
-.home-stats .tiny { font-size: 11px; margin: 0; }
-.home-map-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.55rem; }
+.quick-start { margin: .35rem 0 .65rem; overflow: hidden; border: 1px solid #e1e3e6; border-radius: 16px; background: #fff; box-shadow: 0 1px 2px rgba(29,29,31,.025), 0 8px 24px rgba(29,29,31,.035); }
+.quick-start-primary { display: flex; align-items: center; justify-content: space-between; gap: .65rem; padding: .7rem; }
+.quick-start-primary div { min-width: 0; }
+.quick-start-primary strong { color: #3a3a3c; font-size: 13px; }
+.quick-start-primary p { margin: .12rem 0 0; color: #6e6e73; font-size: 10px; line-height: 1.45; }
+.quick-start-button { flex: 0 0 auto; padding: .42rem .65rem; border-radius: 8px; background: var(--brand); color: #fff; font-size: 11px; }
+.quick-start nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid #e1e3e6; }
+.quick-start nav a { display: flex; align-items: center; justify-content: space-between; gap: .25rem; min-width: 0; padding: .48rem .55rem; border-right: 1px solid #e1e3e6; color: #515154; font-size: 10px; }
+.quick-start nav a:last-child { border-right: 0; }
+.quick-start nav a:hover { background: var(--brand-soft); color: var(--brand); }
+.quick-start nav span { color: #86868b; font-size: 15px; line-height: 1; }
+.situation-readout { margin: .55rem 0; padding: .7rem; border: 1px solid #e1e3e6; border-radius: 16px; background: #fff; box-shadow: 0 1px 2px rgba(29,29,31,.025), 0 8px 24px rgba(29,29,31,.035); }
+.situation-readout.warning { border-color: #ead3a7; }
+.situation-readout header { display: flex; align-items: center; justify-content: space-between; gap: .4rem; padding-bottom: .45rem; border-bottom: 1px solid #e1e3e6; }
+.situation-readout header strong { color: #3a3a3c; font-size: 14px; }
+.situation-readout header > button { padding: .2rem .35rem; border: 0; background: transparent; color: var(--brand); font-size: 9px; cursor: pointer; }
+.situation-readout > div { display: grid; margin-top: .25rem; }
+.situation-readout > div button { display: grid; grid-template-columns: minmax(0, 1fr) auto 12px; gap: .35rem; align-items: center; min-width: 0; padding: .38rem .15rem; border: 0; border-bottom: 1px solid #eceef1; background: transparent; color: #515154; text-align: left; cursor: pointer; }
+.situation-readout > div button:last-child { border-bottom: 0; }
+.situation-readout > div button:hover { color: var(--brand); }
+.situation-readout button span { font-size: 10px; }
+.situation-readout button strong { color: #3a3a3c; font-size: 10px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.situation-readout button small { color: #86868b; font-size: 14px; line-height: 1; }
 .home-block { margin: 0.5rem 0; }
-.home-block h3 { margin: 0 0 0.35rem; font-size: 13px; color: #0F3D66; }
+.home-block h3 { margin: 0 0 0.35rem; font-size: 13px; color: #3a3a3c; }
 .home-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
 .home-list li { display: flex; justify-content: space-between; gap: 0.4rem; font-size: 12px; }
 .linkish {

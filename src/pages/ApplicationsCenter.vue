@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
+import CardPager from '../components/CardPager.vue'
 import {
   reloadShellLayers,
   patchShellFilters,
@@ -14,6 +15,7 @@ import {
 } from '../gis/mapShell'
 import { errMessage } from '../utils/errors'
 import { useAuthStore } from '../stores/auth'
+import { tablePager as vTablePager } from '../utils/tablePager'
 
 const { user } = useAuthStore()
 const route = useRoute()
@@ -24,6 +26,9 @@ const message = ref<string | null>(null)
 const pending = ref(false)
 const mapFocus = ref<{ kind: string; id: string; name: string } | null>(null)
 const activeMapFilter = ref<'sensors' | 'data' | 'tasks' | 'all' | 'indicators'>('all')
+const previewKind = ref<'sensor' | 'satellite' | 'uav' | 'data' | 'task'>('sensor')
+const statsPage = ref(1)
+const statsPages = ['资源概览', '类型与状态', '所属单位', '数据概览', '数据分布', '任务概览', '状态与类型', '任务场景']
 
 const resourceStats = ref<Record<string, unknown> | null>(null)
 const dataStats = ref<Record<string, unknown> | null>(null)
@@ -35,6 +40,8 @@ const previewIds = computed(() => {
   const g = gisPreview.value as Record<string, { firstId?: string }> | null
   return {
     sensor: String(g?.sensors?.firstId || ''),
+    satellite: String(g?.satellites?.firstId || ''),
+    uav: String(g?.uavs?.firstId || ''),
     data: String(g?.data?.firstId || ''),
     task: String(g?.tasks?.firstId || ''),
   }
@@ -105,7 +112,7 @@ const taskByScene = computed(() => asRows(taskStats.value?.byScene))
 
 async function setTab(key: string) {
   tab.value = key
-  await router.replace({ path: '/applications', query: { tab: key } })
+  await router.replace({ path: route.path, query: { tab: key } })
 }
 function syncTab() {
   const t = route.query.tab
@@ -188,11 +195,21 @@ async function loadGisPreview() {
     const sFeats = ((s.data as { features?: Array<Record<string, unknown>> }).features || [])
     const dFeats = ((d.data as { features?: Array<Record<string, unknown>> }).features || [])
     const tFeats = ((t.data as { features?: Array<Record<string, unknown>> }).features || [])
+    const satellite = sFeats.find((item) => String(item.typeCode || '') === 'satellite')
+    const uav = sFeats.find((item) => String(item.typeCode || '') === 'uav')
     gisPreview.value = {
       sensors: {
         total: (s.data as { total?: number }).total,
         features: sFeats.length,
         firstId: sFeats[0] ? String(sFeats[0].platformId ?? sFeats[0].id ?? '') : '',
+      },
+      satellites: {
+        features: sFeats.filter((item) => String(item.typeCode || '') === 'satellite').length,
+        firstId: satellite ? String(satellite.platformId ?? satellite.id ?? '') : '',
+      },
+      uavs: {
+        features: sFeats.filter((item) => String(item.typeCode || '') === 'uav').length,
+        firstId: uav ? String(uav.platformId ?? uav.id ?? '') : '',
       },
       data: {
         total: (d.data as { total?: number }).total,
@@ -210,25 +227,48 @@ async function loadGisPreview() {
   }
 }
 
-async function locatePreview(kind: 'sensor' | 'data' | 'task') {
+async function locatePreview(kind: 'sensor' | 'satellite' | 'uav' | 'data' | 'task') {
   const prev = gisPreview.value as Record<string, { firstId?: string; features?: number }> | null
-  const bucket = prev?.[kind === 'sensor' ? 'sensors' : kind === 'data' ? 'data' : 'tasks']
+  const bucketKey = kind === 'sensor'
+    ? 'sensors'
+    : kind === 'satellite'
+      ? 'satellites'
+      : kind === 'uav'
+        ? 'uavs'
+        : kind === 'data'
+          ? 'data'
+          : 'tasks'
+  const label = kind === 'sensor'
+    ? '传感器'
+    : kind === 'satellite'
+      ? '卫星'
+      : kind === 'uav'
+        ? '无人机'
+        : kind === 'data'
+          ? '数据'
+          : '任务'
+  const businessKind = kind === 'satellite' || kind === 'uav' ? 'sensor' : kind
+  const bucket = prev?.[bucketKey]
   const id = String(bucket?.firstId || '').trim()
   if (!id) {
-    message.value = '当前没有可定位的' + (kind === 'sensor' ? '传感器' : kind === 'data' ? '数据' : '任务')
+    message.value = '当前没有可定位的' + label
     return
   }
-  const ok = await selectShellFeature(kind, id, { openBubble: true, fly: true })
+  const ok = await selectShellFeature(businessKind, id, { openBubble: true, fly: true })
   if (ok) {
     mapFocus.value = {
-      kind,
+      kind: businessKind,
       id,
-      name: (kind === 'sensor' ? '传感器' : kind === 'data' ? '数据' : '任务') + ' #' + id,
+      name: label + ' #' + id,
     }
     message.value = '已在地图定位' + mapFocus.value.name
   } else {
     message.value = '定位失败：未找到对应空间要素'
   }
+}
+
+function locateSelectedPreview() {
+  void locatePreview(previewKind.value)
 }
 
 function kindLabel(kind: unknown) {
@@ -449,6 +489,10 @@ async function filterMapByStat(kind: 'sensors' | 'data' | 'tasks' | 'all' | 'ind
   message.value = '统计联动：仅显示' + (labels[kind] || kind) + '（地图图层已更新）'
 }
 
+function changeMapFilter(event: Event) {
+  void filterMapByStat((event.target as HTMLSelectElement).value as 'sensors' | 'data' | 'tasks' | 'all' | 'indicators')
+}
+
 async function filterSensorsByType(typeCode: unknown) {
   const code = String(typeCode || '').trim()
   resourceFilter.value.typeCode = code
@@ -529,10 +573,6 @@ async function filterTasksByStatus(status: unknown) {
         <h1>综合统计与 GIS 展示</h1>
         <p class="muted">统计与地图联动：点击下方按钮切换地图图层；也可在地图右侧「图层」工具中勾选。</p>
       </div>
-      <div class="plan-head-actions" style="display:flex;gap:0.35rem;flex-wrap:wrap">
-        <button class="btn" type="button" :disabled="pending" @click="mapShowAll">底图全部上图</button>
-        <button class="btn ghost" type="button" :disabled="pending" data-map-action="restore-all" @click="clearMapFocus">恢复全部图层</button>
-      </div>
     </header>
     <div class="tabs">
       <button
@@ -563,39 +603,47 @@ async function filterTasksByStatus(status: unknown) {
 
     <section v-if="tab === 'stats'" class="panel">
 
-        <div class="map-link-bar">
-          <span class="muted">地图联动：</span>
-          <button type="button" class="btn ghost tiny" :class="{ active: activeMapFilter === 'sensors' }" data-map-filter="sensors" @click="filterMapByStat('sensors')">仅传感资源</button>
-          <button type="button" class="btn ghost tiny" :class="{ active: activeMapFilter === 'data' }" data-map-filter="data" @click="filterMapByStat('data')">仅监测数据</button>
-          <button type="button" class="btn ghost tiny" :class="{ active: activeMapFilter === 'tasks' }" data-map-filter="tasks" @click="filterMapByStat('tasks')">仅观测任务</button>
-          <button type="button" class="btn ghost tiny" :class="{ active: activeMapFilter === 'indicators' }" data-map-filter="indicators" @click="filterMapByStat('indicators')">仅指标实例</button>
-          <button type="button" class="btn ghost tiny" :class="{ active: activeMapFilter === 'all' }" data-map-filter="all" @click="filterMapByStat('all')">显示全部</button>
-          <span class="muted tiny">当前：{{ activeMapFilter }}</span>
+        <div class="map-link-bar compact-map-filter">
+          <label>地图显示
+            <select :value="activeMapFilter" :disabled="shellLoading" @change="changeMapFilter">
+              <option value="all">全部业务图层</option>
+              <option value="sensors">仅传感资源</option>
+              <option value="data">仅监测数据</option>
+              <option value="tasks">仅观测任务</option>
+              <option value="indicators">仅指标实例</option>
+            </select>
+          </label>
         </div>
 
-      <p class="muted">对应任务清单 C4–C6：传感资源统计、监测数据统计、观测任务统计。支持条件筛选与下钻到明细中心。</p>
-      <h2>综合统计（文档 3 项）</h2>
-      <p class="muted">传感资源 / 监测数据 / 观测任务。先设筛选条件，再刷新；结果按维度分表展示，避免只看原始 JSON。</p>
-      <button class="btn" type="button" :disabled="pending" @click="() => loadStats()">刷新统计</button>
+      <div class="section-heading-actions">
+        <h2>业务统计</h2>
+        <button class="btn ghost tiny" type="button" :disabled="pending" @click="() => loadStats()">刷新统计</button>
+      </div>
+      <p class="muted">分别回答“资源是否够用、数据是否健康、任务是否形成方案”。设置条件后刷新，点击统计项可联动地图或进入明细。</p>
 
-      <h3>C4 传感资源统计</h3>
-      <div class="form-row">
+      <template v-if="statsPage === 1">
+      <h3>传感资源 · 能力盘点</h3>
+      <div class="form-row stats-filter-grid">
         <label>类型编码<input v-model="resourceFilter.typeCode" placeholder="station/satellite" /></label>
         <label>状态<input v-model="resourceFilter.status" placeholder="active" /></label>
         <label>所属单位<input v-model="resourceFilter.owner" /></label>
         <label>关键字<input v-model="resourceFilter.keyword" /></label>
-        <button class="btn ghost" type="button" :disabled="pending" @click="() => loadStats()">按条件统计</button>
-        <RouterLink class="btn ghost" to="/resources?tab=query">下钻查询</RouterLink>
+        <div class="stats-filter-actions">
+          <button class="btn" type="button" :disabled="pending" @click="() => loadStats()">按条件统计</button>
+          <RouterLink class="btn ghost" to="/resources?tab=query">查看资源</RouterLink>
+        </div>
       </div>
-      <div class="cards">
-        <button type="button" class="card stat clickable" @click="filterMapByStat('sensors')"><h3>资源总数</h3><p class="stat-num">{{ resourceStats?.total ?? '—' }}</p><span class="muted">点击仅显传感资源</span></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('sensors')"><h3>类型数</h3><p class="stat-num">{{ resourceByType.length }}</p><span class="muted">联动地图图层</span></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('sensors')"><h3>状态类</h3><p class="stat-num">{{ resourceByStatus.length }}</p><span class="muted">联动地图图层</span></button>
+      <div class="stat-summary">
+        <button type="button" @click="filterMapByStat('sensors')"><span>已登记资源</span><strong>{{ resourceStats?.total ?? '—' }}</strong><small>地图查看</small></button>
+        <button type="button" @click="filterMapByStat('sensors')"><span>能力类型</span><strong>{{ resourceByType.length }}</strong><small>种分类</small></button>
+        <button type="button" @click="filterMapByStat('sensors')"><span>运行状态</span><strong>{{ resourceByStatus.length }}</strong><small>种状态</small></button>
       </div>
+      </template>
+      <template v-if="statsPage === 2">
       <div class="grid-2">
         <div>
           <h4>按类型</h4>
-          <table class="table">
+          <table v-table-pager="{ label: '资源类型统计分页' }" class="table">
             <thead><tr><th>类型</th><th>编码</th><th>数量</th></tr></thead>
             <tbody>
               <tr v-if="!resourceByType.length"><td colspan="3" class="muted">暂无类型统计，点击刷新统计或检查数据</td></tr>
@@ -614,7 +662,7 @@ async function filterTasksByStatus(status: unknown) {
         </div>
         <div>
           <h4>按状态</h4>
-          <table class="table">
+          <table v-table-pager="{ label: '资源状态统计分页' }" class="table">
             <thead><tr><th>状态</th><th>数量</th></tr></thead>
             <tbody>
               <tr v-if="!resourceByStatus.length"><td colspan="3" class="muted">暂无状态统计</td></tr>
@@ -626,8 +674,10 @@ async function filterTasksByStatus(status: unknown) {
           </table>
         </div>
       </div>
+      </template>
+      <template v-if="statsPage === 3">
       <h4>按所属单位（Top）</h4>
-      <table class="table">
+      <table v-table-pager="{ label: '所属单位统计分页' }" class="table">
         <thead><tr><th>单位</th><th>数量</th></tr></thead>
         <tbody>
           <tr v-for="(row, i) in resourceByOwner.slice(0, 12)" :key="'ro'+i">
@@ -636,9 +686,11 @@ async function filterTasksByStatus(status: unknown) {
           </tr>
         </tbody>
       </table>
+      </template>
 
-      <h3>C5 监测数据统计</h3>
-      <div class="form-row">
+      <template v-if="statsPage === 4">
+      <h3>监测数据 · 质量判读</h3>
+      <div class="form-row stats-filter-grid">
         <label>数据类型<input v-model="dataFilter.dataType" placeholder="timeseries" /></label>
         <label>质量状态<input v-model="dataFilter.qualityStatus" placeholder="passed/failed" /></label>
         <label>访问级别<input v-model="dataFilter.accessLevel" placeholder="public" /></label>
@@ -649,18 +701,22 @@ async function filterTasksByStatus(status: unknown) {
             <option value="false">非隔离</option>
           </select>
         </label>
-        <button class="btn ghost" type="button" :disabled="pending" @click="() => loadStats()">按条件统计</button>
-        <RouterLink class="btn ghost" to="/data?tab=query">下钻查询</RouterLink>
+        <div class="stats-filter-actions">
+          <button class="btn" type="button" :disabled="pending" @click="() => loadStats()">按条件统计</button>
+          <RouterLink class="btn ghost" to="/data?tab=query">查看数据</RouterLink>
+        </div>
       </div>
-      <div class="cards">
-        <button type="button" class="card stat clickable" @click="filterMapByStat('data')"><h3>数据总数</h3><p class="stat-num">{{ dataStats?.total ?? '—' }}</p><span class="muted">点击仅显监测数据</span></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('data')"><h3>隔离数</h3><p class="stat-num">{{ dataStats?.quarantinedCount ?? '—' }}</p><span class="muted">联动数据图层</span></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('data')"><h3>质量类</h3><p class="stat-num">{{ dataByQuality.length }}</p><span class="muted">可点质量行过滤</span></button>
+      <div class="stat-summary">
+        <button type="button" @click="filterMapByStat('data')"><span>数据记录</span><strong>{{ dataStats?.total ?? '—' }}</strong><small>地图查看</small></button>
+        <button type="button" @click="filterMapByStat('data')"><span>需要隔离</span><strong>{{ dataStats?.quarantinedCount ?? '—' }}</strong><small>条记录</small></button>
+        <button type="button" @click="filterMapByStat('data')"><span>质量状态</span><strong>{{ dataByQuality.length }}</strong><small>种状态</small></button>
       </div>
+      </template>
+      <template v-if="statsPage === 5">
       <div class="grid-2">
         <div>
           <h4>按数据类型</h4>
-          <table class="table">
+          <table v-table-pager="{ label: '数据类型统计分页' }" class="table">
             <thead><tr><th>类型</th><th>数量</th></tr></thead>
             <tbody>
               <tr v-for="(row, i) in dataByType" :key="'dt'+i">
@@ -672,7 +728,7 @@ async function filterTasksByStatus(status: unknown) {
         </div>
         <div>
           <h4>按质量状态</h4>
-          <table class="table">
+          <table v-table-pager="{ label: '数据质量统计分页' }" class="table">
             <thead><tr><th>质量</th><th>数量</th></tr></thead>
             <tbody>
               <tr v-if="!dataByQuality.length"><td colspan="3" class="muted">暂无质量统计</td></tr>
@@ -689,28 +745,31 @@ async function filterTasksByStatus(status: unknown) {
           </table>
         </div>
       </div>
+      </template>
 
-      <h3>C6 观测任务统计</h3>
-      <div class="form-row">
+      <template v-if="statsPage === 6">
+      <h3>观测任务 · 方案进展</h3>
+      <div class="form-row stats-filter-grid">
         <label>状态<input v-model="taskFilter.status" placeholder="submitted" /></label>
         <label>任务类型<input v-model="taskFilter.taskType" /></label>
-        <label>关键字<input v-model="taskFilter.keyword" /></label>
-        <button class="btn ghost" type="button" :disabled="pending" @click="() => loadStats()">按条件统计</button>
-        <RouterLink class="btn ghost" to="/planning?tab=tasks">任务列表</RouterLink>
-        <RouterLink class="btn ghost" to="/planning?tab=plans">方案管理</RouterLink>
+        <label class="wide">关键字<input v-model="taskFilter.keyword" /></label>
+        <div class="stats-filter-actions">
+          <button class="btn" type="button" :disabled="pending" @click="() => loadStats()">按条件统计</button>
+          <RouterLink class="btn ghost" to="/planning?tab=tasks">任务列表</RouterLink>
+          <RouterLink class="btn ghost" to="/planning?tab=plans">方案管理</RouterLink>
+        </div>
       </div>
-      <div class="form-row" style="margin-bottom:0.5rem">
-        <RouterLink class="btn ghost" to="/planning?tab=tasks">下钻任务管理</RouterLink>
+      <div class="stat-summary">
+        <button type="button" @click="filterMapByStat('tasks')"><span>观测任务</span><strong>{{ taskStats?.total ?? '—' }}</strong><small>地图查看</small></button>
+        <button type="button" @click="filterMapByStat('tasks')"><span>已形成方案</span><strong>{{ taskStats?.withPlanCount ?? '—' }}</strong><small>个任务</small></button>
+        <button type="button" @click="filterMapByStat('tasks')"><span>任务状态</span><strong>{{ taskByStatus.length }}</strong><small>种状态</small></button>
       </div>
-      <div class="cards">
-        <button type="button" class="card stat clickable" @click="filterMapByStat('tasks')"><h3>任务总数</h3><p class="stat-num">{{ taskStats?.total ?? '—' }}</p><span class="muted">点击仅显观测任务</span></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('tasks')"><h3>已有方案</h3><p class="stat-num">{{ taskStats?.withPlanCount ?? '—' }}</p><span class="muted">联动任务图层</span></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('tasks')"><h3>状态类</h3><p class="stat-num">{{ taskByStatus.length }}</p><span class="muted">可点状态行过滤</span></button>
-      </div>
+      </template>
+      <template v-if="statsPage === 7">
       <div class="grid-2">
         <div>
           <h4>按状态</h4>
-          <table class="table">
+          <table v-table-pager="{ label: '任务状态统计分页' }" class="table">
             <thead><tr><th>状态</th><th>数量</th></tr></thead>
             <tbody>
               <tr v-if="!taskByStatus.length"><td colspan="3" class="muted">暂无任务状态统计</td></tr>
@@ -728,7 +787,7 @@ async function filterTasksByStatus(status: unknown) {
         </div>
         <div>
           <h4>按任务类型</h4>
-          <table class="table">
+          <table v-table-pager="{ label: '任务类型统计分页' }" class="table">
             <thead><tr><th>类型</th><th>数量</th></tr></thead>
             <tbody>
               <tr v-for="(row, i) in taskByType" :key="'tt'+i">
@@ -739,8 +798,10 @@ async function filterTasksByStatus(status: unknown) {
           </table>
         </div>
       </div>
+      </template>
+      <template v-if="statsPage === 8">
       <h4>按场景</h4>
-      <table class="table">
+      <table v-table-pager="{ label: '任务场景统计分页' }" class="table">
         <thead><tr><th>场景</th><th>编码</th><th>数量</th></tr></thead>
         <tbody>
           <tr v-for="(row, i) in taskByScene" :key="'tsc'+i">
@@ -750,43 +811,32 @@ async function filterTasksByStatus(status: unknown) {
           </tr>
         </tbody>
       </table>
+      </template>
+      <CardPager v-model:page="statsPage" :pages="statsPages" label="场景统计内容分页" />
     </section>
 
     <section v-if="tab === 'gis'" class="panel">
       <h2>GIS 综合展示</h2>
       <p class="muted">直接控制全屏底图上的业务图层（不再嵌套第二张地图）。{{ shellStatus }}</p>
-      <div class="form-row" style="margin-top:0.5rem;flex-wrap:wrap;gap:0.4rem">
-        <button class="btn ghost" type="button" :disabled="!previewIds.sensor" @click="locatePreview('sensor')">定位首个传感器</button>
-        <button class="btn ghost" type="button" :disabled="!previewIds.data" @click="locatePreview('data')">定位首条数据</button>
-        <button class="btn ghost" type="button" :disabled="!previewIds.task" @click="locatePreview('task')">定位首个任务</button>
+      <div class="gis-quick-locate">
+        <label>快速定位
+          <select v-model="previewKind">
+            <option value="sensor">首个传感器</option>
+            <option value="satellite">首颗卫星</option>
+            <option value="uav">首架无人机</option>
+            <option value="data">首条监测数据</option>
+            <option value="task">首个观测任务</option>
+          </select>
+        </label>
+        <button class="btn ghost" type="button" :disabled="!previewIds[previewKind]" @click="locateSelectedPreview">定位</button>
       </div>
-      <div class="form-row">
-        <button class="btn" type="button" :disabled="shellLoading" @click="filterMapByStat('sensors')">仅显示传感器</button>
-        <button class="btn" type="button" :disabled="shellLoading" @click="filterMapByStat('data')">仅显示监测数据</button>
-        <button class="btn" type="button" :disabled="shellLoading" @click="filterMapByStat('tasks')">仅显示观测任务</button>
-        <button class="btn ghost" type="button" :disabled="pending" @click="filterMapByStat('all')">显示全部图层</button>
-        <button class="btn ghost" type="button" :disabled="shellLoading" @click="mapShowIndicators">仅指标范围</button>
-        <button class="btn ghost" type="button" :disabled="pending" @click="mapRefresh">刷新图层</button>
-      </div>
-      <div class="form-row" style="margin-top:0.6rem">
-        <label class="check"><input type="checkbox" :checked="shellFilters.showSensors" @change="toggleShellLayer('showSensors', $event)" /> 传感器 <span class="badge">{{ shellCounts.sensors }}</span></label>
-        <label class="check"><input type="checkbox" :checked="shellFilters.showData" @change="toggleShellLayer('showData', $event)" /> 监测数据 <span class="badge">{{ shellCounts.data }}</span></label>
-        <label class="check"><input type="checkbox" :checked="shellFilters.showTasks" @change="toggleShellLayer('showTasks', $event)" /> 观测任务 <span class="badge">{{ shellCounts.tasks }}</span></label>
-        <label class="check"><input type="checkbox" :checked="shellFilters.showIndicators" @change="toggleShellLayer('showIndicators', $event)" /> 指标实例 <span class="badge">{{ shellCounts.indicators }}</span></label>
-      </div>
-      <div class="cards" style="margin-top:0.8rem">
-        <button type="button" class="card stat clickable" @click="filterMapByStat('sensors')"><h3>传感器要素</h3><p class="stat-num">{{ shellCounts.sensors }}</p></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('data')"><h3>数据要素</h3><p class="stat-num">{{ shellCounts.data }}</p></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('tasks')"><h3>任务要素</h3><p class="stat-num">{{ shellCounts.tasks }}</p></button>
-        <button type="button" class="card stat clickable" @click="filterMapByStat('indicators')"><h3>指标实例</h3><p class="stat-num">{{ shellCounts.indicators }}</p></button>
-      </div>
-      <div class="layer-tree">
-        <h3>业务图层树</h3>
+      <div class="layer-console">
+        <header><div><span>图层账本</span><strong>当前底图显示什么</strong></div><small>{{ shellCounts.sensors + shellCounts.data + shellCounts.tasks + shellCounts.indicators }} 个业务要素</small></header>
         <label class="check"><input type="checkbox" :checked="shellFilters.showSensors" @change="toggleShellLayer('showSensors', $event)" /> 传感资源 <span class="badge">{{ shellCounts.sensors }}</span></label>
         <label class="check"><input type="checkbox" :checked="shellFilters.showData" @change="toggleShellLayer('showData', $event)" /> 监测数据 <span class="badge">{{ shellCounts.data }}</span></label>
         <label class="check"><input type="checkbox" :checked="shellFilters.showTasks" @change="toggleShellLayer('showTasks', $event)" /> 观测任务 <span class="badge">{{ shellCounts.tasks }}</span></label>
         <label class="check"><input type="checkbox" :checked="shellFilters.showIndicators" @change="toggleShellLayer('showIndicators', $event)" /> 指标实例 <span class="badge">{{ shellCounts.indicators }}</span></label>
-        <div class="form-row" style="margin-top:0.45rem">
+        <div class="layer-console-actions">
           <button class="btn ghost tiny" type="button" @click="mapShowIndicators">仅指标范围</button>
           <button class="btn ghost tiny" type="button" @click="mapShowAll">全部显示</button>
           <button class="btn ghost tiny" type="button" @click="mapRefresh">刷新</button>
@@ -796,11 +846,13 @@ async function filterTasksByStatus(status: unknown) {
     </section>
 
 <section v-if="tab === 'workbench'" class="panel">
-      <h2>工作台与图层</h2>
+      <div class="section-heading-actions">
+        <h2>工作台与图层</h2>
+        <button class="btn ghost tiny" type="button" @click="loadWorkbench">刷新</button>
+      </div>
       <p class="muted">工作台启动数据与 GIS 图层清单，用于核对可展示资源是否齐全。</p>
-      <button class="btn ghost" type="button" @click="loadWorkbench">刷新</button>
       <h3>图层目录（{{ layers.length }}）</h3>
-      <table class="table" v-if="layers.length">
+      <table v-if="layers.length" v-table-pager="{ label: '图层目录分页' }" class="table">
         <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>状态</th><th>说明</th></tr></thead>
         <tbody>
           <tr v-for="layer in layers" :key="String(layer.id)">
@@ -813,9 +865,47 @@ async function filterTasksByStatus(status: unknown) {
         </tbody>
       </table>
       <p v-else class="muted">暂无图层目录记录。</p>
-      <h3>工作台摘要</h3>
-      <pre class="result-pre">{{ workbench ? JSON.stringify(withoutWktFields(workbench), null, 2).slice(0, 3500) : '暂无' }}</pre>
-      <button class="btn" type="button" :disabled="pending" @click="mapShowAll">底图全部上图</button>
+      <details class="workbench-details">
+        <summary>查看工作台技术摘要</summary>
+        <pre class="result-pre">{{ workbench ? JSON.stringify(withoutWktFields(workbench), null, 2).slice(0, 3500) : '暂无' }}</pre>
+      </details>
+      <button class="btn ghost" type="button" :disabled="pending" @click="mapShowAll">全部图层上图</button>
     </section>
   </section>
 </template>
+
+<style scoped>
+.stat-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: .45rem 0 .65rem; overflow: hidden; border: 1px solid #e1e3e6; border-radius: 10px; background: #f6f7f8; }
+.stat-summary button { display: grid; gap: .08rem; min-width: 0; padding: .45rem; border: 0; border-right: 1px solid #e1e3e6; background: transparent; color: #515154; text-align: left; cursor: pointer; }
+.stat-summary button:last-child { border-right: 0; }
+.stat-summary span { font-size: 9px; }
+.stat-summary strong { color: #3a3a3c; font-size: 15px; font-variant-numeric: tabular-nums; }
+.stat-summary small { color: #6e6e73; font-size: 8px; }
+.layer-console { display: grid; gap: .25rem; margin-top: .6rem; padding: .6rem; border: 1px solid #e1e3e6; border-radius: 10px; background: #f6f7f8; }
+.layer-console header { display: flex; align-items: flex-end; justify-content: space-between; gap: .4rem; padding-bottom: .4rem; border-bottom: 1px solid #e1e3e6; }
+.layer-console header div { display: grid; gap: .08rem; }
+.layer-console header span { color: #6e6e73; font-size: 9px; }
+.layer-console header strong { color: #3a3a3c; font-size: 12px; }
+.layer-console header small { color: #6e6e73; font-size: 9px; }
+.layer-console > label { display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: .35rem; padding: .32rem .2rem; border-bottom: 1px solid #e1e3e6; font-size: 11px; }
+.layer-console > label:last-of-type { border-bottom: 0; }
+.layer-console-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; margin-top: .35rem; }
+.layer-console-actions .btn { min-width: 0; padding-inline: .25rem; white-space: nowrap; }
+.compact-map-filter { position: static; display: block; margin-bottom: .65rem; background: #f6f7f8; }
+.compact-map-filter label { grid-template-columns: 62px minmax(0, 1fr); align-items: center; gap: .5rem; color: #515154; font-size: 11px; }
+.compact-map-filter select { min-width: 0; height: 32px; padding-top: 0; padding-bottom: 0; font-size: 11px; }
+.section-heading-actions { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
+.section-heading-actions h2 { margin-bottom: 0; }
+.stats-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; }
+.stats-filter-grid .wide,
+.stats-filter-actions { grid-column: 1 / -1; }
+.stats-filter-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.stats-filter-actions :is(.btn, a) { min-height: 32px; padding: .35rem .55rem; font-size: 10px; }
+.gis-quick-locate { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .5rem; margin: .55rem 0; padding: .55rem; border-radius: 10px; background: #f6f7f8; }
+.gis-quick-locate label { font-size: 10px; }
+.gis-quick-locate select { height: 32px; padding-top: 0; padding-bottom: 0; font-size: 11px; }
+.gis-quick-locate .btn { min-height: 32px; padding: .35rem .65rem; }
+.workbench-details { margin: .65rem 0; border: 1px solid #e1e3e6; border-radius: 10px; background: #f6f7f8; }
+.workbench-details summary { padding: .55rem .65rem; color: #515154; font-size: 11px; font-weight: 600; cursor: pointer; }
+.workbench-details .result-pre { margin: 0; border: 0; border-top: 1px solid #e1e3e6; border-radius: 0; }
+</style>
