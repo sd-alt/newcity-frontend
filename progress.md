@@ -1382,3 +1382,18 @@
 ### Notes
 - `src/pages/AgentTaskWorkspace.vue`：补充规划暂停状态展示。
 - 回滚方式：回退该文件本条状态文案改动即可。
+
+## 2026-08-04 - Task: 区分查询运行与任务草案
+
+### What was done
+- 查询类 AgentRun 在前端显示为“查询运行”，不再显示不存在的任务编号。
+- assisted 模式提示明确为只生成任务草案，不进入方案发布和任务执行。
+- 查询请求创建后显示只读查询说明，避免用户误以为已经创建正式观测任务。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+
+### Notes
+- `src/pages/AgentTaskWorkspace.vue`：更新模式说明、创建结果提示和查询运行卡片。
+- 回滚方式：选择性回退该文件本条改动即可。

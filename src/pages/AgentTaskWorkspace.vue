@@ -40,7 +40,7 @@ let pollTimer: number | null = null
 
 const modes = [
   { key: 'manual', label: '手动创建', note: '不调用模型，直接保存需求与任务草案' },
-  { key: 'assisted', label: 'AI辅助', note: 'AI生成草案，逐阶段人工采用或调整' },
+  { key: 'assisted', label: 'AI辅助', note: '只生成任务草案，不进入方案发布和任务执行' },
   { key: 'agent', label: '多Agent自动规划', note: 'MAF专业Agent协同，关键节点人工确认' },
 ] as const
 const selectedMode = computed(() => modes.find((item) => item.key === mode.value) || modes[0])
@@ -125,9 +125,11 @@ async function submitDemand() {
       const data = response.data as Row
       draft.value = { demandId: data.demandId, taskId: data.taskId, runId: data.runId, status: data.status, originalRequirement: requirement.value.trim(), mode: mode.value }
       run.value = data.run as api.AgentRunData
-      message.value = data.status === 'planning_queued'
-        ? '任务已创建，正在等待后台 Worker 规划任务图'
-        : '任务草案与 Agent 运行已创建，请启动后台 Worker 处理队列'
+      message.value = data.taskId
+        ? data.status === 'planning_queued'
+          ? '任务已创建，正在等待后台 Worker 规划任务图'
+          : '任务草案与 Agent 运行已创建，请启动后台 Worker 处理队列'
+        : '查询运行已创建，不会生成观测任务草案；请等待后台 Worker 返回结果'
       pendingIdempotencyKey.value = ''
       pendingRequestSignature.value = ''
       startTracking(data.runId)
@@ -262,7 +264,7 @@ onUnmounted(() => {
     </section>
     <p v-if="error" class="error">{{ error }}</p><p v-if="message" class="ok-text">{{ message }}</p>
 
-    <article v-if="draft" class="draft-card"><div><span>任务草案</span><strong>#{{ draft.taskId }} · 需求 #{{ draft.demandId }}</strong><small>{{ draft.mode }} · {{ draft.status }}</small></div><p>{{ draft.originalRequirement }}</p><button v-if="draft.mode === 'manual'" class="btn tiny" @click="router.push({ path: '/tasks', query: { tab: 'task-systems', taskId: draft.taskId, sceneId } })">继续配置任务指标</button></article>
+    <article v-if="draft" class="draft-card"><div><span>{{ draft.taskId ? '任务草案' : '查询运行' }}</span><strong v-if="draft.taskId">#{{ draft.taskId }} · 需求 #{{ draft.demandId }}</strong><strong v-else>仅查询 · 需求 #{{ draft.demandId }}</strong><small>{{ draft.mode }} · {{ draft.status }}</small></div><p>{{ draft.originalRequirement }}</p><button v-if="draft.mode === 'manual'" class="btn tiny" @click="router.push({ path: '/tasks', query: { tab: 'task-systems', taskId: draft.taskId, sceneId } })">继续配置任务指标</button></article>
 
     <template v-if="run">
       <div class="run-summary"><div><span>当前节点</span><strong>{{ currentStageName }}</strong></div><div><span>运行状态</span><strong>{{ statusLabel(run.status) }}</strong></div><div><span>必需节点</span><strong>{{ completedMandatoryNodes }}/{{ mandatoryNodeCount }}</strong></div></div>
