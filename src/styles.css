@@ -32,7 +32,7 @@ a { color: var(--brand); text-decoration: none; }
 h1, h2, h3 { margin: 0 0 0.5rem; line-height: 1.25; }
 p { margin: 0 0 0.75rem; }
 
-/* removed legacy .shell/.sidebar admin layout */
+/* 已移除旧版 .shell/.sidebar 管理布局。 */
 
 .page { width: min(1100px, 100%); }
 .page-head {
@@ -177,9 +177,9 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.88em; }
   border: 1px solid #b7e2cf;
 }
 
-/* login styles: see polished block near end */
+/* 登录样式见文件末尾的完善样式区块。 */
 
-/* GIS */
+/* GIS 地图样式。 */
 .gis-page {
   display: block;
   min-height: auto;
@@ -223,7 +223,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.88em; }
 .check input { width: auto; }
 .badge { margin-left: auto; color: var(--muted); font-size: 0.85rem; }
 .legend { display: grid; gap: 0.3rem; color: var(--muted); font-size: 0.88rem; margin-top: 0.4rem; }
-/* dot colors now use the canonical .dot definitions below */
+/* 点颜色统一使用下方的标准 .dot 定义。 */
 .task-item {
   text-align: left;
   border: 1px solid var(--line);
@@ -277,8 +277,8 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.88em; }
   .cesium-host { min-height: 55vh; height: 55vh; }
 }
 
-/* obsolete shell-gis / gis-topnav removed */
-/* stepper: use polished rules near end */
+/* 已移除废弃的 shell-gis / gis-topnav。 */
+/* 步骤条使用文件末尾的完善规则。 */
 .result-pre {
   margin-top: 0.8rem;
   padding: 0.75rem;
@@ -321,7 +321,7 @@ tr.active {
 }
 
 
-/* algorithm monitor */
+/* 算法监控。 */
 .progress-wrap {
   position: relative;
   width: 100%;
@@ -366,9 +366,9 @@ tr.active td {
 }
 
 
-/* center embedded basemap removed (permanent MapBasemap only) */
+/* 已移除中心区域内嵌底图，仅保留固定的 MapBasemap。 */
 
-/* ===== map widgets: non-overlap zones + click bubble ===== */
+/* ===== 地图组件：互不重叠区域与点击气泡 ===== */
 .map-basemap {
   position: absolute;
   inset: 0;
@@ -379,7 +379,7 @@ tr.active td {
   height: 100%;
 }
 
-/* right tool rail: top-right tools only; detail is separate bottom-right control */
+/* 右侧工具栏仅放置右上角工具；详情是独立的右下角控件。 */
 .map-tool-rail {
   position: absolute;
   top: 12px;
@@ -422,7 +422,7 @@ tr.active td {
 }
 .map-tool-group:last-child { padding-bottom: 0; border-bottom: 0; }
 
-/* detail: independent absolute bottom-right — cannot share zoom stack */
+/* 详情面板独立绝对定位在右下角，不与缩放工具共用层叠区域。 */
 .map-tool-detail {
   position: absolute;
   right: 12px;
@@ -445,7 +445,7 @@ tr.active td {
   visibility: hidden;
   pointer-events: none;
 }
-/* legacy wrapper class if present */
+/* 兼容仍可能存在的旧版包装类。 */
 .map-toolbar-detail { display: none !important; }
 
 .map-tool {
@@ -481,11 +481,11 @@ tr.active td {
   stroke-linejoin: round;
 }
 
-/* float panels sit LEFT of toolbar, never under it */
+/* 浮动面板位于工具栏左侧，不能覆盖在工具栏下方。 */
 .map-float-panel {
   position: absolute;
   top: 12px;
-  right: 108px; /* left of 88px tool column */
+  right: 108px; /* 位于 88px 工具列左侧。 */
   z-index: 19;
   width: 160px;
   max-height: min(320px, calc(100% - 80px));
@@ -538,7 +538,7 @@ tr.active td {
   border-radius: 50%;
   margin-right: 0.35rem;
 }
-/* dot colors use the canonical .dot definitions below */
+/* 点颜色统一使用下方的标准 .dot 定义。 */
 .map-legend-panel {
   width: 286px;
   max-height: min(520px, calc(100% - 80px));
@@ -591,7 +591,7 @@ tr.active td {
   border-radius: 50%;
 }
 
-/* bottom-left status only; leave bottom-right empty for bubble clearance near tools? bubble follows click */
+/* 状态只放在左下角；右下角留空以避开工具附近的气泡，气泡会跟随点击位置。 */
 .map-hud-bottom {
   position: absolute;
   left: 12px;
@@ -626,7 +626,7 @@ tr.active td {
   font: inherit;
 }
 
-/* click bubble */
+/* 点击气泡。 */
 .map-bubble {
   position: absolute;
   z-index: 25;
@@ -638,7 +638,7 @@ tr.active td {
   border-radius: 14px;
   box-shadow: 0 12px 32px rgba(29, 29, 31, 0.15);
   pointer-events: auto;
-  /* left/top = feature screen point; transform lifts bubble above the point */
+  /* left/top 是要素屏幕坐标；transform 将气泡抬到点位上方。 */
   will-change: left, top;
 }
 .map-bubble-arrow {
@@ -691,7 +691,7 @@ tr.active td {
 }
 
 
-/* ===== Litchi-style GIS workbench shell ===== */
+/* ===== Litchi 风格 GIS 工作台外壳 ===== */
 html, body, #app {
   height: 100%;
   margin: 0;
@@ -719,7 +719,7 @@ html, body, #app {
   --left-w: 0px;
   grid-template-columns: var(--rail-w) minmax(0, 1fr);
 }
-/* top */
+/* 顶部栏。 */
 .topbar {
   grid-column: 1 / -1;
   grid-row: 1;
@@ -880,7 +880,7 @@ html, body, #app {
 .search-item span { font-size: 12px; color: #6B7280; }
 .tiny-pad { padding: 0.5rem; }
 
-/* left rail: center navigation */
+/* 左侧栏：中心导航。 */
 .left-rail {
   grid-column: 1;
   grid-row: 2;
@@ -990,7 +990,7 @@ html, body, #app {
   font-weight: 600;
 }
 
-/* secondary workspace: one floating surface shared by list and in-page detail */
+/* 次级工作区：列表和页面内详情共用一个浮动面板。 */
 .left-panel {
   position: absolute;
   top: calc(var(--top-h) + 16px);
@@ -1084,7 +1084,7 @@ html, body, #app {
 }
 .panel-resizer:hover { background: rgba(22, 119, 255, 0.25); }
 
-/* compact pages in left panel */
+/* 左侧面板中的紧凑页面。 */
 .left-body .page { width: 100%; max-width: none; padding: 0; }
 .left-body .page-head { justify-content: flex-end; min-height: 0; margin: 0; gap: 0.35rem; }
 .left-body .page-head > div:first-child { display: none; }
@@ -1125,7 +1125,7 @@ html, body, #app {
 .row-click { cursor: pointer; }
 .row-click:hover { background: rgba(22, 119, 255, 0.08); }
 
-/* permanent map canvas */
+/* 固定地图画布。 */
 .map-main {
   grid-column: 2;
   grid-row: 2;
@@ -1135,6 +1135,18 @@ html, body, #app {
   overflow: hidden;
   background: var(--bg);
 }
+.business-route-host {
+  position: fixed;
+  left: 248px;
+  right: calc(var(--route-workspace-w, 360px) + 32px);
+  bottom: 68px;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  pointer-events: none;
+}
+.business-route-host > * { pointer-events: auto; }
 @media (min-width: 1440px) {
   .map-main { min-width: 420px; }
 }
@@ -1163,7 +1175,7 @@ html, body, #app {
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
 }
-/* Left expand top-left; right 详情 sits in tool column under toolbar (no overlap with 放大) */
+/* 左侧展开按钮位于左上角；右侧详情位于工具栏下方，避免与放大按钮重叠。 */
 .edge-btn.left { left: 8px; top: 12px; }
 .edge-btn.right {
   right: 12px;
@@ -1178,10 +1190,10 @@ html, body, #app {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* keep clearly below map-toolbar max-height zone */
+  /* 明确保持在地图工具栏最大高度区域下方。 */
 }
 .app-shell.right-open .edge-btn.right { display: none; }
-/* right detail drawer overlay — does not shrink map column */
+/* 右侧详情抽屉覆盖显示，不压缩地图列宽。 */
 .detail-drawer {
   position: absolute;
   top: calc(var(--top-h) + 16px);
@@ -1441,7 +1453,7 @@ textarea:focus {
   }
 }
 
-/* map chrome: keep tools clear of the single right workspace */
+/* 地图外壳：让工具避开右侧单一工作区。 */
 .app-shell.workspace-open .map-tool-rail,
 .app-shell.right-open .map-tool-rail {
   right: calc(var(--drawer-w) + 32px);
@@ -1471,7 +1483,7 @@ textarea:focus {
   max-width: calc(100% - var(--drawer-w) - 120px);
 }
 
-/* Layering: tools above basemap; drawer above tools only in its own right column */
+/* 层叠关系：工具位于底图上方；抽屉只在自己的右侧列中位于工具上方。 */
 .map-tool-rail { z-index: 22; }
 .map-toolbar { z-index: 22; }
 .map-float-panel { z-index: 23; }
@@ -1543,7 +1555,7 @@ textarea:focus {
 .map-float-item.check input {
   accent-color: #1677FF;
 }
-/* keep map free of Cesium default widget chrome if any residual */
+/* 清理残留的 Cesium 默认控件外壳，保持地图区域简洁。 */
 .cesium-viewer-toolbar,
 .cesium-viewer-animationContainer,
 .cesium-viewer-timelineContainer,
@@ -1604,7 +1616,7 @@ tr.row-click.selected, .row-click.selected {
 .dot.purple { background: #7c3aed; }
 
 
-/* map right-click context menu */
+/* 地图右键上下文菜单。 */
 .map-ctx-menu {
   position: absolute;
   z-index: 40;
@@ -1648,11 +1660,11 @@ tr.row-click.selected, .row-click.selected {
   color: #6B7280;
 }
 .app-shell.right-open .map-ctx-menu {
-  /* keep free of drawer */
+  /* 避开详情抽屉。 */
 }
 
 
-/* Indicator tree in left panel */
+/* 左侧面板中的指标树。 */
 .ind-tree,
 .ind-tree ul {
   list-style: none;
@@ -1706,7 +1718,7 @@ tr.row-click.selected, .row-click.selected {
 .tree-row .dot.inactive { background: #94a3b8; }
 
 
-/* Data center live ingest status */
+/* 数据中心实时接入状态。 */
 .live-status-card {
   margin: 0.6rem 0 0.9rem;
   padding: 0.7rem 0.85rem;
@@ -1757,7 +1769,7 @@ tr.row-click.selected, .row-click.selected {
 .status-pill[data-status="failed"] { background: rgba(239,68,68,0.12); color: #b91c1c; }
 
 
-/* Clickable stat cards and application layer tree */
+/* 可点击统计卡片与应用图层树。 */
 button.card.stat.clickable {
   cursor: pointer;
   text-align: left;
@@ -1811,7 +1823,7 @@ button.card.stat.clickable:hover {
 }
 
 
-/* map <-> stats reverse focus banner */
+/* 地图与统计之间的反向聚焦提示条。 */
 .map-focus-banner {
   display: flex;
   align-items: center;
@@ -1883,7 +1895,7 @@ button.card.stat.clickable:hover {
   min-height: 0;
   flex: 1;
 }
-/* Planning map actions compact toolbar in left panel */
+/* 左侧面板中的规划地图操作紧凑工具栏。 */
 .plan-map-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1915,7 +1927,7 @@ button.card.stat.clickable:hover {
 }
 
 
-/* Apps stats mini bars + active map filter chips */
+/* 应用统计迷你条与活动地图筛选标签。 */
 .stat-bar-row {
   display: flex;
   align-items: center;
@@ -1977,10 +1989,10 @@ button.card.stat.clickable:hover {
 }
 
 
-/* detail styles live with .map-tool-rail section */
+/* 详情样式位于 .map-tool-rail 区块。 */
 
 
-/* planning/left: compact head, hide in-page tabs (use left-subs) */
+/* 规划左侧区域：使用紧凑标题，隐藏页面内标签页并改用 left-subs。 */
 .left-body .page-head.plan-head h1 { font-size: 14px; margin: 0.15rem 0; }
 .left-body .page-head.plan-head .muted { font-size: 12px; line-height: 1.35; }
 .left-body > .page > .tabs { display: none; }
@@ -2011,12 +2023,12 @@ button.card.stat.clickable:hover {
   margin: 0 0 0.65rem !important;
 }
 .task-picker-bar select { font-size: 12px; }
-/* rail is top-right tools only; detail is absolute bottom-right */
+/* 工具栏只放置右上角工具；详情绝对定位在右下角。 */
 .map-basemap .map-tool-rail { bottom: auto; }
 .map-basemap .map-toolbar { bottom: auto !important; position: relative !important; }
 .map-basemap > .map-tool-detail { position: absolute; }
 
-/* ── Toast notifications ── */
+/* ── Toast 提示 ── */
 .toast-rack {
   position: fixed;
   top: calc(var(--top-h) + 8px);
@@ -2067,7 +2079,7 @@ button.card.stat.clickable:hover {
   to   { opacity: 1; transform: translateX(0); }
 }
 
-/* ── Page transition ── */
+/* ── 页面过渡 ── */
 .router-view-enter-active,
 .router-view-leave-active {
   transition: opacity 0.15s ease;
@@ -2077,7 +2089,7 @@ button.card.stat.clickable:hover {
   opacity: 0;
 }
 
-/* ============================== AI assistant ============================== */
+/* ============================== AI 助手 ============================== */
 .assistant-root {
   position: fixed;
   right: 20px;
@@ -2212,6 +2224,14 @@ button.card.stat.clickable:hover {
 .assistant-msg.assistant .assistant-bubble { border-bottom-left-radius: 4px; }
 .assistant-msg.error .assistant-bubble { background: #FEF2F2; border-color: #FECACA; color: #991B1B; }
 .assistant-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.55rem; }
+.assistant-pending-list { display: grid; gap: 0.55rem; margin-bottom: 0.7rem; }
+.assistant-pending-card { display: grid; gap: 0.25rem; padding: 0.75rem; border: 1px solid #ead3a7; border-radius: 10px; background: #fff8eb; }
+.assistant-pending-card span { color: #956116; font-size: 0.7rem; font-weight: 700; }
+.assistant-pending-card strong { color: var(--text); font-size: 0.82rem; }
+.assistant-pending-card p { margin: 0; color: #6e5a3b; font-size: 0.74rem; line-height: 1.45; }
+.assistant-pending-card small { color: #8a7a62; font-size: 0.68rem; overflow-wrap: anywhere; }
+.assistant-pending-button { justify-self: start; min-height: 30px; padding: 0.35rem 0.65rem; border: 0; border-radius: 7px; background: #a66b19; color: #fff; font-size: 0.72rem; cursor: pointer; }
+.assistant-pending-button:hover { background: #855411; }
 .assistant-action-btn {
   border: 1px solid #b7d7f7;
   background: var(--brand-soft);
@@ -2298,6 +2318,19 @@ button.card.stat.clickable:hover {
 .assistant-service-card span { display: block; color: #8a682a; font-size: 0.68rem; }
 .assistant-service-card strong { display: block; margin-top: 0.15rem; color: var(--text); font-size: 0.9rem; overflow-wrap: anywhere; }
 .assistant-service-card p { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.72rem; line-height: 1.45; }
+.assistant-service-mode-group { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.assistant-service-mode-group legend { grid-column: 1 / -1; }
+.assistant-service-mode-group button { min-height: 78px; }
+.assistant-api-config { display: grid; gap: 0.55rem; padding: 0.7rem; border: 1px solid #d9e5f2; border-radius: 10px; background: #f7fbff; }
+.assistant-api-config-title { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+.assistant-api-config-title strong { color: var(--text); font-size: 0.78rem; }
+.assistant-api-config-title small, .assistant-api-hint { color: var(--muted); font-size: 0.67rem; line-height: 1.4; }
+.assistant-config-field { display: grid; gap: 0.2rem; min-width: 0; }
+.assistant-config-field span { color: #515154; font-size: 0.68rem; font-weight: 700; }
+.assistant-config-field input { width: 100%; min-width: 0; box-sizing: border-box; padding: 0.45rem 0.55rem; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--text); font: inherit; font-size: 0.72rem; }
+.assistant-model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.45rem; align-items: end; }
+.assistant-model-load { min-height: 30px; padding: 0.4rem 0.6rem; border: 1px solid #b7d7f7; border-radius: 7px; background: #fff; color: var(--brand-dark); font-size: 0.7rem; cursor: pointer; white-space: nowrap; }
+.assistant-model-load:disabled { cursor: wait; opacity: 0.6; }
 .assistant-setting-group { display: grid; gap: 0.35rem; margin: 0; padding: 0; border: 0; }
 .assistant-setting-group legend { margin-bottom: 0.35rem; color: #515154; font-size: 0.76rem; font-weight: 700; }
 .assistant-setting-group button {
@@ -2323,7 +2356,7 @@ button.card.stat.clickable:hover {
 .assistant-save { height: 36px; border: 0; border-radius: 10px; background: var(--brand); color: #fff; font-size: 0.78rem; cursor: pointer; }
 .assistant-settings-message { margin: -0.35rem 0 0; color: var(--brand-dark); font-size: 0.7rem; text-align: center; }
 
-/* ======================= global polish (round 2) ======================= */
+/* ======================= 全局样式完善（第二轮） ======================= */
 .btn {
   transition: background 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease;
 }
@@ -2346,7 +2379,7 @@ button.card.stat.clickable:hover {
 .search-item { transition: background 0.12s ease; }
 .drawer-actions .btn { flex: 1; }
 
-/* status badges (readable Chinese status labels) */
+/* 状态徽章（配合易读的中文状态标签）。 */
 .status-badge {
   display: inline-block;
   padding: 0.12rem 0.5rem;
@@ -2362,7 +2395,7 @@ button.card.stat.clickable:hover {
 .status-badge.amber { background: #FFFBEB; border-color: #FDE68A; color: #B45309; }
 .status-badge.red   { background: #FEF2F2; border-color: #FECACA; color: #B91C1C; }
 
-/* login split layout */
+/* 登录页左右分栏布局。 */
 .login-shell {
   display: grid;
   grid-template-columns: 1.05fr 1fr;
@@ -2423,7 +2456,7 @@ button.card.stat.clickable:hover {
   .login-card { border-radius: 12px !important; }
 }
 
-/* Right workspace: one card language below every secondary navigation item. */
+/* 右侧工作区：每个次级导航项下方使用一张卡片式布局。 */
 .left-body {
   font-size: 12px;
   line-height: 1.5;
@@ -2778,3 +2811,5 @@ button.card.stat.clickable:hover {
 }
 .table-pager-server .btn:first-child::after { content: '‹'; }
 .table-pager-server .btn:last-child::after { content: '›'; }
+  .assistant-service-mode-group { grid-template-columns: 1fr; }
+  .assistant-service-mode-group legend { grid-column: auto; }

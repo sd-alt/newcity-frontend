@@ -132,7 +132,7 @@ function startPolling() {
           selectedTask.value = latest
           const st = String(latest.status || '').toLowerCase()
           const id = String(latest.id)
-          // 任务完成/失败后自动刷新一次地图输入/结果范围
+          // 任务完成或失败后，自动刷新一次地图输入/结果范围。
           if (
             (st === 'completed' || st === 'failed' || st === 'succeeded' || st === 'success') &&
             !mappedCompletedIds.value.has(id)
@@ -141,17 +141,17 @@ function startPolling() {
             try {
               await inspectTask(id)
             } catch {
-              /* map optional */
+              /* 地图操作为可选步骤 */
             }
           } else if (st === 'running' || st === 'paused' || st === 'queued') {
-            // keep selection in sync only
+            // 这里只同步选中状态。
           }
           void prev
         }
       }
       if (!hasActiveTasks()) stopPolling()
     } catch {
-      // ignore poll errors
+      // 忽略轮询错误。
     }
   }, 2000)
 }
@@ -184,9 +184,23 @@ const taskForm = ref({
   inputDataText: '{"platformId":50,"studyAreaGeoJson":{"type":"Polygon","coordinates":[[[114,22],[115,22],[115,23],[114,23],[114,22]]]}}',
   parametersText: '{}',
 })
+const services = ref<Record<string, unknown>[]>([])
+const editingServiceId = ref('')
+const serviceForm = ref({
+  algorithmModelId: '',
+  code: '',
+  name: '',
+  endpoint: '',
+  runtime: 'builtin',
+  parameterTemplateText: '{}',
+  computeRequirementsText: '{}',
+  status: 'active',
+  timeoutSeconds: 90,
+})
 
 const tabs = [
   { key: 'models', label: '算法增删改查' },
+  { key: 'services', label: '算法服务管理' },
   { key: 'tasks', label: '处理任务创建' },
   { key: 'run', label: '调度与执行' },
   { key: 'monitor', label: '过程监控' },
@@ -294,13 +308,15 @@ function syncTab() {
 async function load() {
   error.value = null
   try {
-    const [m, v, t] = await Promise.all([
+    const [m, v, t, s] = await Promise.all([
       api.listAlgorithmModels(),
       api.listModelVersions(),
       api.listProcessingTasks(),
+      api.listAlgorithmServices(),
     ])
     models.value = m.data
     versions.value = v.data
+    services.value = s.data
     tasks.value = [...t.data].sort((a, b) => {
       const rank = (x: Record<string, unknown>) => {
         const st = String(x.status || '')
@@ -318,12 +334,99 @@ async function load() {
     if (versionForm.value.algorithmModelId === '' && models.value[0]) {
       versionForm.value.algorithmModelId = pickId(models.value[0])
     }
+    if (serviceForm.value.algorithmModelId === '' && models.value[0]) {
+      serviceForm.value.algorithmModelId = pickId(models.value[0])
+    }
     if (taskForm.value.algorithmVersionId === '') {
       const preferred = versions.value.find((x) => String(x.status) === 'active') || versions.value[0]
       if (preferred) taskForm.value.algorithmVersionId = pickId(preferred)
     }
   } catch (err) {
     error.value = errMessage(err, '加载失败')
+  }
+}
+
+function resetServiceForm() {
+  editingServiceId.value = ''
+  serviceForm.value = {
+    algorithmModelId: models.value[0] ? pickId(models.value[0]) : '',
+    code: '',
+    name: '',
+    endpoint: '',
+    runtime: 'builtin',
+    parameterTemplateText: '{}',
+    computeRequirementsText: '{}',
+    status: 'active',
+    timeoutSeconds: 90,
+  }
+}
+
+function editService(item: Record<string, unknown>) {
+  editingServiceId.value = String(item.id)
+  serviceForm.value = {
+    algorithmModelId: String(item.algorithmModelId || ''),
+    code: String(item.code || ''),
+    name: String(item.name || ''),
+    endpoint: String(item.endpoint || ''),
+    runtime: String(item.runtime || 'builtin'),
+    parameterTemplateText: JSON.stringify(item.parameterTemplate || {}, null, 2),
+    computeRequirementsText: JSON.stringify(item.computeRequirements || {}, null, 2),
+    status: String(item.status || 'active'),
+    timeoutSeconds: Number(item.timeoutSeconds || 90),
+  }
+}
+
+function parseServiceJson(value: string, label: string) {
+  try {
+    return JSON.parse(value || '{}') as Record<string, unknown>
+  } catch {
+    throw new Error(`${label}必须是合法 JSON`)
+  }
+}
+
+async function saveService() {
+  if (!serviceForm.value.algorithmModelId || !serviceForm.value.code.trim() || !serviceForm.value.name.trim()) {
+    error.value = '请选择算法模型，并填写服务编码和名称'
+    return
+  }
+  pending.value = true
+  clearAlerts()
+  try {
+    const body = {
+      algorithmModelId: Number(serviceForm.value.algorithmModelId),
+      code: serviceForm.value.code.trim(),
+      name: serviceForm.value.name.trim(),
+      endpoint: serviceForm.value.endpoint.trim(),
+      runtime: serviceForm.value.runtime.trim(),
+      parameterTemplate: parseServiceJson(serviceForm.value.parameterTemplateText, '参数模板'),
+      computeRequirements: parseServiceJson(serviceForm.value.computeRequirementsText, '计算资源要求'),
+      status: serviceForm.value.status,
+      timeoutSeconds: Number(serviceForm.value.timeoutSeconds),
+    }
+    if (editingServiceId.value) {
+      await api.updateAlgorithmService(editingServiceId.value, body)
+      message.value = '算法服务已更新'
+    } else {
+      await api.createAlgorithmService(body)
+      message.value = '算法服务已创建'
+    }
+    resetServiceForm()
+    await load()
+  } catch (err) {
+    error.value = errMessage(err, '算法服务保存失败')
+  } finally {
+    pending.value = false
+  }
+}
+
+async function removeService(item: Record<string, unknown>) {
+  if (!window.confirm(`删除算法服务“${item.name}”？`)) return
+  try {
+    await api.deleteAlgorithmService(item.id as string | number)
+    message.value = '算法服务已删除'
+    await load()
+  } catch (err) {
+    error.value = errMessage(err, '算法服务删除失败')
   }
 }
 
@@ -504,7 +607,7 @@ async function createTask() {
     })
     const newId = pickId(res.data as Record<string, unknown>) || pickId(res as Record<string, unknown>)
     message.value = newId ? ('处理任务已创建 #' + newId) : '处理任务已创建'
-    try { await showAlgoMap() } catch { /* map refresh optional */ }
+    try { await showAlgoMap() } catch { /* 地图刷新失败不影响主流程 */ }
     const keptVersion = taskForm.value.algorithmVersionId
     taskForm.value.code = 'PROC-' + Date.now()
     taskForm.value.algorithmVersionId = keptVersion
@@ -513,7 +616,7 @@ async function createTask() {
       await inspectTask(newId)
       try {
         if (selectedTask.value) await locateLinkedOnMap(selectedTask.value)
-      } catch { /* map optional */ }
+      } catch { /* 地图操作为可选步骤 */ }
     }
     await setTab('run')
   } catch (err) {
@@ -532,7 +635,7 @@ async function runTask(id: unknown) {
     await inspectTask(id)
     try {
       if (selectedTask.value) await locateLinkedOnMap(selectedTask.value)
-    } catch { /* map optional */ }
+    } catch { /* 地图操作为可选步骤 */ }
     startPolling()
     await setTab('monitor')
   } catch (err) {
@@ -549,7 +652,7 @@ async function cancelTask(id: unknown) {
     try {
       await inspectTask(id)
       if (selectedTask.value) await locateLinkedOnMap(selectedTask.value)
-    } catch { /* map optional */ }
+    } catch { /* 地图操作为可选步骤 */ }
   } catch (err) {
     error.value = errMessage(err, '终止失败')
   }
@@ -563,7 +666,7 @@ async function requeueTask(id: unknown) {
     try {
       await inspectTask(id)
       if (selectedTask.value) await locateLinkedOnMap(selectedTask.value)
-    } catch { /* map optional */ }
+    } catch { /* 地图操作为可选步骤 */ }
   } catch (err) {
     error.value = errMessage(err, '重新排队失败')
   }
@@ -577,7 +680,7 @@ async function pauseTask(id: unknown) {
     try {
       await inspectTask(id)
       if (selectedTask.value) await locateLinkedOnMap(selectedTask.value)
-    } catch { /* map optional */ }
+    } catch { /* 地图操作为可选步骤 */ }
   } catch (err) {
     error.value = errMessage(err, '暂停失败')
   }
@@ -592,7 +695,7 @@ async function resumeTask(id: unknown) {
     try {
       await inspectTask(id)
       if (selectedTask.value) await locateLinkedOnMap(selectedTask.value)
-    } catch { /* map optional */ }
+    } catch { /* 地图操作为可选步骤 */ }
     startPolling()
     await setTab('monitor')
   } catch (err) {
@@ -835,7 +938,7 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
       })
       presentAlgoSelection(task, hasStudyArea, hasResultArea)
     } catch {
-      /* optional */
+      /* 可选步骤 */
     }
   } else {
     presentAlgoSelection(task, hasStudyArea, hasResultArea)
@@ -867,7 +970,7 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
         await drawAlgoRegionOverlay({ inputWkt: twkt, fit: true, inputLabel: `关联任务区域 #${id}` })
       }
     } catch {
-      /* optional */
+      /* 可选步骤 */
     }
     message.value = ok || hasStudyArea || hasResultArea
       ? `已定位算法关联任务 #${id}` + (hasStudyArea || hasResultArea ? '，并绘制算法区域' : '')
@@ -885,7 +988,7 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
     return
   }
 
-  // link form fallback
+  // 链接表单的兜底处理。
   const linkPlan = String((linkForm?.value?.planningTaskIds as string) || '').trim()
   const linkData = String((linkForm?.value?.observationDataIds as string) || '').trim()
   if (linkPlan) {
@@ -906,7 +1009,7 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
     return
   }
 
-  // platform point fallback
+  // 平台点位的兜底处理。
   const platformId = input.platformId ?? input.platform_id
   if (platformId != null) {
     const ok = await selectShellFeature('sensor', String(platformId), { openBubble: true, fly: true })
@@ -1042,6 +1145,38 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
       </table>
       </template>
       <CardPager v-model:page="modelPage" :pages="modelPages" label="算法模型与版本分页" />
+    </section>
+
+    <section v-if="tab === 'services'" class="panel">
+      <h2>算法服务管理</h2>
+      <p class="muted">将已登记的算法模型发布为可调用服务，维护运行时、端点、参数模板和计算资源要求。</p>
+      <div class="form-row">
+        <label>算法模型
+          <select v-model="serviceForm.algorithmModelId">
+            <option value="">请选择</option>
+            <option v-for="m in models" :key="'sm'+m.id" :value="String(m.id)">#{{ m.id }} {{ m.code }}</option>
+          </select>
+        </label>
+        <label>服务编码<input v-model="serviceForm.code" placeholder="SERVICE-001" /></label>
+        <label>服务名称<input v-model="serviceForm.name" placeholder="洪涝风险计算服务" /></label>
+        <label>运行时<input v-model="serviceForm.runtime" placeholder="builtin / http" /></label>
+        <label class="wide">调用端点<input v-model="serviceForm.endpoint" placeholder="internal://service-name" /></label>
+        <label>状态<select v-model="serviceForm.status"><option value="active">启用</option><option value="inactive">停用</option><option value="draft">草稿</option></select></label>
+        <label>超时（秒）<input v-model.number="serviceForm.timeoutSeconds" type="number" min="1" /></label>
+        <label class="wide">参数模板 JSON<textarea v-model="serviceForm.parameterTemplateText" rows="2"></textarea></label>
+        <label class="wide">计算资源要求 JSON<textarea v-model="serviceForm.computeRequirementsText" rows="2"></textarea></label>
+        <div class="form-actions"><button class="btn" type="button" :disabled="pending" @click="saveService">{{ editingServiceId ? '保存服务修改' : '创建算法服务' }}</button><button v-if="editingServiceId" class="btn ghost" type="button" @click="resetServiceForm">取消编辑</button></div>
+      </div>
+      <table v-table-pager="{ label: '算法服务分页' }" class="table">
+        <thead><tr><th>ID</th><th>服务</th><th>模型</th><th>运行时</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr v-if="!services.length"><td colspan="6" class="muted">暂无算法服务，请先创建服务。</td></tr>
+          <tr v-for="service in services" :key="String(service.id)">
+            <td>{{ service.id }}</td><td>{{ service.name }}<small class="table-subtext">{{ service.code }}</small></td><td>{{ service.algorithmModelCode || service.algorithmModelId || '-' }}</td><td>{{ service.runtime || '-' }}</td><td>{{ service.status || '-' }}</td>
+            <td class="ops"><button class="btn ghost" type="button" @click="editService(service)">编辑</button><button class="btn ghost" type="button" @click="removeService(service)">删除</button></td>
+          </tr>
+        </tbody>
+      </table>
     </section>
 
     <section v-if="tab === 'tasks'" class="panel">

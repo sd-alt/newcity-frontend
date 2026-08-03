@@ -83,6 +83,7 @@ const legendSections: Array<{ title: string; items: LegendItem[] }> = [
       { kind: 'task', label: '观测任务范围', color: '#0F3D66', shape: 'area' },
       { kind: 'indicator', label: '指标实例范围', color: '#BE123C', shape: 'area' },
       { kind: 'coverage', label: '资源覆盖范围', color: '#16A34A', shape: 'area' },
+      { kind: 'satellite', label: '卫星当前扫描足迹', color: '#38BDF8', shape: 'area' },
       { kind: 'algorithm', label: '算法结果范围', color: '#C2410C', shape: 'area' },
       { kind: 'association', label: '资源关联', color: '#64748B', shape: 'line' },
       { kind: 'satellite', label: '卫星实时轨道', color: '#38BDF8', shape: 'line' },
@@ -103,7 +104,7 @@ const bubbleStyle = computed(() => {
   if (!p) return { display: 'none' as const }
   const box = host || (document.querySelector('.map-basemap') as HTMLDivElement | null)
   if (!box) return { display: 'none' as const }
-  // Keep bubble clear of right map tools and open detail drawer
+  // 避开地图右侧工具，并打开详情抽屉。
   const padX = 12
   const padTop = 8
   const bubbleW = 240
@@ -398,12 +399,12 @@ watch(
 
 watch(mapBoxSelectResult, async (res) => {
   if (!res || !res.entityIds.length) return
-  // Prefer first selectable business entity (skip heat/assoc helpers when possible)
+  // 优先选择第一个可选业务实体，尽量跳过热力图和关联辅助实体。
   let picked: { kind: ShellFeatureKind; id: string } | null = null
   for (const eid of res.entityIds) {
     const parsed = parseEntityBizId(String(eid))
     if (parsed.id && ['sensor', 'data', 'task', 'indicator'].includes(parsed.kind)) {
-      // ignore pure geometry helpers without numeric/business id tail
+      // 忽略末尾没有数字或业务 ID 的纯几何辅助实体。
       if (String(parsed.id).startsWith('heat')) continue
       if (String(eid).startsWith('assoc-link-')) continue
       if (String(eid).startsWith('data-heat-')) continue
@@ -598,7 +599,7 @@ function setHost(el: unknown) {
       <div v-if="shellContextMenu.lon != null" class="map-ctx-sub">
         {{ shellContextMenu.lon.toFixed(5) }}, {{ shellContextMenu.lat?.toFixed(5) }}
       </div>
-      <!-- blank -->
+      <!-- 空白状态 -->
       <button v-if="shellContextMenu.kind === 'blank'" type="button" class="map-ctx-item" @click="ctxLocateHere">以此处为中心查询</button>
       <button v-if="shellContextMenu.kind === 'blank'" type="button" class="map-ctx-item" @click="ctxDrawObservationArea">绘制观测区域</button>
       <button v-if="shellContextMenu.kind === 'blank'" type="button" class="map-ctx-item" @click="ctxNewSensorAt">新建传感器位置</button>
@@ -606,7 +607,7 @@ function setHost(el: unknown) {
       <button v-if="shellContextMenu.kind === 'blank'" type="button" class="map-ctx-item" @click="ctxNearbyResources">查看周边资源</button>
       <button v-if="shellContextMenu.kind === 'blank'" type="button" class="map-ctx-item" @click="ctxCopyCoord">复制坐标</button>
 
-      <!-- sensor -->
+      <!-- 传感资源 -->
       <button v-if="shellContextMenu.kind === 'sensor'" type="button" class="map-ctx-item" @click="ctxViewDetail">查看详情</button>
       <button v-if="shellContextMenu.kind === 'sensor'" type="button" class="map-ctx-item" @click="ctxViewCoverage">查看覆盖范围</button>
       <button v-if="shellContextMenu.kind === 'sensor'" type="button" class="map-ctx-item" @click="ctxViewRecentData">查看最近数据</button>
@@ -614,14 +615,14 @@ function setHost(el: unknown) {
       <button v-if="shellContextMenu.kind === 'sensor'" type="button" class="map-ctx-item" @click="ctxLocateHere">地图定位</button>
       <button v-if="shellContextMenu.kind === 'sensor'" type="button" class="map-ctx-item" @click="ctxJumpCenter">进入所属中心</button>
 
-      <!-- task -->
+      <!-- 任务 -->
       <button v-if="shellContextMenu.kind === 'task'" type="button" class="map-ctx-item" @click="ctxViewDetail">查看任务详情</button>
       <button v-if="shellContextMenu.kind === 'task'" type="button" class="map-ctx-item" @click="ctxViewRelatedIndicators">查看关联指标</button>
       <button v-if="shellContextMenu.kind === 'task'" type="button" class="map-ctx-item" @click="ctxViewPlanCandidates">查看候选资源</button>
       <button v-if="shellContextMenu.kind === 'task'" type="button" class="map-ctx-item" @click="ctxEnterPlanningWorkbench">进入规划工作台</button>
       <button v-if="shellContextMenu.kind === 'task'" type="button" class="map-ctx-item" @click="ctxJumpCenter">进入所属中心</button>
 
-      <!-- data / indicator / other -->
+      <!-- 数据 / 指标 / 其他 -->
       <button v-if="shellContextMenu.kind === 'data' || shellContextMenu.kind === 'indicator'" type="button" class="map-ctx-item" @click="ctxViewDetail">查看详情</button>
       <button v-if="shellContextMenu.kind === 'data' || shellContextMenu.kind === 'indicator'" type="button" class="map-ctx-item" @click="ctxJumpCenter">进入所属中心</button>
       <button v-if="shellContextMenu.kind === 'data' || shellContextMenu.kind === 'indicator'" type="button" class="map-ctx-item" @click="ctxOnlyThisLayer">仅显示该类图层</button>

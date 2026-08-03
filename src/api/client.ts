@@ -1,7 +1,36 @@
 import type { Envelope } from './types'
 
 const CSRF_COOKIE = 'csrftoken'
+const DEFAULT_API_TIMEOUT_MS = 30_000
+const CSRF_TIMEOUT_MS = 10_000
 let lastCsrfFromBody: string | null = null
+
+export type ApiRequestOptions = RequestInit & {
+  /** 单次请求超时；大文件上传和模型调用可按接口延长。 */
+  timeoutMs?: number
+}
+
+function createTimeoutSignal(source: AbortSignal | null | undefined, timeoutMs: number) {
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = globalThis.setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  const abortFromCaller = () => controller.abort()
+
+  if (source?.aborted) controller.abort()
+  else source?.addEventListener('abort', abortFromCaller, { once: true })
+
+  return {
+    signal: controller.signal,
+    didTimeout: () => timedOut,
+    cleanup: () => {
+      globalThis.clearTimeout(timer)
+      source?.removeEventListener('abort', abortFromCaller)
+    },
+  }
+}
 
 function readCookie(name: string): string | null {
   const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'))
@@ -50,26 +79,39 @@ async function ensureCsrfCookie(force = false): Promise<string | null> {
     if (existing) return existing
     if (lastCsrfFromBody) return lastCsrfFromBody
   }
-  const res = await fetch('/api/v1/auth/csrf', {
-    method: 'GET',
-    credentials: 'include',
-    headers: { Accept: 'application/json' },
-  })
+  const timeout = createTimeoutSignal(undefined, CSRF_TIMEOUT_MS)
+  let res: Response
+  try {
+    res = await fetch('/api/v1/auth/csrf', {
+      method: 'GET',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+      signal: timeout.signal,
+    })
+  } catch (cause) {
+    if (timeout.didTimeout()) {
+      throw new ApiError(408, 'CSRF 请求超时，请稍后重试', { timeoutMs: CSRF_TIMEOUT_MS })
+    }
+    throw cause
+  } finally {
+    timeout.cleanup()
+  }
   try {
     const body = await res.clone().json() as { data?: { csrfToken?: string } }
     const token = body?.data?.csrfToken
     if (typeof token === 'string' && token) lastCsrfFromBody = token
   } catch {
-    /* ignore parse */
+    /* 忽略解析异常 */
   }
   return readCookie(CSRF_COOKIE) || lastCsrfFromBody
 }
 
 export async function apiRequest<T>(
   path: string,
-  options: RequestInit = {},
+  options: ApiRequestOptions = {},
   retried = false,
 ): Promise<T> {
+  const { timeoutMs = DEFAULT_API_TIMEOUT_MS, ...requestOptions } = options
   const method = (options.method || 'GET').toUpperCase()
   const headers = new Headers(options.headers || {})
   if (!headers.has('Accept')) headers.set('Accept', 'application/json')
@@ -87,15 +129,31 @@ export async function apiRequest<T>(
     if (csrf) headers.set('X-CSRFToken', csrf)
   }
 
-  const response = await fetch(path, {
-    ...options,
-    method,
-    headers,
-    credentials: 'include',
-  })
-  const body = await parseBody(response)
+  const timeout = createTimeoutSignal(options.signal, timeoutMs)
+  let response: Response
+  let body: unknown
+  try {
+    response = await fetch(path, {
+      ...requestOptions,
+      method,
+      headers,
+      credentials: 'include',
+      signal: timeout.signal,
+    })
+    body = await parseBody(response)
+  } catch (cause) {
+    if (timeout.didTimeout()) {
+      throw new ApiError(408, `请求超时（${timeoutMs}ms），请稍后重试`, { timeoutMs })
+    }
+    throw cause
+  } finally {
+    timeout.cleanup()
+  }
   if (!response.ok) {
     const message = errorMessage(body, response.status)
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('newcity:auth-expired'))
+    }
     if (isWrite && !retried && isCsrfFailure(response.status, message)) {
       await ensureCsrfCookie(true)
       return apiRequest<T>(path, options, true)
@@ -105,6 +163,6 @@ export async function apiRequest<T>(
   return body as T
 }
 
-export async function apiEnvelope<T>(path: string, options?: RequestInit): Promise<Envelope<T>> {
+export async function apiEnvelope<T>(path: string, options?: ApiRequestOptions): Promise<Envelope<T>> {
   return apiRequest<Envelope<T>>(path, options)
 }

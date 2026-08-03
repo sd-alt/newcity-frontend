@@ -278,10 +278,8 @@ const importForm = ref({
 const importFile = ref<File | null>(null)
 
 const tabs = [
-  { key: 'crud', label: '监测数据增删改查' },
-  { key: 'sources', label: '多源数据接入' },
-  { key: 'query', label: '综合查询导出' },
-  { key: 'viz', label: '数据可视化' },
+  { key: 'sources', label: '数据资源建模与接入' },
+  { key: 'query', label: '观测数据管理' },
 ]
 
 const filtered = computed(() => {
@@ -498,7 +496,7 @@ async function createDataset() {
   try {
     await api.createDataset({ code: datasetForm.value.code, name: datasetForm.value.name })
     message.value = '数据集已创建'
-    try { await reloadShellLayers('/data', {}) } catch { /* map refresh optional */ }
+    try { await reloadShellLayers('/data', {}) } catch { /* 地图刷新失败不影响主流程 */ }
     datasetForm.value = { code: '', name: '' }
     await load()
   } catch (err) {
@@ -542,7 +540,7 @@ async function createData() {
     else await api.createObservationData({ ...body, timeStart: isoNow(-7200_000), timeEnd: isoNow() })
     message.value = editingDataId.value ? '监测数据修改已保存' : '监测数据已创建'
     editingDataId.value = ''
-    try { await reloadShellLayers('/data', {}) } catch { /* map refresh optional */ }
+    try { await reloadShellLayers('/data', {}) } catch { /* 地图刷新失败不影响主流程 */ }
     dataForm.value.name = ''
     await load()
   } catch (err) {
@@ -558,7 +556,7 @@ async function removeData(id: unknown) {
   try {
     await api.deleteObservationData(String(id))
     message.value = '已删除'
-    try { await reloadShellLayers('/data', {}) } catch { /* map refresh optional */ }
+    try { await reloadShellLayers('/data', {}) } catch { /* 地图刷新失败不影响主流程 */ }
     await load()
   } catch (err) {
     error.value = errMessage(err, '删除失败')
@@ -759,7 +757,7 @@ async function pullSource() {
         payload?.dataId ??
         payload?.id
       if (dataId != null) await selectShellFeature('data', String(dataId), { openBubble: true, fly: true })
-    } catch { /* map optional */ }
+    } catch { /* 地图操作为可选步骤 */ }
   } catch (err) {
     error.value = errMessage(err, '实时拉取失败')
   } finally {
@@ -790,7 +788,7 @@ async function refreshLiveStatus(sourceId?: string) {
         try {
           await showDataOnMap()
           message.value = `实时接入有新数据（累计 ${pullCount}），地图数据层已刷新`
-        } catch { /* map optional */ }
+        } catch { /* 地图操作为可选步骤 */ }
       }
       if (Number.isFinite(pullCount)) lastLivePullCount = pullCount
     } else if (st === 'stopped' || st === 'idle' || st === 'error' || st === 'failed') {
@@ -832,7 +830,7 @@ async function startLivePull() {
       if (lastId != null && lastId !== '' && lastId !== '-') {
         await selectShellFeature('data', String(lastId), { openBubble: true, fly: true })
       }
-    } catch { /* map optional */ }
+    } catch { /* 地图操作为可选步骤 */ }
     message.value = '实时接入已启动，间隔 ' +
       String((res.data as any)?.live?.intervalSeconds || liveIntervalSeconds.value) +
       ' 秒；地图数据层将随新数据自动刷新'
@@ -1010,7 +1008,7 @@ onMounted(async () => {
   await load()
   applyRouteSensorQuery()
   if (tab.value === 'query' && qPlatformId.value) {
-    try { await runDataQuery(true) } catch { /* optional */ }
+    try { await runDataQuery(true) } catch { /* 可选刷新失败不影响主流程 */ }
   }
 })
 watch(() => route.query.tab, syncTab)

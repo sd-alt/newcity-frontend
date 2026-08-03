@@ -910,3 +910,444 @@
   - `progress.md`：追加本轮文档更新、验证和回滚记录。
 - 本轮未修改业务代码、地图数据、需求 Word 或前端 `.make` 临时资料。
 - 回滚点：本条日志之前的 README 与四中心说明状态。先执行 `git diff -- README.md docs/四中心与智能任务规划前端说明.md progress.md > readme-notes-frontend.patch` 保存补丁，再对同一文件清单执行 `git restore -p -- <文件>`，只选择本轮文档改动。
+
+## 2026-08-01 - Task: 修正观测能力管理窄工作区表格显示并完成 Playwright 复测
+
+### What was done
+- 将观测能力管理表调整为窄工作区可读布局：资源名称与所属平台合并为主信息列，精度、覆盖范围、状态和编辑档案保持独立操作字段，避免右侧状态/操作列被裁切或覆盖。
+- 保留现有表格分页指令和后端数据来源，未改变传感器能力档案的编辑保存流程。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过，Vite 成功生成生产包；仅保留现有大包体积提示。
+- `git diff --check -- src/pages/ResourcesCenter.vue`：通过，无空白错误。
+- Playwright Chromium（已安装 Chromium 139.0.7258.5）登录 `demo / demo-pass` 后访问 `/resources/sensors?tab=capabilities`：表格和操作按钮均在 1440×1000 视口内可见，内部滚动宽度等于容器宽度，页面级 `document.documentElement.scrollWidth` 为 1440；控制台错误、页面异常和失败请求均为 0，引导隐藏状态正常。
+
+### Notes
+- 改动文件：
+  - `src/pages/ResourcesCenter.vue`：重排观测能力表列结构并增加窄工作区响应式样式。
+  - `docs/四中心与智能任务规划前端说明.md`：补充观测能力表的显示约束和验收口径。
+  - `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚点：本轮尚未提交；如需回滚，先执行 `git diff -- src/pages/ResourcesCenter.vue docs/四中心与智能任务规划前端说明.md progress.md > capability-table-responsive.patch` 保存补丁，再对上述文件执行 `git restore -p -- <文件>`，只撤销本轮新增区块。
+
+## 2026-08-01 - Task: 优化观测能力状态文案并完成 1024 视口复核
+
+### What was done
+- 将常见后端状态值转换为界面可读文案：`active/inactive/enabled/disabled` 显示为“启用/停用”，`maintenance` 显示为“维护中”，未知状态保留原值。
+- 保持表格列宽、编辑入口和后端数据读写不变，避免窄屏状态文本逐字换行。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过，Vite 成功生成生产包；仅保留现有大包体积提示。
+- `git diff --check`：通过；仅有现有工作区的 LF/CRLF 提示。
+- Playwright Chromium 在 1024×768 视口登录后检查：状态文案正确，编辑按钮可见，页面级宽度为 1024 且无表格横向溢出；控制台错误、页面异常和 API 失败请求均为 0。
+
+### Notes
+- 改动文件：
+  - `src/pages/ResourcesCenter.vue`：增加观测能力状态文案映射。
+  - `docs/四中心与智能任务规划前端说明.md`：补充状态文案约定。
+  - `progress.md`：追加本轮验证和回滚记录。
+- 回滚点：本轮尚未提交；如需回滚，先执行 `git diff -- src/pages/ResourcesCenter.vue docs/四中心与智能任务规划前端说明.md progress.md > capability-status-label.patch` 保存补丁，再对上述文件执行 `git restore -p -- <文件>`，只撤销本轮新增区块。
+
+## 2026-08-01 - Task: 修正资源配置进度计数与六阶段轨迹的语义冲突
+
+### What was done
+- 将资源配置进度右上角的模糊“已完成 / 9 步”改为“当前第 X 步 / 共 9 步 · 已完成 Y 步”，明确九个实际步骤与六个业务阶段的对应关系。
+- 保留需求、指标、资源、规划、执行、成果六阶段轨迹和现有步骤卡片操作，不改变任务执行顺序或后端接口。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过，Vite 成功生成生产包；仅保留现有大包体积提示。
+- `git diff --check -- src/pages/PlanningCenter.vue`：通过。
+- Playwright Chromium 登录后访问 `/business?tab=flow&taskId=9`：显示“当前第 6 步 / 共 9 步 · 已完成 5 步”，六个阶段圆点均正常渲染，1440×1000 页面级宽度为 1440，控制台错误和 API 失败请求均为 0。
+
+### Notes
+- 改动文件：
+  - `src/pages/PlanningCenter.vue`：澄清资源配置进度计数文案。
+  - `docs/四中心与智能任务规划前端说明.md`：记录六阶段与九步骤的显示约定。
+  - `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚点：本轮尚未提交；如需回滚，先执行 `git diff -- src/pages/PlanningCenter.vue docs/四中心与智能任务规划前端说明.md progress.md > resource-progress-label.patch` 保存补丁，再对上述文件执行 `git restore -p -- <文件>`，只撤销本轮新增区块。
+
+## 2026-08-01 - Task: 同步四中心功能表并补齐任务生命周期入口
+
+### What was done
+- 将四中心功能表统一为 24 个功能项：任务中心 5 项、资源中心 8 项、业务中心 6 项、应用中心 5 项；业务中心新增过程管理与成果追溯、方案管理，应用中心统一为场景应用、态势展示、综合分析。
+- 前端目录、传统二级导航和方案页标签已与功能表同名；过程管理与成果追溯接入现有执行成果页面，方案管理复用资源配置页的方案列表、对比和结果视图。
+- 任务管理补齐提交、审核、启动、暂停、完成确认、归档的前后端动作，状态由后端持久化并按状态控制可见按钮；未新增数据库字段或迁移。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过，Vite 构建 98 个模块；保留现有大包体积提示。
+- `F:\aidata\newcity\.venv\Scripts\python.exe manage.py check`：通过。
+- `F:\aidata\newcity\.venv\Scripts\python.exe manage.py makemigrations --check --dry-run`：通过，无新增迁移。
+- `F:\aidata\newcity\.venv\Scripts\python.exe manage.py test operations.tests.test_planning.ObservationTaskModelingTests`：17 项通过。
+- Playwright Chromium 登录后检查 `/business/execution`、`/business?tab=plans`、`/tasks?tab=task-manage`：三个入口可达，页面宽度无横向溢出，控制台错误为 0；地图供应商请求在无外网时会被浏览器中止，不影响页面路由和业务 API。
+- Word 主功能表结构校验：25 行 × 4 列、24 个功能项、分组纵向合并与表头重复标记正确，未发现问号替换；Word/LibreOffice 无可用的稳定无头渲染入口，本轮未把结构检查冒充为视觉渲染通过。
+
+### Notes
+- `F:\aidata\newcity\docs\requirements\系统建设任务清单与工作量表(2).docx`：按用户功能表更新 24 个功能项并保留原表格样式；回滚点为 `F:\aidata\temp_docx_safe\requirements_backup_20260801\系统建设任务清单与工作量表(2).docx`，可直接复制覆盖恢复。
+- `F:\aidata\newcity-frontend\src\features\catalog.ts`：同步功能目录并新增两个业务入口。
+- `F:\aidata\newcity-frontend\src\components\AppLayout.vue`：同步四中心二级导航及业务中心分组。
+- `F:\aidata\newcity-frontend\src\pages\PlanningCenter.vue`：将配置结果入口改名为方案管理。
+- `F:\aidata\newcity-frontend\src\pages\TaskCenterView.vue`、`src\api\endpoints.ts`：增加任务生命周期按钮与接口封装。
+- `F:\aidata\newcity\operations\api\views\planning\tasks.py`、`operations\tests\test_planning.py`：增加状态流转接口及回归测试。
+- `F:\aidata\newcity-frontend\docs\四中心与智能任务规划前端说明.md`、`F:\aidata\newcity\docs\系统业务链路与前后端联调说明.md`：同步功能目录和任务生命周期约定。
+- 回滚方式：代码文件使用 `git diff -- <文件>` 保存补丁后按文件执行 `git restore -p -- <文件>`；Word 使用上述备份覆盖目标文件，不执行全量重置。
+
+## 2026-08-01 - Task: 统一资源配置进度条为九步口径
+
+### What was done
+- 将资源配置进度条从六个概念阶段改为九个可执行步骤，依次显示创建、提交、反算、候选、基础、优化、增补、评估、输出。
+- 圆点数量、步骤名称、当前步骤计数和已完成数量统一使用九步口径；步骤名称采用短标签，完整名称保留在悬停提示和下方步骤卡片中，避免窄工作区内挤压。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- Playwright Chromium 在 1440×1000、1024×768 视口检查：进度节点数量均为 9，计数显示“共 9 步”，页面级横向溢出为 0，控制台错误为 0。
+- 生成并人工查看 `qa-output/screenshots/resource-progress-9steps.png`，九个节点在右侧工作区内可读，未出现六步/九步混用。
+- `npm.cmd run build`：待本轮最终复核后记录。
+
+### Notes
+- `src/pages/PlanningCenter.vue`：移除六阶段进度条映射，改为九个实际步骤节点并统一短标签样式。
+- `docs/四中心与智能任务规划前端说明.md`：同步九步进度条说明。
+- `qa-output/screenshots/resource-progress-9steps.png`：本轮 Playwright 视觉检查截图。
+- 回滚方式：保存 `git diff -- src/pages/PlanningCenter.vue docs/四中心与智能任务规划前端说明.md progress.md` 后，按文件执行 `git restore -p -- <文件>`；不影响后端和数据库。
+
+## 2026-08-01 - Task: 资源配置进度条最终构建复核
+
+### What was done
+- 完成九步进度条改动后的最终前端构建复核。
+
+### Testing
+- `npm.cmd run build`：通过，Vite 成功构建 98 个模块；仅保留既有大包体积提示。
+- `git diff --check -- src/pages/PlanningCenter.vue docs/四中心与智能任务规划前端说明.md progress.md`：通过。
+
+### Notes
+- 改动仍集中在资源配置进度条及其说明文档；回滚方式沿用上一条记录的按文件补丁回滚方式。
+
+## 2026-08-01 - Task: 优化资源选择与能力评估卡片布局
+
+### What was done
+- 将候选资源从十列宽表改为统一的紧凑卡片：平台信息与综合评分置于顶部，五项能力维度采用指标网格，评分依据默认折叠，避免窄工作区中的长文本挤压。
+- 将排除资源同步改为同一视觉体系的原因卡片，并保留硬约束原因的完整展示。
+- 候选与排除资源均按每页 4 项进行客户端分页；点击候选卡片继续定位地图，展开评分依据时阻止误触定位，不重新加载地图或改变后端数据流程。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过，Vite 成功构建 98 个模块；仅保留既有大包体积提示。
+- Playwright Chromium 登录演示账号并进入任务 #9 的资源选择页：1440×1000 与 1024×768 页面级 `scrollWidth` 均等于视口宽度，控制台错误为 0；候选卡片宽度分别为约 384px / 304px，高度约 202px，候选分页由 4 项切换为 2 项，排除资源分页显示 24 项共 6 页。
+- Playwright 交互检查：展开“查看评分依据”只打开当前卡片内容，候选下一页可正常切换；生成 `qa-output/resource-selection-cards-1440.png`、`qa-output/resource-selection-cards-1024.png` 和 `qa-output/resource-selection-cards-no-guide.png` 并人工检查布局。
+
+### Notes
+- `src/pages/PlanningCenter.vue`：新增候选/排除卡片、分页计算、评分原因拆分和窄工作区样式。
+- `docs/四中心与智能任务规划前端说明.md`：补充资源选择与能力评估卡片及分页约定。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- `qa-output/resource-selection-cards-1440.png`、`qa-output/resource-selection-cards-1024.png`、`qa-output/resource-selection-cards-no-guide.png`：本轮浏览器视觉验证截图。
+- 回滚方式：保存 `git diff -- src/pages/PlanningCenter.vue docs/四中心与智能任务规划前端说明.md progress.md` 后，按文件执行 `git restore -p -- <文件>`，只撤销本轮卡片布局区块；不影响后端和数据库。
+
+## 2026-08-01 - Task: 拆分资源选择与能力评估入口并增加任务线路
+
+### What was done
+- 将业务中心“能力评估”从 `candidates` 独立为 `evaluation` 路由页签；资源选择页只保留候选筛选、评分依据和地图定位，能力评估页集中展示指标满足、总体覆盖、有效覆盖、覆盖错位和评估依据。
+- 在资源选择与能力评估之间增加“需求查询 → 资源选择 → 能力评估 → 资源配置 → 方案管理”任务线路，按真实任务完成状态显示已完成、当前和待开始节点，节点可直接切换对应业务页面。
+- 入口目录、左侧二级导航、README 和前端说明同步使用 `evaluation` 页签；未修改后端接口，能力评估页只读取已有评估结果，未执行评估时显示明确空态和下一步入口。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过，Vite 成功构建 98 个模块；仅保留既有大包体积提示。
+- Playwright Chromium 登录演示账号并进入任务 #9：左侧“能力评估”进入 `/business?tab=evaluation`，页面标题为“能力评估”，任务线路 5 个节点且当前节点正确；资源选择页标题为“资源选择”，当前节点正确。
+- 1440×1000 与 1024×768 检查：页面级 `scrollWidth` 分别为 1440 / 1024，控制台错误为 0；评估结果可读取，空态入口和线路节点可用。
+- 生成并人工查看 `qa-output/business-route-1440.png`、`qa-output/business-route-1024.png`，线路圆点、连接线和右侧卡片未出现重叠或横向溢出。
+- `git diff --check -- src/pages/PlanningCenter.vue src/components/AppLayout.vue src/features/catalog.ts README.md docs/四中心与智能任务规划前端说明.md`：通过。
+
+### Notes
+- `src/pages/PlanningCenter.vue`：新增 evaluation 页签、能力评估结果页、任务线路和空态/结果态交互。
+- `src/components/AppLayout.vue`、`src/features/catalog.ts`：将能力评估入口指向 `tab=evaluation`。
+- `README.md`、`docs/四中心与智能任务规划前端说明.md`：同步页面路由和任务线路说明。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- `qa-output/business-route-1440.png`、`qa-output/business-route-1024.png`：本轮浏览器视觉验证截图。
+- 回滚方式：保存 `git diff -- src/pages/PlanningCenter.vue src/components/AppLayout.vue src/features/catalog.ts README.md docs/四中心与智能任务规划前端说明.md progress.md > business-route-evaluation.patch` 后，按文件执行 `git restore -p -- <文件>`，只撤销本轮入口与任务线路改动；不影响后端和数据库。
+
+## 2026-08-01 - Task: 将任务线路移至地图底部并从业务卡片中抽离
+
+### What was done
+- 移除资源选择/能力评估右侧工作卡片中的线路容器，改为地图底部中间的透明任务线路，只保留节点、连接线和步骤文字，不再遮挡右侧业务内容。
+- 任务线路通过独立的地图承载区挂载，随右侧浮窗宽度调整而保持居中；资源配置页面继续使用原有九步进度，不与五段业务线路混用。
+- 修复首屏挂载顺序：线路承载区放在 Vue 应用外部，避免 Teleport 目标晚于业务页挂载导致空白页。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过，Vite 成功构建 98 个模块；仅保留既有大包体积提示。
+- Playwright Chromium 登录演示账号并进入资源选择/能力评估：线路在地图底部中间独立显示，1440×1000 线路区域约 720×62px，1024×768 约 384×62px；两种视口页面级 `scrollWidth` 均无溢出，控制台错误为 0。
+- 首屏回归：登录后 `/business` body 正常渲染，任务选择器可见；未再出现 Teleport target 警告或空白页。
+- 生成并人工查看 `qa-output/business-route-map-1440-slim.png`、`qa-output/business-route-map-1024-slim.png`。
+- `git diff --check -- index.html src/components/AppLayout.vue src/pages/PlanningCenter.vue src/styles.css progress.md docs/四中心与智能任务规划前端说明.md`：通过。
+
+### Notes
+- `index.html`：增加 Vue 应用外部的任务线路挂载点。
+- `src/components/AppLayout.vue`：同步右侧工作区宽度到线路定位变量，保持地图底部线路避让浮窗。
+- `src/pages/PlanningCenter.vue`：将线路 Teleport 到地图承载区并改为透明节点条。
+- `src/styles.css`：新增地图底部线路承载区定位样式。
+- `docs/四中心与智能任务规划前端说明.md`、`progress.md`：同步线路位置和本轮验证记录。
+- `qa-output/business-route-map-1440-slim.png`、`qa-output/business-route-map-1024-slim.png`：本轮浏览器视觉验证截图。
+- 回滚方式：保存 `git diff -- index.html src/components/AppLayout.vue src/pages/PlanningCenter.vue src/styles.css docs/四中心与智能任务规划前端说明.md progress.md > business-route-map-position.patch` 后，按文件执行 `git restore -p -- <文件>`，只撤销本轮线路位置改动；不影响后端和业务数据。
+
+## 2026-08-01 - Task: 将任务线路延伸到资源配置与方案管理
+
+### What was done
+- 地图底部任务线路扩展覆盖资源选择、能力评估、资源配置和方案管理四个业务入口，并按当前页高亮对应节点。
+- 资源配置右侧保留九个具体执行步骤，地图底部线路只表达五段业务阶段，避免两种进度口径互相替代。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- Playwright Chromium 登录演示账号并进入任务 #9：资源配置页线路当前节点为“资源配置”，九步进度同时正常显示；方案管理页线路当前节点为“方案管理”。
+- 1024×768 两个入口页面级 `scrollWidth` 和 `body.scrollWidth` 均为 1024，控制台错误为 0；生成并人工查看 `qa-output/business-route-flow-1024.png`、`qa-output/business-route-plans-1024.png`。
+
+### Notes
+- `src/pages/PlanningCenter.vue`：让地图底部任务线路覆盖 `flow` 与 `plans` 页签。
+- `docs/四中心与智能任务规划前端说明.md`：同步四个业务入口共用线路的说明。
+- `progress.md`：追加本轮验证和回滚记录。
+- `qa-output/business-route-flow-1024.png`、`qa-output/business-route-plans-1024.png`：本轮入口视觉验证截图。
+- 回滚方式：保存 `git diff -- src/pages/PlanningCenter.vue docs/四中心与智能任务规划前端说明.md progress.md > business-route-all-tabs.patch` 后，按文件执行 `git restore -p -- <文件>`，只撤销本轮线路入口扩展。
+## 2026-08-01 - Task: 调整地图底部任务线路安全间距
+
+### What was done
+- 将地图底部任务线路整体上移，为右下角 AI 助手、地图对象详情按钮和地图状态条预留稳定的垂直安全区；线路仍覆盖需求查询、资源选择、能力评估、资源配置和方案管理五个入口。
+- 在前端说明中补充浮动控件避让约束，明确线路与资源配置九步进度相互独立。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过；Vite 生成生产包，仅保留既有大包体积提示。
+- `git diff --check`：通过。
+- Playwright Chromium 登录后检查 1440×1000 与 1024×768：线路与 AI 按钮、地图详情按钮均无几何重叠，页面横向溢出为 0；资源选择、能力评估、资源配置四个入口均显示五节点线路，点击方案管理节点可切换到 `tab=plans`。
+
+### Notes
+- `src/styles.css`：将地图底部任务线路容器的底部偏移调整为 84px，避让右下角浮动控件；回滚可执行 `git restore -p -- src/styles.css`，仅撤销本轮样式改动。
+- `docs/四中心与智能任务规划前端说明.md`：补充任务线路安全间距说明；回滚可执行 `git restore -p -- docs/四中心与智能任务规划前端说明.md`。
+- `progress.md`：追加本轮施工、验证和回滚记录；回滚可执行 `git restore -p -- progress.md`。
+## 2026-08-01 - Task: 优化地图任务线路可读性
+
+### What was done
+- 将地图底部任务线路调整为与现有地图浮层一致的浅色圆角条，增加边框和轻阴影，提高复杂底图上的文字、节点和连接线对比度。
+- 针对中等屏幕隐藏次要节点说明，避免右侧工作区展开后线路文字拥挤；五个业务节点和点击切换逻辑保持不变。
+- 在前端说明中补充线路的视觉样式和响应式显示约束。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过；仅保留既有大包体积提示。
+- `git diff --check`：通过。
+- Playwright Chromium 登录后检查 1024×768：任务线路可读，次要说明按断点隐藏；与 AI 按钮、地图详情按钮无几何重叠，页面横向溢出为 0，控制台错误为 0。
+- Playwright Chromium 登录后检查 1440×1000：线路显示完整节点说明，浮层样式与地图工具保持一致，页面横向溢出为 0，控制台错误为 0。
+
+### Notes
+- `src/pages/PlanningCenter.vue`：统一任务线路浮层样式并增加 1100px 响应式断点；回滚可执行 `git restore -p -- src/pages/PlanningCenter.vue`，仅撤销本轮线路样式改动。
+- `docs/四中心与智能任务规划前端说明.md`：补充线路可读性与响应式约束；回滚可执行 `git restore -p -- docs/四中心与智能任务规划前端说明.md`。
+- `progress.md`：追加本轮施工、验证和回滚记录；回滚可执行 `git restore -p -- progress.md`。
+## 2026-08-01 - Task: 按样式.make重做地图任务条
+
+### What was done
+- 读取 `F:\download\Chrome_download\样式.make` 的页面缩略图，提取其地图底部“白色轻浮层 + 紧凑状态胶囊”视觉结构。
+- 将五段业务线路改为参考样式：左侧保留“任务线路”短标题，已完成、当前、待处理分别使用绿色、蓝色、灰色状态胶囊；取消原先的大圆点连接线，保留每个节点的点击切换和语义状态。
+- 中等屏幕隐藏节点图标，仅保留完整节点名称，避免任务条收窄后出现“需求/资源”等截断文字。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过；仅保留既有大包体积提示。
+- `git diff --check`：通过。
+- Playwright Chromium 登录后检查 1440×1000：任务条为参考页面的紧凑胶囊布局，五个节点名称完整，页面横向溢出为 0，控制台错误为 0。
+- Playwright Chromium 登录后检查 1024×768：节点名称仍完整可读，图标按断点隐藏；与 AI 按钮、地图详情按钮无重叠，页面横向溢出为 0，控制台错误为 0。
+
+### Notes
+- `src/pages/PlanningCenter.vue`：重做任务条的浮层、状态胶囊和中等屏幕响应式样式；回滚可执行 `git restore -p -- src/pages/PlanningCenter.vue`，仅撤销本轮任务条改动。
+- `docs/四中心与智能任务规划前端说明.md`：补充参考样式和状态颜色约定；回滚可执行 `git restore -p -- docs/四中心与智能任务规划前端说明.md`。
+- `progress.md`：追加本轮施工、验证和回滚记录；回滚可执行 `git restore -p -- progress.md`。
+- 参考文件 `F:\download\Chrome_download\样式.make` 仅作读取和视觉对照，未修改原文件。
+## 2026-08-01 - Task: 调整任务条至地图底部居中
+
+### What was done
+- 参考 `样式.make` 的底部状态条比例，将任务线路宽度收窄为地图可用区域的约 70%，并保持水平居中。
+- 将任务条下移至地图底部安全边距内，仍避开 AI 助手、地图详情按钮和状态条。
+- 1024 宽度下压缩胶囊内边距与字号，确保五个节点名称完整显示，不出现省略号。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过；仅保留既有大包体积提示。
+- `git diff --check`：通过。
+- Playwright Chromium 登录后检查 1440×1000：任务条宽 504px、水平居中、底部与地图浮动控件无重叠，横向溢出为 0。
+- Playwright Chromium 登录后检查 1024×768：任务条宽 300px、五个节点名称均完整可读，横向溢出为 0，控制台错误为 0。
+
+### Notes
+- `src/styles.css`：将任务条底部位置调整为 68px；回滚可执行 `git restore -p -- src/styles.css`。
+- `src/pages/PlanningCenter.vue`：将任务条限制为地图区域约 70% 宽度并保持响应式文字可读；回滚可执行 `git restore -p -- src/pages/PlanningCenter.vue`。
+- `docs/四中心与智能任务规划前端说明.md`：补充任务条居中和宽度约束；回滚可执行 `git restore -p -- docs/四中心与智能任务规划前端说明.md`。
+- `progress.md`：追加本轮施工、验证和回滚记录；回滚可执行 `git restore -p -- progress.md`。
+## 2026-08-01 - Task: 精简任务条文案并放大字号
+
+### What was done
+- 将任务条五个节点由完整业务名称改为“需求 / 资源 / 评估 / 配置 / 方案”，保留完整说明在业务页面和导航中。
+- 桌面端节点字号调整为 12px，中等屏幕为 11px；状态颜色和 `.make` 参考样式保持一致。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过；仅保留既有大包体积提示。
+- `git diff --check`：通过。
+- Playwright Chromium 登录后检查 1440×1000、1024×768：五个短标签均完整显示，任务条仍在地图底部居中，与 AI 助手和地图详情按钮无重叠，横向溢出为 0，控制台错误为 0。
+
+### Notes
+- `src/pages/PlanningCenter.vue`：精简任务线路标签并增大文字；回滚可执行 `git restore -p -- src/pages/PlanningCenter.vue`。
+- `docs/四中心与智能任务规划前端说明.md`：补充任务条短标签约定；回滚可执行 `git restore -p -- docs/四中心与智能任务规划前端说明.md`。
+- `progress.md`：追加本轮施工、验证和回滚记录；回滚可执行 `git restore -p -- progress.md`。
+## 2026-08-01 - Task: 适配侧边工作区收起后的任务条居中
+
+### What was done
+- 将任务线路的右侧安全区改为随侧边工作区状态动态计算：工作区展开时避开工作区，工作区收起时释放预留宽度并按地图主区域重新居中。
+- 保持任务条的短标签、字号、状态颜色和底部位置不变。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过；仅保留既有大包体积提示。
+- `git diff --check`：通过。
+- Playwright Chromium 登录后进入资源配置页，测量侧边工作区展开/收起：展开时任务条中心为 608px，收起后中心为 828px，与地图主区域中心一致；两种状态横向溢出均为 0，控制台错误为 0。
+
+### Notes
+- `src/components/AppLayout.vue`：根据左侧工作区、右侧详情抽屉状态同步任务条安全区宽度；回滚可执行 `git restore -p -- src/components/AppLayout.vue`。
+- `docs/四中心与智能任务规划前端说明.md`：补充工作区收起后的居中规则；回滚可执行 `git restore -p -- docs/四中心与智能任务规划前端说明.md`。
+- `progress.md`：追加本轮施工、验证和回滚记录；回滚可执行 `git restore -p -- progress.md`。
+## 2026-08-01 - Task: satellite footprint and viewport label optimization
+
+### What was done
+- Satellite layers prefer backend coverage WKT. When a real TLE/SGP4 trajectory and valid swath width are available, the map adds the current ground-projected scan footprint; no simulated footprint is created without real inputs.
+- Satellite names now follow the current screen projection and are shown only when the satellite is inside the viewport. Selecting a satellite with a footprint focuses the map on that footprint.
+- Cesium uses request-render mode, camera throttling, and visibility-only updates so camera movement does not rebuild whole data layers.
+
+### Testing
+- `npm.cmd run typecheck`: passed.
+- `npm.cmd run build`: passed; existing Cesium bundle-size warning remains.
+- `git diff --check -- src/gis/mapLayers.ts src/gis/mapShell.ts docs/四中心与智能任务规划前端说明.md`: passed.
+- Playwright Chromium after demo login: `/application?tab=sensors` loaded 33 sensors with no console errors; `scrollWidth` stayed 1440 and 1024 at 1440x1000 and 1024x768.
+- A browser-only 120 km swath injection verified the footprint rendering and detail text; current demo satellites have no configured swath, so the real-data path correctly reports that scan width is not configured.
+
+### Notes
+- `src/gis/mapLayers.ts`: satellite footprint entities, viewport label visibility, and Cesium request-render configuration. Roll back with `git restore -p -- src/gis/mapLayers.ts`.
+- `src/gis/mapShell.ts`: camera scheduling, satellite footprint focus, and layer re-render requests. Roll back with `git restore -p -- src/gis/mapShell.ts`.
+- `docs/四中心与智能任务规划前端说明.md`: documented swath, footprint, viewport-label, and performance rules. Roll back with `git restore -p -- docs/四中心与智能任务规划前端说明.md`.
+- `progress.md`: appended this work record only. Roll back this record with `git restore -p -- progress.md`.
+## 2026-08-01 - Task: 鏇存柊鍗槦鎵弿足迹图例
+
+### What was done
+- 在地图“范围与连线”图例中补充“卫星当前扫描足迹”，让动态扫描椭圆与地图说明保持一致。
+
+### Testing
+- `npm.cmd run typecheck`: passed.
+- `git diff --check -- src/components/MapBasemap.vue`: passed.
+
+### Notes
+- `src/components/MapBasemap.vue`: added the satellite scan-footprint legend item. Roll back with `git restore -p -- src/components/MapBasemap.vue`.
+- `progress.md`: appended this record only. Roll back with `git restore -p -- progress.md`.
+
+## 2026-08-02 - Task: Render Microsoft Agent Framework dynamic task graphs
+
+### What was done
+- Replaced the fixed linear Agent stage track with a topology-level Workflow lane driven by backend nodes and edges.
+- Added Workflow mode, source, graph type, node/edge count, concurrent nodes, Checkpoint, fallback state, and mandatory-node progress.
+- Added node-level dependency, risk, planning reason, professional Agent, Executor, allowed/actual tool, and expandable input/output summaries.
+
+### Testing
+- `npm.cmd run typecheck` passed.
+- `npm.cmd run build` passed; the existing Vite chunk-size warning remains.
+- `git diff --check -- src/api/endpoints.ts src/pages/AgentTaskWorkspace.vue docs/四中心与智能任务规划前端说明.md` passed.
+- Playwright with mocked read-only Workflow API data at 1280×900 found 3 topology levels, 4 nodes, 2 same-level parallel cards, and zero horizontal page overflow. The first local pass also reported two unrelated 403 map-layer requests; no task was written to the backend.
+
+### Notes
+- `src/api/endpoints.ts` - adds typed Workflow, node, and edge API contracts while preserving prior endpoint additions.
+- `src/pages/AgentTaskWorkspace.vue` - renders the topology lane and Workflow metadata while preserving the existing plan-adjustment route change.
+- `docs/四中心与智能任务规划前端说明.md` - documents dynamic graph display and progress semantics.
+- `progress.md` - appends this frontend implementation and verification record.
+- Rollback point: selectively revert the dynamic Workflow additions in the four files above; preserve unrelated existing changes in `src/api/endpoints.ts` and `src/pages/AgentTaskWorkspace.vue` with `git restore -p` rather than whole-file restore.
+
+## 2026-08-02 - Task: Final frontend verification after strict requirement alignment
+
+### What was done
+- Revalidated the dynamic Workflow API contract and topology-lane implementation after backend lifecycle and effective-tool corrections.
+
+### Testing
+- `npm.cmd run typecheck` passed.
+- `npm.cmd run build` passed; only the existing Vite chunk-size warning remains.
+- `git diff --check` passed for the frontend delivery files.
+
+### Notes
+- `progress.md` - records final frontend verification.
+- Rollback point: verification-only record; use the preceding frontend task-block rollback point for implementation rollback.
+
+## 2026-08-03 - Task: Connect AI assistant pending actions to the Agent task workspace
+### What was done
+- Added polling and a visible pending-task card in the right-bottom AI assistant for clarification and approval checkpoints.
+- Added `runId` deep-link loading in the Agent task workspace, including automatic scroll/focus to the follow-up or approval area.
+- Documented the human-in-the-loop entry and continuation flow.
+
+### Testing
+- `npm.cmd run typecheck` passed.
+- `npm.cmd run build` passed; the existing Vite chunk-size warning remains.
+- `git diff --check` completed with only existing LF/CRLF normalization warnings.
+- Backend pending-action API and full regression tests passed separately; no source-code or database migration errors were introduced.
+
+### Notes
+- `src/api/endpoints.ts` - adds the pending Agent action type and endpoint.
+- `src/components/AssistantPanel.vue` - polls pending actions, shows action cards, and routes to the exact Agent run.
+- `src/pages/AgentTaskWorkspace.vue` - loads `runId` deep links and focuses human input/approval controls.
+- `src/styles.css` - styles the assistant pending-action card.
+- `docs/Agent人工节点与助手入口说明.md` - documents waiting states, buttons, and Worker continuation.
+- `progress.md` - records this frontend implementation and verification evidence.
+- Rollback point: selectively revert the five frontend files listed above; preserve unrelated existing changes in shared files with `git restore -p` rather than whole-file restore.
+
+## 2026-08-03 - Task: 修复前端会话、Agent 状态处理并优化首屏加载
+### What was done
+- API 层统一处理 401 会话失效事件，路由自动清理用户状态并回到登录页。
+- 文件下载和文本接口统一复用 API 错误处理；Agent SSE JSON 异常不再导致页面崩溃，断线后继续使用轮询刷新。
+- Agent 任务使用更可靠的随机幂等键，避免同一页面内重复提交产生可预测键值。
+- 将主要业务页面改为路由懒加载，降低首屏 JavaScript 体积。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过；构建后的最大首包约 123KB，已消除原 582KB 首包警告。
+
+### Notes
+- `src/api/client.ts` - 增加统一会话失效事件。
+- `src/api/endpoints.ts` - 统一文本下载错误处理。
+- `src/router/index.ts` - 增加会话失效跳转和业务页面懒加载。
+- `src/pages/AgentTaskWorkspace.vue` - 增强幂等键、SSE 解析和断线刷新。
+- `src/main.ts` - 生产环境错误提示脱敏。
+- 回滚方式：选择性回退上述五个源码文件中的本条改动；不要整文件恢复，以保留其他未提交前端需求改动。
+## 2026-08-03 - Task: 将前端开发服务端口纳入环境配置
+
+### What was done
+- 增加 `VITE_DEV_SERVER_HOST` 和 `VITE_DEV_SERVER_PORT`，Vite 开发服务不再把 5173 写死。
+- 增加严格端口模式，配置端口被占用时直接报错，不自动切换到其他端口。
+- 保留并明确 `VITE_API_PROXY_TARGET`，当前前端代理后端 8001。
+
+### Testing
+- 前端重启后监听 5173，`/api/health/` 代理返回 HTTP 200。
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `git diff --check`：通过，仅有既有 LF/CRLF 转换提示。
+- 前端 `.env` 已确认被 Git 忽略。
+
+### Notes
+- `vite.config.ts`：读取前端主机、端口和后端代理配置，并校验端口范围。
+- `.env`、`.env.example`：增加前端服务主机和端口配置。
+- 回滚方式：删除本轮 Vite 配置和环境项，重启前端即可；不影响后端和数据库。
+## 2026-08-03 - Task: 增加前端请求超时与自动验证
+
+### What was done
+- API 客户端增加默认 30 秒超时、请求取消和超时错误提示。
+- 模型对话、模型列表、文件上传和文本导出使用单独的超时配置。
+- 新增前端 GitHub Actions 类型检查与生产构建流程，并补充说明文档。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `git diff --check`：通过，仅有既有 LF/CRLF 转换提示。
+
+### Notes
+- `src/api/client.ts`、`src/api/endpoints.ts`：增加请求超时和取消处理。
+- `.github/workflows/frontend-ci.yml`、`docs/请求超时与自动验证说明.md`：增加自动验证和配置说明。
+- 回滚方式：选择性回滚上述文件；不影响后端、数据库和现有 API 契约。

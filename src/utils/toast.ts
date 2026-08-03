@@ -28,7 +28,7 @@ export function dismissToast(id: number) {
   toasts.value = toasts.value.filter((t) => t.id !== id)
 }
 
-/** Convenience helpers */
+/** 提供便捷提示的辅助函数。 */
 export const toast = {
   info: (msg: string) => pushToast(msg, 'info'),
   success: (msg: string) => pushToast(msg, 'success'),

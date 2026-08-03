@@ -10,6 +10,7 @@ dist
 .env.*
 playwright-report
 test-results
+qa-output/
 .coverage
 
 __pycache__/

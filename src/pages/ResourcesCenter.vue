@@ -61,6 +61,23 @@ const crudPages = computed(() => [editingPlatformId.value ? '编辑平台' : '�
 const queryViewPages = ['查询条件', '查询结果']
 const vizPages = ['筛选与上图', '资源摘要']
 
+function sensorPlatform(sensor: Record<string, unknown>) {
+  const platformId = String(sensor.platformId ?? '')
+  return platforms.value.find((platform) => String(platform.id) === platformId) || {}
+}
+
+function sensorStatusLabel(value: unknown) {
+  const status = String(value ?? '').trim().toLowerCase()
+  const labels: Record<string, string> = {
+    active: '启用',
+    inactive: '停用',
+    enabled: '启用',
+    disabled: '停用',
+    maintenance: '维护中',
+  }
+  return labels[status] || String(value || '未设置')
+}
+
 const platformForm = ref({
   platformTypeId: '',
   name: '',
@@ -98,9 +115,9 @@ const positionSourceForm = ref({
 })
 
 const tabs = [
-  { key: 'types', label: '传感器类型维护' },
-  { key: 'crud', label: '传感器增删改查' },
-  { key: 'query', label: '综合查询' },
+  { key: 'crud', label: '传感器资源管理' },
+  { key: 'capabilities', label: '观测能力管理' },
+  { key: 'query', label: '资源查询' },
   { key: 'viz', label: '资源可视化' },
 ]
 
@@ -321,13 +338,13 @@ async function createPlatform() {
     const newId = (res.data as any)?.id ?? (res as any)?.id
     message.value = editingPlatformId.value ? '平台资料修改已保存' : (newId ? ('平台已创建 #' + newId) : '平台已创建')
     editingPlatformId.value = ''
-    try { await reloadShellLayers('/resources', {}) } catch { /* map refresh optional */ }
+    try { await reloadShellLayers('/resources', {}) } catch { /* 地图刷新失败不影响主流程 */ }
     if (newId != null) {
-      try { await locateOnMap('sensor', newId) } catch { /* optional */ }
+      try { await locateOnMap('sensor', newId) } catch { /* 地图定位为可选步骤 */ }
     }
     platformForm.value.name = ''
     platformForm.value.identifier = ''
-    // keep location for consecutive creates near same area unless user clears
+    // 如果用户没有清除位置，则连续创建时保留相近区域的位置。
     await load()
   } catch (err) {
     error.value = errMessage(err, '创建失败（表单内容已保留）')
@@ -377,7 +394,7 @@ async function removePlatform(id: unknown) {
   try {
     await api.deletePlatform(String(id))
     message.value = '平台已删除'
-    try { await reloadShellLayers('/resources', {}) } catch { /* map refresh optional */ }
+    try { await reloadShellLayers('/resources', {}) } catch { /* 地图刷新失败不影响主流程 */ }
     await load()
   } catch (err) {
     error.value = errMessage(err, '删除失败（可能存在关联数据）')
@@ -407,7 +424,7 @@ async function createSensor() {
     else await api.createSensor(body)
     message.value = editingSensorId.value ? '传感器资料修改已保存' : '传感器已创建'
     editingSensorId.value = ''
-    try { await reloadShellLayers('/resources', {}) } catch { /* map refresh optional */ }
+    try { await reloadShellLayers('/resources', {}) } catch { /* 地图刷新失败不影响主流程 */ }
     sensorForm.value.sensorName = ''
     await load()
   } catch (err) {
@@ -441,7 +458,7 @@ async function removeSensor(id: unknown) {
   try {
     await api.deleteSensor(String(id))
     message.value = '传感器已删除'
-    try { await reloadShellLayers('/resources', {}) } catch { /* map refresh optional */ }
+    try { await reloadShellLayers('/resources', {}) } catch { /* 地图刷新失败不影响主流程 */ }
     await load()
   } catch (err) {
     error.value = errMessage(err, '删除失败')
@@ -684,9 +701,32 @@ async function showOnMap() {
         <span class="muted" style="font-size:12px">{{ shellStatus }}</span>
       </div>
 
-    <section v-if="tab === 'types'" class="panel">
-      <h2>传感器类型维护</h2>
-      <p class="muted">管理卫星/无人机/站点等类型的分类编码、属性模板与参数规范，供传感器建模引用。</p>
+    <section v-if="tab === 'capabilities'" class="panel">
+      <h2>观测能力管理</h2>
+      <p class="muted">维护传感器的精度、覆盖范围和状态；点击档案可继续编辑八类资源信息。</p>
+      <table v-table-pager="{ label: '观测能力分页' }" class="table capability-table">
+        <thead><tr><th>资源 / 平台</th><th>精度</th><th>覆盖范围</th><th class="capability-status">状态</th><th class="capability-ops">操作</th></tr></thead>
+        <tbody>
+          <tr v-if="!sensors.length"><td colspan="5" class="muted">暂无传感器资源，请先在资源管理中登记。</td></tr>
+          <tr v-for="sensor in sensors" :key="String(sensor.id)">
+            <td>
+              <div class="capability-resource">
+                <strong>{{ sensor.sensorName || sensor.name || '-' }}</strong>
+                <small>{{ sensorPlatform(sensor).name || sensor.platformId || '-' }}</small>
+              </div>
+            </td>
+            <td>{{ sensor.accuracyPercent ?? '-' }}%</td>
+            <td>{{ sensor.coverageGeoJson || sensor.coverageWkt ? '已配置' : '未配置' }}</td>
+            <td class="capability-status">{{ sensorStatusLabel(sensor.status || sensorPlatform(sensor).status) }}</td>
+            <td class="ops capability-ops"><button class="btn ghost" type="button" @click="openSensorProfile(sensor.id)">编辑档案</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section v-if="tab === 'crud'" class="panel">
+      <h2>传感器资源管理</h2>
+      <p class="muted">登记平台与传感器资源，维护类型、单位、位置、状态和覆盖范围。</p>
       <div>
         <div v-if="typePage === 1">
           <h3>平台类型（{{ platformTypes.length }}）</h3>
@@ -985,6 +1025,18 @@ async function showOnMap() {
 .page > .panel { border-radius: 16px; }
 .form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
 .page .table.resource-summary-table { min-width: 920px; }
+.table-scroll .capability-table { width: 100%; min-width: 0; margin: 0; table-layout: fixed; }
+.capability-table th, .capability-table td { white-space: normal; overflow-wrap: anywhere; }
+.capability-table th:nth-child(1), .capability-table td:nth-child(1) { width: 35%; }
+.capability-table th:nth-child(2), .capability-table td:nth-child(2) { width: 12%; }
+.capability-table th:nth-child(3), .capability-table td:nth-child(3) { width: 17%; }
+.capability-table th:nth-child(4), .capability-table td:nth-child(4) { width: 17%; }
+.capability-table th:nth-child(5), .capability-table td:nth-child(5) { width: 19%; }
+.capability-resource { display: grid; gap: .12rem; min-width: 0; }
+.capability-resource strong { color: #3a3a3c; font-size: 10px; line-height: 1.25; }
+.capability-resource small { color: #6e6e73; font-size: 9px; line-height: 1.25; }
+.capability-table td.capability-ops { display: table-cell; min-width: 0; white-space: normal; }
+.capability-table .capability-ops .btn { width: 100%; max-width: 100%; padding: .3rem .2rem; white-space: nowrap; line-height: 1.2; }
 .profile-page-head { margin-bottom: .55rem; }
 .advanced-entry { margin: .45rem 0; overflow: hidden; border: 1px solid transparent; border-radius: 10px; background: #f6f7f8; }
 .advanced-entry summary { display: flex; align-items: center; justify-content: space-between; gap: .45rem; padding: .55rem .65rem; cursor: pointer; list-style: none; }

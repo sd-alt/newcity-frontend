@@ -89,7 +89,7 @@ export function clearMapDrawings(viewer: Viewer | null) {
     try {
       viewer.dataSources.remove(activeDs, true)
     } catch {
-      /* ignore */
+      /* 忽略异常 */
     }
   }
   activeDs = null

@@ -1,20 +1,17 @@
 ﻿# newcity-frontend
 
-地学传感网前端（Vue 3 + TypeScript + Cesium），严格对齐《系统建设任务清单与工作量表》第一阶段 **34 项**。
+地学传感网前端（Vue 3 + TypeScript + Cesium），严格对齐《系统建设任务清单与工作量表》图1-3的四中心 **22 项**。
 
 当前发布分支为 `main`，前端仓库为 `sd-alt/newcity-frontend`。本地默认通过 Vite 将 `/api` 代理到 `http://127.0.0.1:8001`。
 
-## 34 项入口
+## 22 项入口
 
 | 中心 | 路由 | 页内 Tab | 文档功能项 |
 | --- | --- | --- | --- |
-| 感知指标中心 | `/indicators` | samples / instances / tree / query / versions | 样例维护、实例生成、指标树、查询导出、实例版本（发布/停用/回退 + 定义版本追溯） |
-| 传感资源中心 | `/resources` | types / crud / query / viz | 类型维护、传感器 CRUD、综合查询、可视化 |
-| 观测数据中心 | `/data` | crud / sources / query / viz | 数据 CRUD、多源接入、查询导出、可视化 |
-| 观测规划中心 | `/planning` | tasks / flow / candidates / plans | 任务 CRUD、指标选择、候选筛选、评分解释、基础/优化/增补关联、需求反算、方案管理、结果输出 |
-| 算法处理中心 | `/algorithms` | models / tasks / run / monitor / results | 模型+版本、任务创建、调度执行/终止/重排、过程监控、结果管理 |
-| 综合应用中心 | `/applications` | stats / gis / workbench | 三类统计 + GIS 入口 |
-| GIS 工作台 | `/gis` | `?tab=sensors|data|tasks` | 传感器/数据/任务图层；`?taskId=` 任务定位 |
+| 任务中心 | `/tasks` | task-create / task-manage / modeling / systems / versions | 任务创建、任务管理、指标创建、指标体系管理、指标版本与追溯 |
+| 资源中心 | `/resources/*` | sensors / capabilities / data / algorithms / knowledge | 传感器资源、观测能力、数据建模与接入、观测数据、算法模型与服务、知识管理与应用 |
+| 业务中心 | `/business` | tasks / candidates / evaluation / flow | 需求查询、资源选择、能力评估、资源配置 |
+| 应用中心 | `/application*` | workbench / tasks / gis / progress / stats | 场景主题配置、场景任务发起、GIS 展示、任务进程与成果、场景统计分析 |
 
 ## 关键交互约定
 
@@ -46,7 +43,7 @@ npm run typecheck
 npm run build
 ```
 
-浏览器：登录后从首页 34 项矩阵进入各中心，按 Tab 验收。
+浏览器：登录后从首页 22 项功能矩阵进入各中心，按 Tab 验收。
 
 GIS 综合展示的快速定位可选择首颗卫星或首架无人机。卫星轨迹来自后端活动 TLE/SGP4 推演并显示公里高度；无人机轨迹来自后端位置遥测并显示米制高度。没有轨迹数据的平台只显示登记位置和原因，前端不生成模拟路线。地图详情、图例、聚合和视角规则见 [`docs/四中心与智能任务规划前端说明.md`](docs/四中心与智能任务规划前端说明.md)。
 

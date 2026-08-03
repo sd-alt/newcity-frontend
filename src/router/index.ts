@@ -1,17 +1,18 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import AppLayout from '../components/AppLayout.vue'
-import HomeView from '../pages/HomeView.vue'
-import LoginView from '../pages/LoginView.vue'
-import ResourcesCenter from '../pages/ResourcesCenter.vue'
-import DataCenter from '../pages/DataCenter.vue'
-import PlanningCenter from '../pages/PlanningCenter.vue'
-import AlgorithmsCenter from '../pages/AlgorithmsCenter.vue'
-import ApplicationsCenter from '../pages/ApplicationsCenter.vue'
-import TaskCenterView from '../pages/TaskCenterView.vue'
-import ResourceKnowledgeView from '../pages/ResourceKnowledgeView.vue'
-import BusinessExecutionView from '../pages/BusinessExecutionView.vue'
-import AgentTaskWorkspace from '../pages/AgentTaskWorkspace.vue'
 import { useAuthStore } from '../stores/auth'
+
+const AppLayout = () => import('../components/AppLayout.vue')
+const HomeView = () => import('../pages/HomeView.vue')
+const LoginView = () => import('../pages/LoginView.vue')
+const ResourcesCenter = () => import('../pages/ResourcesCenter.vue')
+const DataCenter = () => import('../pages/DataCenter.vue')
+const PlanningCenter = () => import('../pages/PlanningCenter.vue')
+const AlgorithmsCenter = () => import('../pages/AlgorithmsCenter.vue')
+const ApplicationsCenter = () => import('../pages/ApplicationsCenter.vue')
+const TaskCenterView = () => import('../pages/TaskCenterView.vue')
+const ResourceKnowledgeView = () => import('../pages/ResourceKnowledgeView.vue')
+const BusinessExecutionView = () => import('../pages/BusinessExecutionView.vue')
+const AgentTaskWorkspace = () => import('../pages/AgentTaskWorkspace.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -61,6 +62,14 @@ const router = createRouter({
 })
 
 let bootstrapped = false
+window.addEventListener('newcity:auth-expired', () => {
+  const auth = useAuthStore()
+  auth.user.value = null
+  if (router.currentRoute.value.name !== 'login') {
+    router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
+  }
+})
+
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (bootstrapped === false) {

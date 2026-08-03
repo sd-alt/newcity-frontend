@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
 import type { AssistantAction } from '../api/endpoints'
 import { selectShellFeature } from '../gis/mapShell'
-import { readAiPreferences, saveAiPreferences, type AiPreferences, type AiTaskMode } from '../utils/aiPreferences'
+import {
+  readAiPreferences,
+  saveAiPreferences,
+  type AiPreferences,
+  type AiServiceMode,
+  type AiTaskMode,
+} from '../utils/aiPreferences'
 
 type ChatMessage = {
   id: number
@@ -25,38 +31,70 @@ const assistantStatus = ref<api.AssistantStatusData | null>(null)
 const view = ref<'chat' | 'settings'>('chat')
 const preferences = ref<AiPreferences>(readAiPreferences())
 const settingsMessage = ref('')
+const apiKeyInput = ref('')
+const availableModels = ref<string[]>([])
+const loadingModels = ref(false)
 const unread = ref(false)
 const bodyEl = ref<HTMLElement | null>(null)
+const pendingActions = ref<api.AgentPendingAction[]>([])
+let pendingTimer: number | null = null
+let pendingSignature = ''
 let nextId = 0
 
 const WELCOME =
   '你好，我是系统 AI 助手。你可以用一句话让我创建观测任务、查任务进展、看数据质量或盘点传感资源。'
 
 onMounted(async () => {
+  void refreshPendingActions()
+  pendingTimer = window.setInterval(() => void refreshPendingActions(), 10000)
   messages.value = [{ id: ++nextId, role: 'assistant', text: WELCOME }]
   suggestions.value = ['帮我创建武汉暴雨观测任务', '查看任务列表', '数据质量怎么样', '有哪些传感资源']
   try {
     const res = await api.assistantStatus()
     const d = res.data
     assistantStatus.value = d
-    statusLine.value =
-      d.mode === 'api'
-        ? d.ready
-          ? `外部模型 · ${d.model}`
-          : '外部模型未配置，已回退内置规则'
-        : '内置规则模式 · 无需联网'
+    statusLine.value = preferences.value.serviceMode === 'api'
+      ? d.apiConfigured ? `统一 AI 模型 · ${d.model}` : '统一 AI 模型 · 等待服务器配置'
+      : '内置预设模式 · 不调用模型服务'
   } catch {
     statusLine.value = ''
     assistantStatus.value = null
   }
 })
 
+onUnmounted(() => {
+  if (pendingTimer != null) window.clearInterval(pendingTimer)
+})
+
 function toggle() {
   open.value = !open.value
   if (open.value) {
     unread.value = false
+    void refreshPendingActions()
     void nextTick(scrollBottom)
   }
+}
+
+async function refreshPendingActions() {
+  try {
+    const response = await api.listAgentPendingActions()
+    const next = response.data || []
+    const signature = next.map((item) => `${item.runId}:${item.approvalId}:${item.status}`).join('|')
+    if (signature !== pendingSignature && next.length && !open.value) unread.value = true
+    pendingSignature = signature
+    pendingActions.value = next
+  } catch {
+    pendingActions.value = []
+  }
+}
+
+async function openPendingAction(action: api.AgentPendingAction) {
+  await router.push({ path: '/application/tasks', query: { runId: action.runId, focus: 'human-action' } })
+  open.value = false
+}
+
+function pendingActionLabel(action: api.AgentPendingAction) {
+  return action.actionType === 'input' ? '补充信息' : '查看并确认'
 }
 
 function openView(value: 'chat' | 'settings') {
@@ -70,9 +108,42 @@ function chooseDefaultMode(value: AiTaskMode) {
   preferences.value = { ...preferences.value, defaultTaskMode: value }
 }
 
+function chooseServiceMode(value: AiServiceMode) {
+  preferences.value = { ...preferences.value, serviceMode: value }
+  if (value === 'preset') statusLine.value = '内置预设模式 · 不调用模型服务'
+  else if (assistantStatus.value?.apiConfigured) statusLine.value = `统一 AI 模型 · ${assistantStatus.value.model}`
+  else statusLine.value = '统一 AI 模型 · 等待服务器配置'
+}
+
+async function loadModels() {
+  const apiBase = preferences.value.apiBase.trim()
+  const apiKey = apiKeyInput.value.trim()
+  if (!apiBase || !apiKey) {
+    settingsMessage.value = '请先填写 API 地址和 API Key。'
+    return
+  }
+  loadingModels.value = true
+  settingsMessage.value = ''
+  try {
+    const response = await api.assistantModels({ apiBase, apiKey, model: preferences.value.model.trim() })
+    availableModels.value = response.data.models || []
+    const firstModel = availableModels.value[0]
+    if (!preferences.value.model && firstModel) {
+      preferences.value = { ...preferences.value, model: firstModel }
+    }
+    settingsMessage.value = availableModels.value.length
+      ? `已拉取 ${availableModels.value.length} 个模型。API Key 只保留在当前页面。`
+      : '接口连接成功，但没有返回可用模型。'
+  } catch (err) {
+    settingsMessage.value = err instanceof Error ? `拉取模型失败：${err.message}` : '拉取模型失败，请检查地址和密钥。'
+  } finally {
+    loadingModels.value = false
+  }
+}
+
 function saveSettings() {
   saveAiPreferences(preferences.value)
-  settingsMessage.value = '已保存，并同步到综合感知任务入口。'
+  settingsMessage.value = '已保存。API Key 仅保留在当前页面，不会写入浏览器存储。'
 }
 
 function scrollBottom() {
@@ -83,12 +154,27 @@ function scrollBottom() {
 async function send(text?: string) {
   const msg = (text ?? input.value).trim()
   if (!msg || sending.value) return
+  const hasApiOverride = Boolean(preferences.value.apiBase.trim() || preferences.value.model.trim() || apiKeyInput.value.trim())
+  if (preferences.value.serviceMode === 'api' && hasApiOverride) {
+    if (!preferences.value.apiBase.trim() || !apiKeyInput.value.trim() || !preferences.value.model.trim()) {
+      view.value = 'settings'
+      settingsMessage.value = 'API 模式下请完整填写地址、API Key 和模型，或全部留空使用服务器配置。'
+      return
+    }
+  }
+  const apiConfig = preferences.value.serviceMode === 'api' && hasApiOverride
+    ? {
+        apiBase: preferences.value.apiBase.trim(),
+        apiKey: apiKeyInput.value.trim(),
+        model: preferences.value.model.trim(),
+      }
+    : undefined
   input.value = ''
   messages.value.push({ id: ++nextId, role: 'user', text: msg })
   sending.value = true
   await nextTick(scrollBottom)
   try {
-    const res = await api.assistantChat(msg)
+    const res = await api.assistantChat(msg, preferences.value.serviceMode, apiConfig)
     const d = res.data
     messages.value.push({
       id: ++nextId,
@@ -107,6 +193,7 @@ async function send(text?: string) {
     })
   } finally {
     sending.value = false
+    void refreshPendingActions()
     await nextTick(scrollBottom)
   }
 }
@@ -148,6 +235,15 @@ function actionLabel(action: AssistantAction) {
         </header>
 
         <div v-if="view === 'chat'" ref="bodyEl" class="assistant-body">
+          <div v-if="pendingActions.length" class="assistant-pending-list" aria-live="polite">
+            <article v-for="action in pendingActions" :key="`${action.runId}-${action.approvalId}`" class="assistant-pending-card">
+              <span>{{ action.actionType === 'input' ? '任务待补充' : '任务待确认' }} · {{ action.stageName }}</span>
+              <strong>{{ action.title }}</strong>
+              <p>{{ action.description }}</p>
+              <small>{{ action.taskName }}</small>
+              <button type="button" class="assistant-pending-button" @click="openPendingAction(action)">{{ pendingActionLabel(action) }}</button>
+            </article>
+          </div>
           <div
             v-for="m in messages"
             :key="m.id"
@@ -179,9 +275,50 @@ function actionLabel(action: AssistantAction) {
         <div v-else class="assistant-settings">
           <section class="assistant-service-card">
             <span>当前模型服务</span>
-            <strong>{{ assistantStatus?.model || '状态暂不可用' }}</strong>
-            <p v-if="assistantStatus">{{ assistantStatus.ready ? '服务已就绪' : '服务未就绪，系统会按后端策略回退' }} · {{ assistantStatus.mode === 'api' ? '外部模型' : '内置规则' }}</p>
-            <p v-else>未能读取服务状态，不影响保存本地运行偏好。</p>
+            <strong>{{ preferences.serviceMode === 'api' ? (assistantStatus?.model || '等待服务器配置') : '内置预设规则' }}</strong>
+            <p v-if="assistantStatus && preferences.serviceMode === 'api'">{{ assistantStatus.apiConfigured ? '右下角助手与多 Agent 工作流共用统一模型网关' : '服务器尚未配置统一模型服务' }}</p>
+            <p v-else-if="preferences.serviceMode === 'preset'">本地规则直接处理，不调用模型服务。</p>
+            <p v-else>未能读取模型服务状态，不影响保存本地运行偏好。</p>
+          </section>
+
+          <fieldset class="assistant-setting-group assistant-service-mode-group">
+            <legend>助手运行方式</legend>
+            <button type="button" :class="{ active: preferences.serviceMode === 'preset' }" @click="chooseServiceMode('preset')">
+              <strong>内置预设模式</strong>
+              <small>按系统规则处理，不调用模型服务</small>
+            </button>
+            <button type="button" :class="{ active: preferences.serviceMode === 'api' }" @click="chooseServiceMode('api')">
+              <strong>AI 接入模式</strong>
+              <small>与多 Agent 工作流共用服务器模型</small>
+            </button>
+          </fieldset>
+
+          <section v-if="preferences.serviceMode === 'api'" class="assistant-api-config">
+            <div class="assistant-api-config-title">
+              <strong>当前助手 API 配置</strong>
+              <small>留空时使用服务器默认配置</small>
+            </div>
+            <label class="assistant-config-field">
+              <span>API 地址</span>
+              <input v-model="preferences.apiBase" type="url" placeholder="https://api.example.com/v1" autocomplete="url" />
+            </label>
+            <label class="assistant-config-field">
+              <span>API Key</span>
+              <input v-model="apiKeyInput" type="password" placeholder="仅当前页面有效" autocomplete="new-password" />
+            </label>
+            <div class="assistant-model-row">
+              <label class="assistant-config-field">
+                <span>模型</span>
+                <input v-model="preferences.model" list="assistant-model-options" placeholder="例如 gpt-4o-mini" />
+                <datalist id="assistant-model-options">
+                  <option v-for="model in availableModels" :key="model" :value="model" />
+                </datalist>
+              </label>
+              <button type="button" class="assistant-model-load" :disabled="loadingModels" @click="loadModels">
+                {{ loadingModels ? '拉取中…' : '拉取模型' }}
+              </button>
+            </div>
+            <small class="assistant-api-hint">API Key 只用于当前助手会话和模型拉取，不保存到浏览器或服务器。</small>
           </section>
 
           <fieldset class="assistant-setting-group">
@@ -196,7 +333,7 @@ function actionLabel(action: AssistantAction) {
             <span><strong>显示技术运行记录</strong><small>在任务页展示工具调用、数据来源和耗时</small></span>
           </label>
 
-          <p class="assistant-security-note">模型、服务地址和密钥由服务器环境管理。浏览器只保存以上偏好，不保存 API Key。</p>
+          <p class="assistant-security-note">多 Agent 工作流仍使用服务器配置；本页 API 配置只影响当前 AI 助手，API Key 不会持久化。</p>
           <button type="button" class="assistant-save" @click="saveSettings">保存设置</button>
           <p v-if="settingsMessage" class="assistant-settings-message">{{ settingsMessage }}</p>
         </div>

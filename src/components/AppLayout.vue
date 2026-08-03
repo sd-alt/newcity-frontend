@@ -30,9 +30,13 @@ const route = useRoute()
 const router = useRouter()
 
 const leftOpen = ref(true)
-// right panel state lives in mapShell (shared with map toolbar)
+// 右侧面板状态保存在 mapShell 中，与地图工具栏共享。
 const rightOpen = shellRightOpen
 const leftWidth = ref(window.innerWidth >= 1440 ? 440 : 360)
+watch([leftWidth, leftOpen, rightOpen], ([width, panelOpen, drawerOpen]) => {
+  const reservedWidth = panelOpen || drawerOpen ? width : 0
+  document.documentElement.style.setProperty('--route-workspace-w', `${reservedWidth}px`)
+}, { immediate: true })
 const userMenuOpen = ref(false)
 const searchQ = ref('')
 const searchOpen = ref(false)
@@ -136,14 +140,15 @@ const centers: CenterItem[] = [
     key: 'tasks',
     label: '任务中心',
     short: '任务中心',
-    description: '指标与任务管理',
+    description: '任务与指标管理',
     to: '/tasks',
-    defaultTab: 'systems',
+    defaultTab: 'task-manage',
     children: [
+      { key: 'task-create', label: '任务创建', to: '/tasks', tab: 'task-create' },
+      { key: 'task-manage', label: '任务管理', to: '/tasks', tab: 'task-manage' },
+      { key: 'indicator-create', label: '指标体系建模', to: '/tasks', tab: 'modeling' },
       { key: 'systems', label: '指标体系管理', to: '/tasks', tab: 'systems' },
-      { key: 'modeling', label: '手工指标建模', to: '/tasks', tab: 'modeling' },
-      { key: 'task-systems', label: '任务指标体系', to: '/tasks', tab: 'task-systems' },
-      { key: 'versions', label: '版本与追溯', to: '/tasks', tab: 'versions' },
+      { key: 'versions', label: '指标版本与追溯', to: '/tasks', tab: 'versions' },
     ],
   },
   {
@@ -154,27 +159,30 @@ const centers: CenterItem[] = [
     to: '/resources/sensors',
     defaultTab: 'crud',
     children: [
-      { key: 'sensor-types', label: '传感器类型', to: '/resources/sensors', tab: 'types' },
-      { key: 'sensors', label: '传感器资源', to: '/resources/sensors', tab: 'crud' },
-      { key: 'observations', label: '观测数据库', to: '/resources/data', tab: 'query' },
-      { key: 'data-sources', label: '数据接入', to: '/resources/data', tab: 'sources' },
-      { key: 'algorithms', label: '算法模型与服务', to: '/resources/algorithms', tab: 'models' },
-      { key: 'knowledge', label: '知识库', to: '/resources/knowledge' },
+      { key: 'sensors', label: '传感器资源管理', to: '/resources/sensors', tab: 'crud' },
+      { key: 'capabilities', label: '观测能力管理', to: '/resources/sensors', tab: 'capabilities' },
+      { key: 'data-modeling', label: '数据资源建模与接入', to: '/resources/data', tab: 'sources' },
+      { key: 'observations', label: '观测数据管理', to: '/resources/data', tab: 'query' },
+      { key: 'algorithms', label: '算法模型管理', to: '/resources/algorithms', tab: 'models' },
+      { key: 'algorithm-services', label: '算法服务管理', to: '/resources/algorithms', tab: 'services' },
+      { key: 'knowledge-modeling', label: '知识建模与管理', to: '/resources/knowledge', tab: 'edit' },
+      { key: 'knowledge-use', label: '知识检索与应用', to: '/resources/knowledge', tab: 'search' },
     ],
   },
   {
     key: 'business',
     label: '业务中心',
     short: '业务中心',
-    description: '方案与执行管理',
+    description: '任务处理、资源评估与配置',
     to: '/business',
     defaultTab: 'tasks',
     children: [
-      { key: 'tasks', label: '观测任务管理', to: '/business', tab: 'tasks' },
-      { key: 'flow', label: '查选算评配优验', to: '/business', tab: 'flow' },
-      { key: 'candidates', label: '候选资源与评分', to: '/business', tab: 'candidates' },
-      { key: 'plans', label: '观测方案与评价', to: '/business', tab: 'plans' },
-      { key: 'execution', label: '执行与成果', to: '/business/execution' },
+      { key: 'demand-query', label: '需求查询', to: '/business', tab: 'tasks' },
+      { key: 'execution-trace', label: '过程管理与成果追溯', to: '/business/execution' },
+      { key: 'resource-selection', label: '资源选择', to: '/business', tab: 'candidates' },
+      { key: 'capability-evaluation', label: '能力评估', to: '/business', tab: 'evaluation' },
+      { key: 'resource-configuration', label: '资源配置', to: '/business', tab: 'flow' },
+      { key: 'plan-management', label: '方案管理', to: '/business', tab: 'plans' },
     ],
   },
   {
@@ -185,10 +193,11 @@ const centers: CenterItem[] = [
     to: '/application/tasks',
     defaultTab: 'agent-tasks',
     children: [
+      { key: 'workbench', label: '场景主题配置', to: '/application', tab: 'workbench' },
       { key: 'agent-tasks', label: '场景任务发起', to: '/application/tasks' },
       { key: 'gis', label: 'GIS综合展示', to: '/application', tab: 'gis' },
+      { key: 'progress', label: '任务进程与成果查看', to: '/application/tasks', tab: 'progress' },
       { key: 'stats', label: '场景统计分析', to: '/application', tab: 'stats' },
-      { key: 'workbench', label: '场景与图层配置', to: '/application', tab: 'workbench' },
     ],
   },
 ]
@@ -217,7 +226,8 @@ const sensorProfileId = computed(() =>
 
 const activeSubKey = computed(() => {
   const q = String(route.query.tab || activeCenter.value?.defaultTab || '')
-  const exact = subItems.value.find((s) => s.to === route.path && (s.tab == null || s.tab === q))
+  const exact = subItems.value.find((s) => s.to === route.path && s.tab === q)
+    || subItems.value.find((s) => s.to === route.path && s.tab == null)
   if (exact) return exact.key
   const byPath = subItems.value.find((s) => s.to === route.path)
   if (byPath) return byPath.key
@@ -245,7 +255,7 @@ watch(
       mapToolMessage.value = ''
       mapDrawGeometry.value = null
     } catch {
-      /* optional */
+      /* 可选步骤 */
     }
     await reloadShellLayers(
       route.path,
@@ -594,7 +604,7 @@ async function saveDetailEdit() {
 }
 
 watch(rightOpen, () => {
-  // drawer open/close changes safe area for bubble and toolbar
+  // 抽屉开关会改变气泡和工具栏的安全区域。
   requestAnimationFrame(() => updateShellBubbleScreen())
   setTimeout(() => updateShellBubbleScreen(), 220)
 })
@@ -1010,7 +1020,7 @@ async function doLogout() {
       </div>
     </header>
 
-    <!-- section -->
+    <!-- 区块 -->
     <aside class="left-rail" aria-label="中心导航">
       <div v-for="c in centers" :key="c.key" class="rail-group">
         <button
@@ -1045,7 +1055,7 @@ async function doLogout() {
       </div>
     </aside>
 
-    <!-- section -->
+    <!-- 区块 -->
     <aside v-show="leftOpen && !rightOpen" class="left-panel" :style="{ width: leftWidth + 'px' }">
       <div class="left-panel-head">
         <span>{{ pageLabel }}</span>
@@ -1058,14 +1068,14 @@ async function doLogout() {
       <div class="panel-resizer" title="拖动调整宽度" @mousedown.prevent="onLeftResize" />
     </aside>
 
-    <!-- section -->
+    <!-- 区块 -->
     <main class="map-main">
       <MapBasemap />
       <button v-if="!leftOpen" type="button" class="edge-btn left" @click="toggleLeft">展开</button>
       <!-- 详情入口已并入地图工具栏末项，避免与放大等同列叠压 -->
     </main>
 
-    <!-- section -->
+    <!-- 区块 -->
     <aside class="detail-drawer" :class="{ open: rightOpen }">
       <div class="drawer-head">
         <div>
@@ -1284,10 +1294,10 @@ async function doLogout() {
       </div>
     </aside>
 
-    <!-- AI assistant -->
+    <!-- AI 助手 -->
     <AssistantPanel v-if="user" />
 
-    <!-- Toast notifications -->
+    <!-- Toast 提示 -->
     <Teleport to="body">
       <div class="toast-rack" aria-live="polite">
         <div

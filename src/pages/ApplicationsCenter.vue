@@ -319,7 +319,7 @@ watch(shellSelected, async (v) => {
       )
     }
   } catch {
-    /* map filter optional */
+    /* 地图筛选为可选步骤 */
   }
   message.value =
     "地图选中：" +

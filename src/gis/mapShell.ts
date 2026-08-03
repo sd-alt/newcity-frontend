@@ -13,6 +13,7 @@ import {
   loadSensorLayer,
   loadTaskLayer,
   loadWktFeatureLayer,
+  updateSatelliteViewVisibility,
 } from './mapLayers'
 import { wktToGeoJson } from './wkt'
 import { loadMapConfig, type BasemapKey } from './mapConfig'
@@ -57,7 +58,7 @@ export const shellFilters = reactive({
   showData: true,
   showTasks: true,
   showIndicators: true,
-  /** data layer style: all | points | heat */
+  /** 数据图层样式：all | points | heat。 */
   dataStyle: 'all',
 })
 export type ShellFeatureKind = 'sensor' | 'data' | 'task' | 'indicator' | 'unknown'
@@ -114,6 +115,8 @@ let hasFittedView = false
 let activeShellCenter: ShellCenter = 'home'
 let highlightedEntity: Cesium.Entity | null = null
 let highlightRestore: (() => void) | null = null
+let cameraVisibilityRemove: (() => void) | null = null
+let cameraVisibilityFrame: number | null = null
 
 function asList(payload: unknown): Array<Record<string, unknown>> {
   if (Array.isArray(payload)) return payload as Array<Record<string, unknown>>
@@ -155,16 +158,17 @@ export async function ensureShellViewer(container: HTMLElement): Promise<Viewer>
   try {
     ;(viewer.cesiumWidget.creditContainer as HTMLElement).style.display = 'none'
   } catch {
-    /* ignore */
+    /* 忽略异常 */
   }
   shellViewer.value = viewer
   try {
     // 关闭默认双击缩放，避免与测距/绘面双击结束冲突
     viewer.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK)
   } catch {
-    /* ignore */
+    /* 忽略异常 */
   }
   bindPick(viewer)
+  bindCameraVisibility(viewer)
   flyToChina(viewer)
   shellStatus.value = '底图已加载'
   return viewer
@@ -177,6 +181,12 @@ export function destroyShellViewer() {
   shellBubbleEntity = null
   bubblePostRenderRemove?.()
   bubblePostRenderRemove = null
+  cameraVisibilityRemove?.()
+  cameraVisibilityRemove = null
+  if (cameraVisibilityFrame != null && typeof window !== 'undefined') {
+    window.cancelAnimationFrame(cameraVisibilityFrame)
+  }
+  cameraVisibilityFrame = null
   shellContextMenu.value = null
   pickHandler?.destroy()
   pickHandler = null
@@ -210,6 +220,7 @@ function entityDescription(entity: Cesium.Entity): string {
 export function parseEntityBizId(entityId: string): { kind: ShellFeatureKind; id: string } {
   const raw = String(entityId || '')
   if (raw.startsWith('sensor-cov-')) return { kind: 'sensor', id: raw.slice('sensor-cov-'.length) }
+  if (raw.startsWith('sensor-footprint-')) return { kind: 'sensor', id: raw.slice('sensor-footprint-'.length) }
   if (raw.startsWith('sensor-')) return { kind: 'sensor', id: raw.slice('sensor-'.length) }
   if (raw.startsWith('data-heat-')) return { kind: 'data', id: raw.slice('data-heat-'.length) }
   if (raw.startsWith('data-')) return { kind: 'data', id: raw.slice('data-'.length) }
@@ -222,7 +233,7 @@ function clearHighlight() {
   try {
     highlightRestore?.()
   } catch {
-    /* ignore */
+    /* 忽略异常 */
   }
   highlightRestore = null
   if (highlightedEntity) highlightedEntity = null
@@ -295,7 +306,7 @@ function applyHighlight(entity: Cesium.Entity) {
 function findEntityByBiz(kind: ShellFeatureKind, id: string): Cesium.Entity | null {
   const sid = String(id)
   const candidates: string[] = []
-  if (kind === 'sensor') candidates.push(`sensor-${sid}`, `sensor-cov-${sid}`)
+  if (kind === 'sensor') candidates.push(`sensor-${sid}`, `sensor-cov-${sid}`, `sensor-footprint-${sid}`)
   else if (kind === 'data') candidates.push(`data-${sid}`, `data-heat-${sid}`)
   else if (kind === 'task') candidates.push(`task-${sid}`)
   else if (kind === 'indicator') candidates.push(`indicator-${sid}`)
@@ -317,6 +328,14 @@ function findEntityByBiz(kind: ShellFeatureKind, id: string): Cesium.Entity | nu
   return null
 }
 
+function findEntityById(entityId: string): Cesium.Entity | null {
+  for (const ds of dataSources) {
+    const entity = ds.entities.getById(entityId)
+    if (entity) return entity
+  }
+  return null
+}
+
 
 function getEntityWorldPosition(entity: Cesium.Entity, time = Cesium.JulianDate.now()): Cesium.Cartesian3 | null {
   try {
@@ -325,9 +344,9 @@ function getEntityWorldPosition(entity: Cesium.Entity, time = Cesium.JulianDate.
       if (p) return p
     }
   } catch {
-    /* ignore */
+    /* 忽略异常 */
   }
-  // polygon / polyline: use bounding sphere center via hierarchy samples is heavy; try _position or polygon hierarchy first point
+  // 多边形 / 折线使用层级采样计算包围球中心开销较大，优先尝试 _position 或多边形层级的第一个点。
   try {
     const poly = entity.polygon
     if (poly?.hierarchy) {
@@ -347,7 +366,7 @@ function getEntityWorldPosition(entity: Cesium.Entity, time = Cesium.JulianDate.
       }
     }
   } catch {
-    /* ignore */
+    /* 忽略异常 */
   }
   try {
     const line = entity.polyline
@@ -359,12 +378,12 @@ function getEntityWorldPosition(entity: Cesium.Entity, time = Cesium.JulianDate.
       }
     }
   } catch {
-    /* ignore */
+    /* 忽略异常 */
   }
   return null
 }
 
-/** Project entity world position to canvas pixel coordinates (relative to Cesium canvas). */
+/** 将实体世界坐标投影为画布像素坐标（相对于 Cesium 画布）。 */
 export function projectEntityToScreen(entity: Cesium.Entity): { x: number; y: number } | null {
   const viewer = shellViewer.value
   if (!viewer || viewer.isDestroyed()) return null
@@ -378,8 +397,8 @@ export function projectEntityToScreen(entity: Cesium.Entity): { x: number; y: nu
   )
   if (!windowPos) return null
   if (!Number.isFinite(windowPos.x) || !Number.isFinite(windowPos.y)) return null
-  // Allow slight offscreen; UI will clamp. Far offscreen => hide follow noise.
-  // Keep projecting during camera fly; UI clamps bubble into host.
+  // 允许目标略微出屏，由界面负责限制位置；距离过远时隐藏跟随气泡，避免产生噪声。
+  // 相机飞行期间继续投影，由界面将气泡限制在容器内。
   if (
     windowPos.x < -400 ||
     windowPos.y < -400 ||
@@ -410,10 +429,34 @@ function ensureBubbleFollow(viewer: Viewer) {
     try {
       viewer.scene.postRender.removeEventListener(cb)
     } catch {
-      /* ignore */
+    /* 忽略异常 */
     }
     bubblePostRenderRemove = null
   }
+}
+
+function scheduleSatelliteVisibility(viewer: Viewer) {
+  if (cameraVisibilityFrame != null) return
+  const run = () => {
+    cameraVisibilityFrame = null
+    updateSatelliteViewVisibility(viewer)
+  }
+  if (typeof window !== 'undefined') cameraVisibilityFrame = window.requestAnimationFrame(run)
+  else run()
+}
+
+function bindCameraVisibility(viewer: Viewer) {
+  cameraVisibilityRemove?.()
+  cameraVisibilityRemove = null
+  try {
+    viewer.camera.percentageChanged = 0.05
+    const onChanged = () => scheduleSatelliteVisibility(viewer)
+    viewer.camera.changed.addEventListener(onChanged)
+    cameraVisibilityRemove = () => viewer.camera.changed.removeEventListener(onChanged)
+  } catch {
+    /* 忽略异常 */
+  }
+  updateSatelliteViewVisibility(viewer)
 }
 
 function selectFromEntity(
@@ -439,7 +482,7 @@ function selectFromEntity(
     spatial: spatialLine ? stripLabel(spatialLine) || spatialLine : '',
     relations: relationLines.join('\n') || description,
   }
-  // Always prefer entity projected position so bubble anchors to the feature
+  // 始终优先使用实体投影位置，让气泡锚定到要素。
   const projected = projectEntityToScreen(entity)
   if (projected) {
     shellPickScreen.value = projected
@@ -558,9 +601,9 @@ function bindPick(viewer: Viewer) {
       clearHighlight()
       return
     }
-    // pass click as fallback; projection to entity point preferred inside selectFromEntity
+    // 将点击位置作为兜底传入；selectFromEntity 内部优先投影到实体点位。
     selectFromEntity(entity, { x: movement.position.x, y: movement.position.y }, true)
-    // next frame re-anchor to true entity screen position
+    // 下一帧重新锚定到实体真实屏幕位置。
     requestAnimationFrame(() => updateShellBubbleScreen())
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
 
@@ -574,16 +617,16 @@ function bindPick(viewer: Viewer) {
   try {
     viewer.scene.canvas.addEventListener('contextmenu', (e) => e.preventDefault())
   } catch {
-    /* ignore */
+    /* 忽略异常 */
   }
 }
 
 
-/** Ensure target kind is loaded/visible on map. Always refresh on force. */
+/** 确保目标类型已加载并在地图上可见；强制模式下始终刷新。 */
 async function ensureFeatureOnMap(kind: ShellFeatureKind, forceRefresh = false): Promise<void> {
   if (kind === 'sensor') {
     setShellVisibility({ showSensors: true })
-    // Locate from list should not be blocked by left-panel filters.
+    // 从列表定位时不应受到左侧面板筛选条件阻挡。
     shellFilters.sensorType = ''
     shellFilters.sensorStatus = ''
     if (forceRefresh || !cacheSensors.length) {
@@ -591,7 +634,7 @@ async function ensureFeatureOnMap(kind: ShellFeatureKind, forceRefresh = false):
         const res = await api.getSensorGis()
         cacheSensors = asList((res.data as { features?: unknown })?.features ?? res.data)
       } catch {
-        /* ignore */
+    /* 忽略异常 */
       }
     }
   } else if (kind === 'data') {
@@ -604,7 +647,7 @@ async function ensureFeatureOnMap(kind: ShellFeatureKind, forceRefresh = false):
         const res = await api.getDataGis()
         cacheData = asList((res.data as { features?: unknown })?.features ?? res.data)
       } catch {
-        /* ignore */
+    /* 忽略异常 */
       }
     }
   } else if (kind === 'task') {
@@ -616,7 +659,7 @@ async function ensureFeatureOnMap(kind: ShellFeatureKind, forceRefresh = false):
         const res = await api.getTaskGis()
         cacheTasks = asList((res.data as { features?: unknown })?.features ?? res.data)
       } catch {
-        /* ignore */
+    /* 忽略异常 */
       }
     }
   } else if (kind === 'indicator') {
@@ -628,7 +671,7 @@ async function ensureFeatureOnMap(kind: ShellFeatureKind, forceRefresh = false):
           String(r.spatialWkt || r.geometryWkt || '').trim(),
         )
       } catch {
-        /* ignore */
+    /* 忽略异常 */
       }
     }
   } else {
@@ -637,7 +680,7 @@ async function ensureFeatureOnMap(kind: ShellFeatureKind, forceRefresh = false):
   await rerenderShellLayers(false)
 }
 
-/** List/search -> map: fly, highlight, bubble, detail */
+/** 列表/搜索到地图：飞行定位、高亮、气泡和详情。 */
 export async function selectShellFeature(
   kind: ShellFeatureKind,
   id: string | number,
@@ -647,7 +690,7 @@ export async function selectShellFeature(
   if (!viewer || viewer.isDestroyed()) return false
   const sid = String(id)
 
-  // Always surface the target layer first so list/map selection is visible.
+  // 始终先显示目标图层，确保列表和地图的选中状态可见。
   if (kind === 'sensor') setShellVisibility({ showSensors: true })
   else if (kind === 'data') setShellVisibility({ showData: true })
   else if (kind === 'task') setShellVisibility({ showTasks: true })
@@ -655,13 +698,13 @@ export async function selectShellFeature(
 
   let entity = findEntityByBiz(kind, sid)
 
-  // Soft ensure: show layer and render from existing cache first.
+  // 软加载：先显示图层，并优先使用现有缓存渲染。
   if (!entity && kind !== 'unknown') {
     await ensureFeatureOnMap(kind, false)
     entity = findEntityByBiz(kind, sid)
   }
 
-  // Hard ensure: always re-fetch GIS when still missing (stale cache / wrong center).
+  // 强加载：仍未找到目标时重新请求 GIS 数据，处理缓存过期或中心错误。
   if (!entity && kind !== 'unknown') {
     await ensureFeatureOnMap(kind, true)
     entity = findEntityByBiz(kind, sid)
@@ -708,7 +751,7 @@ export async function selectShellFeature(
   }
 
   const openBubble = options?.openBubble !== false
-  // Highlight first without depending on stale camera
+  // 先高亮目标，不依赖过期的相机状态。
   selectFromEntity(entity, null, openBubble)
   if (options?.fly !== false) {
     try {
@@ -717,6 +760,10 @@ export async function selectShellFeature(
         : null
       const typeCode = String(sensor?.typeCode || '').toLowerCase()
       const isUav = typeCode.includes('uav') || typeCode.includes('drone') || typeCode.includes('无人机')
+      const focusEntity = typeCode === 'satellite'
+        ? findEntityById(`sensor-footprint-${sid}`) || findEntityById(`sensor-cov-${sid}`) || entity
+        : entity
+      if (typeCode === 'satellite' && focusEntity !== entity) shellBubbleEntity = focusEntity
       const position = entity.position?.getValue(viewer.clock.currentTime)
       if (isUav && position) {
         const cartographic = Cesium.Cartographic.fromCartesian(position)
@@ -734,15 +781,15 @@ export async function selectShellFeature(
           duration: 0.9,
         })
       } else {
-        await viewer.flyTo(entity, { duration: 0.9 })
+        await viewer.flyTo(focusEntity, { duration: 0.9 })
       }
     } catch {
-      /* ignore */
+    /* 忽略异常 */
     }
-    // After fly, re-project bubble onto the feature point
+    // 飞行结束后，将气泡重新投影到要素点位。
     requestAnimationFrame(() => {
       updateShellBubbleScreen()
-      // second tick after render
+      // 渲染完成后的第二个时机。
       setTimeout(() => updateShellBubbleScreen(), 50)
       setTimeout(() => updateShellBubbleScreen(), 200)
       setTimeout(() => updateShellBubbleScreen(), 500)
@@ -835,7 +882,7 @@ async function clearSources(viewer: Viewer) {
     try {
       viewer.dataSources.remove(ds, true)
     } catch {
-      /* ignore */
+    /* 忽略异常 */
     }
   }
 }
@@ -865,6 +912,8 @@ function applyVisibility() {
     else if (name.startsWith('planning-') || name.includes('coverage') || name.includes('gap')) ds.show = activeShellCenter === 'planning'
     else ds.show = true
   }
+  const viewer = shellViewer.value
+  if (viewer && !viewer.isDestroyed()) viewer.scene.requestRender()
 }
 
 function hasDataSource(name: string) {
@@ -1171,6 +1220,7 @@ export async function reloadShellLayers(
     if (gen !== reloadGeneration) return
     recomputeAlerts()
     applyVisibility()
+    updateSatelliteViewVisibility(viewer)
     if (!hasFittedView) {
       await flyToDataSources(viewer)
       if (gen !== reloadGeneration) return
@@ -1236,6 +1286,7 @@ export async function rerenderShellLayers(fitView = true) {
     shellCounts.indicators = cacheIndicators.length
   }
   applyVisibility()
+  updateSatelliteViewVisibility(viewer)
   if (fitView) await flyToDataSources(viewer)
 }
 
@@ -1275,9 +1326,11 @@ export async function clearDataTimeWindow(options?: { fit?: boolean }) {
 export function setShellVisibility(partial: Partial<typeof shellFilters>) {
   Object.assign(shellFilters, partial)
   applyVisibility()
+  const viewer = shellViewer.value
+  if (viewer && !viewer.isDestroyed()) updateSatelliteViewVisibility(viewer)
 }
 
-/** Update layer visibility and/or attribute filters, then optionally re-render features. */
+/** 更新图层可见性和属性筛选，并按需重新渲染要素。 */
 export async function patchShellFilters(
   partial: Partial<typeof shellFilters>,
   options?: { fit?: boolean; rerender?: boolean },
@@ -1341,7 +1394,7 @@ export async function setShellBasemap(key: BasemapKey) {
 export type ShellLayerMode = 'sensors' | 'data' | 'tasks' | 'all'
 
 export async function focusShellMode(mode: ShellLayerMode, path = '/applications') {
-  // 先按路由装载缓存图层，再强制可见性（避免被 center 默认上图策略覆盖）
+    // 先按路由装载缓存图层，再强制可见性（避免被中心区域默认上图策略覆盖）。
   await reloadShellLayers(path, {})
   if (mode === 'sensors') {
     setShellVisibility({ showSensors: true, showData: false, showTasks: false, showIndicators: false })
@@ -1462,7 +1515,7 @@ export async function showShellAndFit(mode: ShellLayerMode, path: string) {
   void fitShellView()
 }
 
-// ---------- planning association map story ----------
+// ---------- 规划关联地图业务链路 ----------
 
 export type AssocLinkMode = 'candidate' | 'basic' | 'optimized' | 'supplement'
 
@@ -1524,7 +1577,7 @@ async function removeDataSourceByName(name: string) {
       try {
         viewer.dataSources.remove(ds, true)
       } catch {
-        /* ignore */
+    /* 忽略异常 */
       }
     } else {
       keep.push(ds)
@@ -1543,15 +1596,15 @@ async function removeDataSourceByName(name: string) {
       try {
         viewer.dataSources.remove(ds as never, true)
       } catch {
-        /* ignore */
+    /* 忽略异常 */
       }
     }
   } catch {
-    /* ignore */
+    /* 忽略异常 */
   }
 }
 
-/** Planning workspace: tasks + sensors visible together */
+/** 规划工作区：同时显示任务和传感资源。 */
 export async function showPlanningWorkspace(path = '/planning') {
   await reloadShellLayers(path, {})
   setShellVisibility({ showSensors: true, showData: false, showTasks: true })
@@ -1559,7 +1612,7 @@ export async function showPlanningWorkspace(path = '/planning') {
   shellStatus.value = `规划工作台：任务 ${shellCounts.tasks} · 传感资源 ${shellCounts.sensors}`
 }
 
-/** Indicators workspace: instance ranges only */
+/** 指标工作区：仅显示指标实例范围。 */
 export async function showIndicatorsWorkspace(path = '/indicators') {
   if (!cacheIndicators.length) {
     await reloadShellLayers(path, {})
@@ -1767,8 +1820,8 @@ export async function clearAssociationLinks() {
 }
 
 /**
- * Draw task-sensor association lines on the map.
- * mode: candidate(gray) / basic(blue) / optimized(green) / supplement(orange)
+ * 在地图上绘制任务与传感器的关联连线。
+ * 模式：候选（灰色）/ 基础（蓝色）/ 优化（绿色）/ 补充（橙色）。
  */
 export async function drawAssociationLinks(
   taskId: string | number,
@@ -1793,7 +1846,7 @@ export async function drawAssociationLinks(
         cacheTasks = asList((tRes.data as { features?: unknown })?.features ?? tRes.data)
       }
     } catch {
-      /* keep existing cache */
+      /* 保留现有缓存 */
     }
     shellFilters.sensorType = ''
     shellFilters.sensorStatus = ''
@@ -1828,12 +1881,12 @@ export async function drawAssociationLinks(
   for (const link of links) {
     let to = sensorLonLat(link.platformId)
     if (!to) {
-      // one more chance after soft ensure
+      // 软加载后再尝试一次。
       try {
         const res = await api.getSensorGis()
         cacheSensors = asList((res.data as { features?: unknown })?.features ?? res.data)
       } catch {
-        /* ignore */
+    /* 忽略异常 */
       }
       to = sensorLonLat(link.platformId)
     }
@@ -1876,7 +1929,7 @@ export async function drawAssociationLinks(
   return drawn.length
 }
 
-/** Focus offline/fault sensors for home alerts */
+/** 聚焦离线或故障传感器，用于首页告警。 */
 export async function focusAlertSensors() {
   await reloadShellLayers('/resources', {})
   setShellVisibility({ showSensors: true, showData: false, showTasks: false })
@@ -1884,7 +1937,7 @@ export async function focusAlertSensors() {
   shellStatus.value = `告警关注：离线 ${shellAlerts.offlineSensors} · 故障/维护 ${shellAlerts.faultSensors}`
 }
 
-/** Show data layer for quality attention */
+/** 显示数据图层，用于查看质量问题。 */
 export async function focusAnomalousData() {
   await showShellAndFit('data', '/data')
   shellStatus.value = `数据质量关注：异常 ${shellAlerts.anomalousData} · 已上图数据 ${shellCounts.data}`
@@ -1908,7 +1961,7 @@ export async function copyTextToClipboard(text: string) {
       return true
     }
   } catch {
-    /* fallthrough */
+    /* 继续执行后续分支 */
   }
   shellStatus.value = '复制失败，请手动复制'
   return false

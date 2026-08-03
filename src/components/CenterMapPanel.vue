@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * Lightweight status strip for centers.
- * Does NOT create a Cesium viewer — the full-screen basemap lives in AppLayout/MapBasemap.
+ * 四中心状态条。
+ * 此组件不创建 Cesium viewer；全屏底图由 AppLayout/MapBasemap 提供。
  */
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'

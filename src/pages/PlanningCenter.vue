@@ -56,24 +56,16 @@ const STEP_ORDER: StepKey[] = [
   'evaluate',
   'output',
 ]
-const STEPS: { key: StepKey; title: string; desc: string }[] = [
-  { key: 'create', title: '1. 创建任务', desc: '任务建模 + 指标选择' },
-  { key: 'submit', title: '2. 提交任务', desc: '进入可关联状态' },
-  { key: 'reverse', title: '3. 需求反算', desc: '反算所需传感器类型/数量' },
-  { key: 'candidates', title: '4. 候选与评分', desc: '筛选候选并展示评分依据' },
-  { key: 'basic', title: '5. 基础关联', desc: '建立初步关联' },
-  { key: 'optimize', title: '6. 优化关联', desc: '优化资源组合' },
-  { key: 'supplement', title: '7. 增补关联', desc: '补足覆盖不足' },
-  { key: 'evaluate', title: '8. 满足度评估', desc: '关联后覆盖/精度核查' },
-  { key: 'output', title: '9. 规划输出', desc: '生成输出方案' },
-]
-const PIPELINE_PHASES: { key: string; label: string; steps: StepKey[]; result?: boolean }[] = [
-  { key: 'requirement', label: '需求', steps: ['create'] },
-  { key: 'indicator', label: '指标', steps: ['submit'] },
-  { key: 'resource', label: '资源', steps: ['reverse', 'candidates'] },
-  { key: 'planning', label: '规划', steps: ['basic', 'optimize', 'supplement', 'evaluate'] },
-  { key: 'execution', label: '执行', steps: ['output'] },
-  { key: 'result', label: '成果', steps: [], result: true },
+const STEPS: { key: StepKey; title: string; shortTitle: string; desc: string }[] = [
+  { key: 'create', title: '1. 创建任务', shortTitle: '创建', desc: '任务建模 + 指标选择' },
+  { key: 'submit', title: '2. 提交任务', shortTitle: '提交', desc: '进入可关联状态' },
+  { key: 'reverse', title: '3. 需求反算', shortTitle: '反算', desc: '反算所需传感器类型/数量' },
+  { key: 'candidates', title: '4. 候选与评分', shortTitle: '候选', desc: '筛选候选并展示评分依据' },
+  { key: 'basic', title: '5. 基础关联', shortTitle: '基础', desc: '建立初步关联' },
+  { key: 'optimize', title: '6. 优化关联', shortTitle: '优化', desc: '优化资源组合' },
+  { key: 'supplement', title: '7. 增补关联', shortTitle: '增补', desc: '补足覆盖不足' },
+  { key: 'evaluate', title: '8. 满足度评估', shortTitle: '评估', desc: '关联后覆盖/精度核查' },
+  { key: 'output', title: '9. 规划输出', shortTitle: '输出', desc: '生成输出方案' },
 ]
 const evaluationGuideSteps = [
   { title: '先看是否满足', detail: '“指标满足”回答当前方案能不能完成任务。未满足时先不要输出方案。' },
@@ -86,11 +78,39 @@ const router = useRouter()
 const route = useRoute()
 const tab = ref('tasks')
 const tabs = [
-  { key: 'tasks', label: '任务建模' },
-  { key: 'flow', label: '需求与关联' },
-  { key: 'candidates', label: '候选与评分' },
+  { key: 'tasks', label: '需求查询' },
+  { key: 'candidates', label: '资源选择' },
+  { key: 'evaluation', label: '能力评估' },
+  { key: 'flow', label: '资源配置' },
   { key: 'plans', label: '方案管理' },
 ]
+type BusinessRouteKey = 'tasks' | 'candidates' | 'evaluation' | 'flow' | 'plans'
+const BUSINESS_ROUTE_STEPS: Array<{ key: BusinessRouteKey; label: string; description: string }> = [
+  { key: 'tasks', label: '需求', description: '需求查询 · 确认任务目标' },
+  { key: 'candidates', label: '资源', description: '资源选择 · 筛选候选资源' },
+  { key: 'evaluation', label: '评估', description: '能力评估 · 比较任务满足度' },
+  { key: 'flow', label: '配置', description: '资源配置 · 组合观测方案' },
+  { key: 'plans', label: '方案', description: '方案管理 · 确认并输出方案' },
+]
+const businessRouteSteps = computed(() => {
+  const currentKey = tabs.some((item) => item.key === tab.value) ? tab.value as BusinessRouteKey : 'tasks'
+  return BUSINESS_ROUTE_STEPS.map((step, index) => {
+    const done = step.key === 'tasks'
+      ? taskId.value != null && (doneSteps.value.has('submit') || doneSteps.value.has('reverse'))
+      : step.key === 'candidates'
+        ? doneSteps.value.has('candidates')
+        : step.key === 'evaluation'
+          ? doneSteps.value.has('evaluate') || Boolean(evalResult.value)
+          : step.key === 'flow'
+            ? doneSteps.value.has('output')
+            : doneSteps.value.has('output')
+    return {
+      ...step,
+      number: index + 1,
+      state: step.key === currentKey ? 'current' : done ? 'done' : 'pending',
+    }
+  })
+})
 const flowFormPage = ref(1)
 const flowFormPages = ['任务与时间', '指标与尺度', '空间与约束', '评分权重']
 const planSectionPage = ref(1)
@@ -220,14 +240,14 @@ const unlockedStepIndex = computed(() => {
 const currentStepInfo = computed(() => STEPS[stepIndex.value] || STEPS[0])
 const previousStep = computed(() => stepIndex.value > 0 ? STEPS[stepIndex.value - 1] : null)
 const nextStep = computed(() => stepIndex.value < STEPS.length - 1 ? STEPS[stepIndex.value + 1] : null)
-const pipelinePhases = computed(() => PIPELINE_PHASES.map((phase) => {
-  const complete = phase.result
-    ? doneSteps.value.has('output')
-    : phase.steps.length > 0 && phase.steps.every((step) => doneSteps.value.has(step))
+const pipelineSteps = computed(() => STEPS.map((step) => {
+  const complete = doneSteps.value.has(step.key)
   const activeStep = STEP_ORDER[unlockedStepIndex.value]
-  const current = !complete && !phase.result && activeStep != null && phase.steps.includes(activeStep)
+  const current = !complete && step.key === activeStep
   return {
-    ...phase,
+    key: step.key,
+    title: step.title,
+    label: step.shortTitle,
     state: complete ? 'done' : current ? 'current' : 'pending',
     status: complete ? '已完成' : current ? '进行中' : '待开始',
   }
@@ -275,6 +295,23 @@ const relationRows = computed(() => evaluationSummary.value?.relations || [])
 const relationPageCount = computed(() => Math.max(1, Math.ceil(relationRows.value.length / relationPageSize)))
 const pagedRelations = computed(() => relationRows.value.slice((relationPage.value - 1) * relationPageSize, relationPage.value * relationPageSize))
 const relationPageLabels = computed(() => Array.from({ length: relationPageCount.value }, (_, index) => `资源关系第 ${index + 1} 页`))
+const candidatePage = ref(1)
+const excludedPage = ref(1)
+const candidatePageSize = 4
+const excludedPageSize = 4
+const candidatePageCount = computed(() => Math.max(1, Math.ceil(candidateRows.value.length / candidatePageSize)))
+const excludedPageCount = computed(() => Math.max(1, Math.ceil(excludedRows.value.length / excludedPageSize)))
+const pagedCandidateRows = computed(() => candidateRows.value.slice((candidatePage.value - 1) * candidatePageSize, candidatePage.value * candidatePageSize))
+const pagedExcludedRows = computed(() => excludedRows.value.slice((excludedPage.value - 1) * excludedPageSize, excludedPage.value * excludedPageSize))
+const candidatePageLabels = computed(() => Array.from({ length: candidatePageCount.value }, (_, index) => `候选资源第 ${index + 1} 页`))
+const excludedPageLabels = computed(() => Array.from({ length: excludedPageCount.value }, (_, index) => `排除资源第 ${index + 1} 页`))
+const CANDIDATE_DIMENSIONS = [
+  { key: 'theme', label: '主题' },
+  { key: 'space', label: '空间' },
+  { key: 'time', label: '时间' },
+  { key: 'capability', label: '能力' },
+  { key: 'reliability', label: '可靠' },
+] as const
 
 function evaluationCoverage(value: unknown) {
   const raw = value as Record<string, unknown> | null
@@ -313,9 +350,16 @@ async function setTab(key: string) {
     q[k] = Array.isArray(v) ? String(v[0] ?? '') : String(v)
   }
   q.tab = key
-  // keep current task id in URL for refresh / map jump
+  // 刷新或地图跳转时，保留当前任务 ID 在 URL 中。
   if (taskId.value != null) q.taskId = String(taskId.value)
   await router.replace({ path: route.path, query: q })
+}
+async function goBusinessRoute(key: BusinessRouteKey) {
+  await setTab(key)
+}
+async function openEvaluationFlow() {
+  currentStep.value = 'evaluate'
+  await setTab('flow')
 }
 function syncTab() {
   const t = route.query.tab
@@ -546,7 +590,7 @@ async function createTask() {
   pending.value = true
   error.value = null
   message.value = null
-  try { await showPlanningWorkspace('/planning') } catch { /* map refresh optional */ }
+  try { await showPlanningWorkspace('/planning') } catch { /* 地图刷新失败不影响主流程 */ }
   try {
     const created = await api.createTask({
       name: taskName.value,
@@ -566,10 +610,10 @@ async function createTask() {
     advanceTo('submit')
     message.value = '任务草稿已保存，请绘制任务区域并完成观测配置'
     await setTab('flow')
-    try { await showPlanningWorkspace('/planning') } catch { /* map refresh optional */ }
+    try { await showPlanningWorkspace('/planning') } catch { /* 地图刷新失败不影响主流程 */ }
     try {
       await selectShellFeature('task', String(data.id), { openBubble: false, fly: true })
-    } catch { /* map optional */ }
+    } catch { /* 地图操作为可选步骤 */ }
     await loadLists()
   } catch (err) {
     error.value = errMessage(err, '创建任务失败')
@@ -712,7 +756,7 @@ async function confirmCandidates() {
     }
     await setTab('flow')
     message.value = '候选筛选与评分已确认，可进行基础关联'
-    try { await showCandidatesOnMap() } catch { /* map optional */ }
+    try { await showCandidatesOnMap() } catch { /* 地图操作为可选步骤 */ }
   } catch (err) {
     error.value = errMessage(err, '候选确认失败')
   } finally {
@@ -737,7 +781,7 @@ async function basicAssociation() {
       try {
         const res = await api.getAssociationResult(String(planRow.id))
         planResult.value = res.data
-      } catch { /* optional */ }
+      } catch { /* 可选步骤 */ }
     }
     await showAssociationOnMap('basic')
     await loadCandidates(false)
@@ -770,7 +814,7 @@ async function optimizeAssociation() {
       try {
         const ar = await api.getAssociationResult(String(planRow.id))
         planResult.value = ar.data
-      } catch { /* optional */ }
+      } catch { /* 可选步骤 */ }
     }
     await showAssociationOnMap('optimized')
     await loadCandidates(false)
@@ -791,7 +835,7 @@ async function supplementAssociation() {
     // 增补：优先 after.resourceIds（优化入选+增补），否则 added+opt
     const built = buildLinksFromOptPayload(res.data, 'supplement')
     if (!built.length && lastOptLinks.value.length) {
-      // fallback merge opt + added ids from payload
+      // 兜底合并 payload 中的优化资源 ID 和增补资源 ID。
       const root = asRec(res.data)
       const results = Array.isArray(root.results) ? (root.results as Record<string, unknown>[]) : []
       const added = new Set<string>()
@@ -831,13 +875,27 @@ async function supplementAssociation() {
       try {
         const ar = await api.getAssociationResult(String(planRow.id))
         planResult.value = ar.data
-      } catch { /* optional */ }
+      } catch { /* 可选步骤 */ }
     }
     await showAssociationOnMap('supplement')
   } catch (err) {
     error.value = errMessage(err, '增补关联失败')
   } finally {
     pending.value = false
+  }
+}
+
+async function loadEvaluationResult() {
+  if (taskId.value == null) {
+    evalResult.value = null
+    return
+  }
+  try {
+    const res = await api.requirementEvaluation(taskId.value)
+    evalResult.value = res.data
+  } catch {
+    // 能力评估入口只读取已有结果；评估尚未执行时保持空态，不提前触发计算。
+    evalResult.value = null
   }
 }
 
@@ -856,7 +914,7 @@ async function requirementEvaluation() {
         gapWkt: String(oc.gapWkt || ''),
         fit: true,
       })
-    } catch { /* map optional */ }
+    } catch { /* 地图操作为可选步骤 */ }
     markDone('evaluate')
     advanceTo('output')
     await setTab('flow')
@@ -890,7 +948,7 @@ async function planningOutput() {
         gapWkt: String(data.summary?.overall?.gapWkt || ''),
         fit: true,
       })
-    } catch { /* map optional */ }
+    } catch { /* 地图操作为可选步骤 */ }
     markDone('output')
     message.value = '规划输出已生成'
     await loadLists()
@@ -1081,7 +1139,7 @@ async function selectTask(id: unknown) {
             const rm = planObj.resourceMatches || data.resourceMatches
             hasMatches = Array.isArray(rm) && rm.length > 0
           } catch {
-            /* optional */
+            /* 可选步骤 */
           }
         } else if (taskPlans[0]) {
           planResult.value = taskPlans[0] as Record<string, unknown>
@@ -1117,7 +1175,7 @@ async function removeTask(id: unknown) {
     await api.deleteTask(String(id))
     if (taskId.value != null && String(taskId.value) === String(id)) await resetForm()
     message.value = '任务已删除'
-    try { await showPlanningWorkspace('/planning') } catch { /* map refresh optional */ }
+    try { await showPlanningWorkspace('/planning') } catch { /* 地图刷新失败不影响主流程 */ }
     await loadLists()
   } catch (err) {
     error.value = errMessage(err, '删除任务失败')
@@ -1169,7 +1227,7 @@ async function resetForm() {
   wTime.value = 0.2
   wCapability.value = 0.2
   wReliability.value = 0.2
-  // clear taskId from URL so map jump / watch does not re-select
+  // 清理 URL 中的 taskId，避免地图跳转或监听逻辑重复选中任务。
   const q: Record<string, string> = {}
   for (const [k, v] of Object.entries(route.query)) {
     if (v == null || k === 'taskId') continue
@@ -1193,7 +1251,7 @@ async function loadPlanResult(planId: unknown, opts?: { silent?: boolean }) {
     try {
       await showPlanningWorkspace('/planning')
     } catch {
-      /* map optional */
+      /* 地图操作为可选步骤 */
     }
     const planObj = (planResult.value as Record<string, unknown> | null) || {}
     const nested = (planObj.plan as Record<string, unknown> | undefined) || {}
@@ -1212,7 +1270,7 @@ async function loadPlanResult(planId: unknown, opts?: { silent?: boolean }) {
         await selectShellFeature('task', String(taskId.value), { openBubble: false, fly: true })
       }
     } catch {
-      /* map optional */
+      /* 地图操作为可选步骤 */
     }
     const modeLabel = mode === 'basic' ? '基础' : mode === 'optimized' ? '优化' : '增补'
     if (!opts?.silent) {
@@ -1267,7 +1325,7 @@ async function doPublishPlan(planId: unknown, status?: unknown) {
   try {
     await api.publishPlan(String(planId))
     await loadLists()
-    try { await loadPlanResult(planId, { silent: true }) } catch { /* map optional */ }
+    try { await loadPlanResult(planId, { silent: true }) } catch { /* 地图操作为可选步骤 */ }
     message.value = '方案 #' + planId + ' 已发布，已同步地图关联'
   } catch (err) {
     error.value = errMessage(err, '方案发布失败')
@@ -1314,7 +1372,7 @@ async function doCopyPlan(planId: unknown) {
       try {
         await loadPlanResult(newId, { silent: true })
       } catch {
-        /* map optional */
+        /* 地图操作为可选步骤 */
       }
     }
     message.value =
@@ -1341,7 +1399,7 @@ async function doApprovePlan(planId: unknown, status?: unknown) {
   try {
     await api.approvePlan(String(planId))
     await loadLists()
-    try { await loadPlanResult(planId, { silent: true }) } catch { /* map optional */ }
+    try { await loadPlanResult(planId, { silent: true }) } catch { /* 地图操作为可选步骤 */ }
     message.value = '方案 #' + planId + ' 已审核通过，可继续发布；已同步地图关联'
   } catch (err) {
     error.value = errMessage(err, '审核失败')
@@ -1487,6 +1545,13 @@ function explainOf(c: Record<string, unknown>) {
   return '-'
 }
 
+function reasonListOf(c: Record<string, unknown>) {
+  const value = c.reasons ?? c.reason ?? c.explanation
+  if (Array.isArray(value) && value.length) return value.map(String)
+  if (typeof value === 'string' && value.trim()) return [value]
+  return ['未通过当前硬约束']
+}
+
 function dimScore(c: Record<string, unknown>, key: string) {
   const direct = pickScores(c)
   if (direct && direct[key] != null) return direct[key]
@@ -1551,13 +1616,13 @@ async function applyRouteTaskQuery() {
   if (raw == null || raw === '') return
   const id = Number(Array.isArray(raw) ? raw[0] : raw)
   if (!Number.isFinite(id)) return
-  // avoid re-entry when setTab writes the same taskId
+  // setTab 写入相同 taskId 时，避免重复进入处理逻辑。
   if (taskId.value === id && taskStatus.value) return
   try {
     await selectTask(id)
     message.value = '已根据地图跳转载入任务 #' + id
   } catch {
-    /* optional */
+    /* 可选步骤 */
   }
 }
 
@@ -1565,7 +1630,7 @@ function applyRouteCoordHint() {
   const lon = Number(Array.isArray(route.query.lon) ? route.query.lon[0] : route.query.lon)
   const lat = Number(Array.isArray(route.query.lat) ? route.query.lat[0] : route.query.lat)
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) return
-  // seed a small study area if empty so user can create task near map click
+  // 研究区为空时初始化一个小范围，便于用户在地图附近创建任务。
   if (!researchAreaGeoJson.value) {
     const d = 0.08
     researchAreaGeoJson.value = {
@@ -1603,9 +1668,19 @@ watch(() => route.query.tab, () => {
   if (tab.value === 'candidates' && taskId.value != null) {
     void loadCandidates(false, false)
   }
+  if (tab.value === 'evaluation' && taskId.value != null) {
+    void loadEvaluationResult()
+  }
 })
 watch(() => route.query.taskId, () => { void applyRouteTaskQuery() })
 watch(instanceId, () => { syncFromSelectedInstance() })
+watch(taskId, () => {
+  if (tab.value === 'evaluation' && taskId.value != null) void loadEvaluationResult()
+})
+watch([candidateRows, excludedRows], () => {
+  candidatePage.value = 1
+  excludedPage.value = 1
+})
 
 
 async function locateTaskOnMap(id: string | number | unknown, options?: { silent?: boolean; openDetail?: boolean }) {
@@ -1675,7 +1750,7 @@ function buildLinksFromOptPayload(data: unknown, mode: 'optimized' | 'supplement
     const after = asRec(item.after)
     const selectedIds = (item.selectedResourceIds || item.addedResourceIds || after.resourceIds || []) as unknown[]
     const ids = selectedIds.map((x) => String(x))
-    // candidates may hold scores
+    // 候选资源中可能包含评分信息。
     const snap = asRec(item.inputSnapshot)
     const cands = Array.isArray(snap.candidates)
       ? (snap.candidates as Record<string, unknown>[])
@@ -1747,7 +1822,7 @@ async function showAssociationOnMap(mode: 'basic' | 'optimized' | 'supplement', 
     if (planLike && !planTypeMatches(planLike)) return
     if (!Array.isArray(rm)) return
     for (const row of rm as Array<Record<string, unknown>>) {
-      // only matched resources
+      // 只保留已匹配的资源。
       if (row.matched === false) continue
       const rowMode = String(row.mode || row.associationMode || row.planType || '').toLowerCase()
       if (rowMode && !hints.some((h) => rowMode.includes(h.toLowerCase()))) continue
@@ -1795,7 +1870,7 @@ async function showAssociationOnMap(mode: 'basic' | 'optimized' | 'supplement', 
         collectMatches(data.resourceMatches, data)
         if (matches.length) break
       } catch {
-        /* try next plan */
+        /* 尝试下一个方案 */
       }
     }
   }
@@ -1836,7 +1911,7 @@ async function showAssociationOnMap(mode: 'basic' | 'optimized' | 'supplement', 
         break
       }
     } catch {
-      /* optional */
+      /* 可选步骤 */
     }
   }
 
@@ -1988,9 +2063,24 @@ async function applyPlanningMapAction() {
       <p v-if="error" class="error">{{ error }}</p>
       <p v-if="message" class="ok-text">{{ message }}</p>
 
+      <section v-if="tab === 'tasks'" class="business-route-context" aria-label="需求阶段进度">
+        <div class="business-route-context-head">
+          <div>
+            <span class="eyebrow">当前阶段</span>
+            <strong>需求</strong>
+          </div>
+          <span class="business-route-context-count">1 / 5</span>
+        </div>
+        <p>{{ taskId ? `任务 #${taskId} 已选中，确认目标后可进入资源选择。` : '先确认任务目标并创建任务，后续再进入资源选择。' }}</p>
+        <div class="business-route-context-track" aria-hidden="true">
+          <span class="active"></span><span></span><span></span><span></span><span></span>
+        </div>
+        <button class="btn ghost tiny" type="button" :disabled="!hasTask" @click="setTab('candidates')">{{ hasTask ? '进入资源选择' : '创建任务后继续' }}</button>
+      </section>
+
       <div v-if="user && tab !== 'flow' && hasTask" class="planning-context-bar">
         <span>当前任务 #{{ taskId }} · 步骤 {{ STEPS.find((x) => x.key === currentStep)?.title || currentStep }}</span>
-        <button class="btn ghost" type="button" @click="setTab('flow')">进入需求与关联</button>
+        <button class="btn ghost" type="button" @click="setTab('flow')">进入资源配置</button>
       </div>
 
       <div v-if="user" class="planning-task-picker" data-testid="planning-task-picker">
@@ -2016,8 +2106,28 @@ async function applyPlanningMapAction() {
         <p v-if="!taskId">选择已有任务后，才可执行候选、关联和覆盖分析。</p>
       </div>
 
+      <Teleport to="#business-route-host">
+        <div v-if="tab === 'candidates' || tab === 'evaluation' || tab === 'flow' || tab === 'plans'" class="business-route" aria-label="业务任务线路">
+          <header class="business-route-head">
+            <div>
+              <p class="eyebrow">任务</p>
+              <strong>{{ tab === 'evaluation' ? '从资源选择到能力评估' : '从需求到方案' }}</strong>
+            </div>
+            <span>{{ taskId ? `任务 #${taskId} · ${taskStatus || '待处理'}` : '请先选择任务' }}</span>
+          </header>
+          <ol class="business-route-track">
+            <li v-for="step in businessRouteSteps" :key="step.key" :class="step.state">
+              <button type="button" :aria-current="step.state === 'current' ? 'step' : undefined" @click="goBusinessRoute(step.key)">
+                <span class="business-route-marker" aria-hidden="true">{{ step.state === 'done' ? '✓' : step.number }}</span>
+                <span class="business-route-copy"><strong>{{ step.label }}</strong><small>{{ step.description }}</small></span>
+              </button>
+            </li>
+          </ol>
+        </div>
+      </Teleport>
+
       <section v-if="tab === 'tasks'" class="panel">
-        <h2>观测任务列表</h2>
+        <h2>需求查询</h2>
         <table v-table-pager="{ label: '观测任务分页' }" class="table">
           <thead><tr><th>ID</th><th>编码</th><th>名称</th><th>状态</th><th>指标</th><th></th></tr></thead>
           <tbody>
@@ -2047,24 +2157,25 @@ async function applyPlanningMapAction() {
           <header class="planning-workflow-head">
             <div>
               <p class="eyebrow">任务流水线</p>
-              <h2>观测规划进度</h2>
+          <h2>资源配置</h2>
             </div>
-            <span class="planning-progress-count">{{ doneSteps.size }} / {{ STEPS.length }} 步</span>
+            <span class="planning-progress-count">当前第 {{ stepIndex + 1 }} 步 / 共 {{ STEPS.length }} 步 · 已完成 {{ doneSteps.size }} 步</span>
           </header>
 
-          <div class="pipeline-scroll" aria-label="任务流水线进度">
+          <div class="pipeline-scroll" aria-label="资源配置 9 步进度">
             <ol class="planning-pipeline">
               <li
-                v-for="(phase, index) in pipelinePhases"
-                :key="phase.key"
-                class="pipeline-phase"
-                :class="phase.state"
-                :aria-current="phase.state === 'current' ? 'step' : undefined"
+                v-for="(step, index) in pipelineSteps"
+                :key="step.key"
+                class="pipeline-step"
+                :class="step.state"
+                :title="step.title"
+                :aria-current="step.state === 'current' ? 'step' : undefined"
               >
-                <span class="pipeline-marker" aria-hidden="true">{{ phase.state === 'done' ? '✓' : index + 1 }}</span>
+                <span class="pipeline-marker" aria-hidden="true">{{ step.state === 'done' ? '✓' : index + 1 }}</span>
                 <span class="pipeline-copy">
-                  <strong>{{ phase.label }}</strong>
-                  <small>{{ phase.status }}</small>
+                  <strong>{{ step.label }}</strong>
+                  <small>{{ step.status }}</small>
                 </span>
               </li>
             </ol>
@@ -2331,46 +2442,52 @@ async function applyPlanningMapAction() {
 
       <section v-if="tab === 'candidates'" class="panel">
         <div class="section-heading-actions">
-          <h2>候选传感器筛选 / 评分与解释</h2>
+        <h2>资源选择</h2>
+          <div class="section-heading-actions-group">
+            <button class="btn ghost tiny" type="button" @click="setTab('evaluation')">查看能力评估</button>
           <button class="btn ghost tiny" type="button" :disabled="taskId == null" @click="loadCandidates(false)">刷新</button>
+          </div>
         </div>
-        <p class="muted">对应任务清单：候选筛选 + 评分与解释。流程中须在需求反算后确认本页，再进入基础关联。</p>
+        <p class="muted">从任务约束中筛选可用平台，先确认候选资源，再进入能力评估比较任务满足度。</p>
         <p class="muted" v-if="candidateMeta">候选数 {{ candidateMeta.candidateCount ?? candidateRows.length }} · 排除 {{ candidateMeta.excludedCount ?? '-' }}</p>
-        <table v-if="candidateRows.length" v-table-pager="{ label: '候选资源分页' }" class="table">
-          <thead>
-            <tr>
-              <th>平台</th>
-              <th>标识</th>
-              <th>类型</th>
-              <th>综合分</th>
-              <th>主题</th>
-              <th>空间</th>
-              <th>时间</th>
-              <th>能力</th>
-              <th>可靠</th>
-              <th>评分依据</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(c, idx) in candidateRows" :key="idx" class="row-click" @click="locateCandidateOnMap(c)">
-              <td>{{ c.platformName || c.platformId }}</td>
-              <td><code>{{ c.platformIdentifier || '-' }}</code></td>
-              <td>{{ c.platformType || c.typeCode || '-' }}</td>
-              <td>
-                <div class="stat-bar-row">
-                  <span>{{ scoreOf(c) }}</span>
-                  <i class="stat-bar" :style="{ width: Math.max(6, Math.min(100, Number(scoreOf(c)) || 0)) + '%' }"></i>
-                </div>
-              </td>
-              <td>{{ dimScore(c, 'theme') }}</td>
-              <td>{{ dimScore(c, 'space') }}</td>
-              <td>{{ dimScore(c, 'time') }}</td>
-              <td>{{ dimScore(c, 'capability') }}</td>
-              <td>{{ dimScore(c, 'reliability') }}</td>
-              <td class="clamp" :title="explainOf(c)">{{ explainOf(c).slice(0, 160) }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-if="candidateRows.length" class="candidate-card-list">
+          <article
+            v-for="(c, idx) in pagedCandidateRows"
+            :key="String(c.platformId || c.platformIdentifier || idx)"
+            class="candidate-card"
+            tabindex="0"
+            role="button"
+            @click="locateCandidateOnMap(c)"
+            @keydown.enter="locateCandidateOnMap(c)"
+          >
+            <header class="candidate-card-head">
+              <div class="candidate-card-title">
+                <span class="candidate-type">{{ c.platformType || c.typeCode || '未分类资源' }}</span>
+                <h3>{{ c.platformName || c.platformId || '未命名平台' }}</h3>
+                <code>{{ c.platformIdentifier || c.platformId || '-' }}</code>
+              </div>
+              <div class="candidate-total">
+                <span>综合评分</span>
+                <strong>{{ scoreOf(c) }}</strong>
+              </div>
+            </header>
+            <div class="candidate-score-bar" aria-hidden="true">
+              <i :style="{ width: Math.max(6, Math.min(100, Number(scoreOf(c)) || 0)) + '%' }"></i>
+            </div>
+            <ul class="candidate-metrics" aria-label="能力维度评分">
+              <li v-for="dimension in CANDIDATE_DIMENSIONS" :key="dimension.key">
+                <span>{{ dimension.label }}</span>
+                <strong>{{ dimScore(c, dimension.key) }}</strong>
+              </li>
+            </ul>
+            <details class="candidate-explanation" @click.stop>
+              <summary>查看评分依据</summary>
+              <p>{{ explainOf(c) }}</p>
+            </details>
+            <footer class="candidate-card-foot"><span>点击卡片定位地图</span><span aria-hidden="true">↗</span></footer>
+          </article>
+          <CardPager v-model:page="candidatePage" kind="records" :pages="candidatePageLabels" :summary="`共 ${candidateRows.length} 项`" label="候选资源分页" />
+        </div>
         <div v-else class="empty-panel">
           <p class="muted">暂无候选资源。请先：选择任务 → 提交 → 需求反算 → 执行候选评分。</p>
           <div class="ops">
@@ -2382,18 +2499,88 @@ async function applyPlanningMapAction() {
       
         <h3 style="margin-top:1rem">排除列表（硬约束未通过）</h3>
         <p class="muted">展示被筛选掉的资源及原因，便于解释“为何未入选”。</p>
-        <table v-if="excludedRows.length" v-table-pager="{ label: '排除资源分页' }" class="table">
-          <thead><tr><th>平台</th><th>类型</th><th>排除原因</th></tr></thead>
-          <tbody>
-            <tr v-for="(c, idx) in excludedRows.slice(0, 30)" :key="'ex'+idx">
-              <td>{{ c.platformName || c.platformId }}</td>
-              <td>{{ c.platformType || '-' }}</td>
-              <td class="clamp">{{ Array.isArray(c.reasons) ? c.reasons.join('；') : (c.reasons || '-') }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-if="excludedRows.length" class="excluded-card-list">
+          <article v-for="(c, idx) in pagedExcludedRows" :key="String(c.platformId || c.platformIdentifier || idx)" class="excluded-card">
+            <header class="excluded-card-head">
+              <div>
+                <h4>{{ c.platformName || c.platformId || '未命名平台' }}</h4>
+                <code>{{ c.platformIdentifier || c.platformId || '-' }}</code>
+              </div>
+              <span class="candidate-type">{{ c.platformType || c.typeCode || '未分类资源' }}</span>
+            </header>
+            <div class="excluded-reasons">
+              <span class="excluded-label">未入选</span>
+              <ul>
+                <li v-for="(reason, reasonIndex) in reasonListOf(c)" :key="`${idx}-${reasonIndex}`">{{ reason }}</li>
+              </ul>
+            </div>
+          </article>
+          <CardPager v-model:page="excludedPage" kind="records" :pages="excludedPageLabels" :summary="`共 ${excludedRows.length} 项`" label="排除资源分页" />
+        </div>
         <p v-else class="muted">无排除项或尚未刷新候选。</p>
 </section>
+
+      <section v-if="tab === 'evaluation'" class="panel capability-evaluation-panel">
+        <div class="section-heading-actions">
+          <h2>能力评估</h2>
+          <div class="section-heading-actions-group">
+            <button class="btn ghost tiny" type="button" @click="setTab('candidates')">查看资源选择</button>
+            <button class="btn ghost tiny" type="button" :disabled="taskId == null || pending" @click="loadEvaluationResult">刷新评估</button>
+          </div>
+        </div>
+        <p class="muted">根据候选资源与任务约束，查看指标满足、空间覆盖、资源组合和当前方案是否达到要求。</p>
+        <div v-if="evaluationSummary" class="capability-evaluation-summary">
+          <div class="collaboration-metrics">
+            <article>
+              <span>指标满足</span>
+              <strong>{{ evaluationSummary.satisfiedCount }} / {{ evaluationSummary.indicatorCount }}</strong>
+              <small>{{ evaluationSummary.overallSatisfied ? '整体满足' : '仍需优化' }}</small>
+            </article>
+            <article>
+              <span>总体并集覆盖</span>
+              <strong>{{ evaluationSummary.overallCoveragePercent }}%</strong>
+              <small>至少一个指标可观测</small>
+            </article>
+            <article class="primary-metric">
+              <span>{{ evaluationSummary.indicatorCount > 1 ? '多指标共同覆盖' : '指标有效覆盖' }}</span>
+              <strong>{{ evaluationSummary.commonCoveragePercent }}%</strong>
+              <small>{{ evaluationSummary.commonCoverageSatisfied ? '达到覆盖要求' : '未达到覆盖要求' }}</small>
+            </article>
+            <article :class="{ warning: evaluationSummary.misalignmentPercent > 0 }">
+              <span>覆盖错位</span>
+              <strong>{{ evaluationSummary.misalignmentPercent }}%</strong>
+              <small>有覆盖但无法联合观测</small>
+            </article>
+          </div>
+          <div class="coverage-alignment" :aria-label="evaluationSummary.indicatorCount > 1 ? '共同覆盖、覆盖错位和未覆盖区域比例' : '指标有效覆盖和未覆盖区域比例'">
+            <div class="coverage-band">
+              <i class="common" :style="{ width: evaluationSummary.commonCoveragePercent + '%' }"></i>
+              <i class="misaligned" :style="{ width: evaluationSummary.misalignmentPercent + '%' }"></i>
+              <i class="uncovered" :style="{ width: evaluationSummary.uncoveredPercent + '%' }"></i>
+            </div>
+            <p><span><i class="common"></i>有效覆盖 {{ evaluationSummary.commonCoveragePercent }}%</span><span><i class="misaligned"></i>覆盖错位 {{ evaluationSummary.misalignmentPercent }}%</span><span><i class="uncovered"></i>未覆盖 {{ evaluationSummary.uncoveredPercent }}%</span></p>
+          </div>
+          <ul v-if="evaluationSummary.reasons.length" class="hint-list collaboration-reasons">
+            <li v-for="(reason, index) in evaluationSummary.reasons" :key="'evaluation-reason' + index">{{ reason }}</li>
+          </ul>
+          <div class="evaluation-actions">
+            <button class="btn" type="button" @click="drawPlanningCoverageFromEval">在地图查看覆盖与缺口</button>
+            <button class="btn ghost" type="button" @click="openEvaluationFlow">进入任务流程</button>
+          </div>
+          <details>
+            <summary>查看完整评估依据</summary>
+            <pre class="result-pre">{{ businessResultText(evalResult, 5000) }}</pre>
+          </details>
+        </div>
+        <div v-else class="empty-panel capability-evaluation-empty">
+          <strong>还没有可展示的能力评估结果</strong>
+          <p class="muted">先在资源选择中确认候选资源，再完成资源关联；评估结果会在任务流程第 8 步生成。</p>
+          <div class="ops">
+            <button class="btn" type="button" @click="setTab('candidates')">先看候选资源</button>
+            <button class="btn ghost" type="button" :disabled="canRun('evaluate') === false" @click="runStepAction('evaluate')">执行能力评估</button>
+          </div>
+        </div>
+      </section>
 
       <section v-if="tab === 'plans'" class="panel">
         <h2>规划方案管理</h2>
@@ -2585,8 +2772,64 @@ async function applyPlanningMapAction() {
 }
 .planning-context-bar span { color: #515154; font-size: 10px; line-height: 1.4; }
 .planning-context-bar .btn { min-height: 30px; padding: .3rem .55rem; font-size: 10px; white-space: nowrap; }
+.business-route-context {
+  display: grid;
+  gap: .5rem;
+  margin: .55rem 0 .75rem;
+  padding: .72rem .78rem;
+  border: 1px solid #e2e3e7;
+  border-radius: 14px;
+  background: #fff;
+}
+.business-route-context-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.business-route-context-head > div { display: flex; align-items: baseline; gap: .45rem; }
+.business-route-context .eyebrow { margin: 0; color: #8a8a90; font-size: 9px; letter-spacing: .04em; }
+.business-route-context-head strong { color: #1d1d1f; font-size: 14px; }
+.business-route-context-count { color: #6e6e73; font-size: 10px; font-variant-numeric: tabular-nums; }
+.business-route-context p { margin: 0; color: #6e6e73; font-size: 10px; line-height: 1.45; }
+.business-route-context-track { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .25rem; }
+.business-route-context-track span { height: 3px; border-radius: 999px; background: #e5e5e8; }
+.business-route-context-track span.active { background: #0071e3; }
+.business-route-context .btn { justify-self: start; min-height: 28px; padding: .28rem .55rem; font-size: 10px; }
+.business-route {
+  width: clamp(300px, 70%, 520px);
+  max-width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .35rem .5rem;
+  border: 1px solid rgba(220, 221, 225, .94);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .94);
+  box-shadow: 0 6px 18px rgba(29, 29, 31, .12);
+}
+.business-route-head { display: flex; flex: 0 0 auto; align-items: center; min-width: max-content; }
+.business-route-head > div { display: flex; align-items: center; }
+.business-route-head .eyebrow { margin: 0; color: #303033; font-size: 11px; font-weight: 650; }
+.business-route-head strong,
+.business-route-head > span { display: none; }
+.business-route-track { display: grid; flex: 1 1 auto; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .25rem; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.business-route-track li { position: relative; min-width: 0; }
+.business-route-track li:not(:last-child)::after { display: none; }
+.business-route-track button { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; width: 100%; min-width: 0; gap: .24rem; min-height: 26px; padding: .2rem .38rem; border: 1px solid transparent; border-radius: 999px; background: #f3f4f6; color: #62656a; text-align: center; cursor: pointer; }
+.business-route-track button:focus-visible { outline: 2px solid rgba(0, 113, 227, .25); outline-offset: 3px; border-radius: 8px; }
+.business-route-track li.done button { border-color: #d2eedc; background: #edf9f1; color: #26744a; }
+.business-route-track li.current button { border-color: #b7d7f7; background: #edf5ff; color: #006fda; }
+.business-route-marker { display: grid; flex: 0 0 16px; place-items: center; width: 16px; height: 16px; border: 0; border-radius: 50%; background: #d6d9de; color: #fff; font-size: 9px; font-weight: 700; }
+.business-route-track li.done .business-route-marker { background: #3ba569; color: #fff; }
+.business-route-track li.current .business-route-marker { background: #0071e3; color: #fff; box-shadow: none; }
+.business-route-copy { display: block; min-width: 0; }
+.business-route-copy strong { display: block; overflow: hidden; color: inherit; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.business-route-copy small { display: none; }
+.capability-evaluation-summary { display: grid; gap: .55rem; }
+.evaluation-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .25rem; }
+.capability-evaluation-empty { display: grid; gap: .45rem; }
+.capability-evaluation-empty > strong { color: #3a3a3c; font-size: 12px; }
+.capability-evaluation-empty p { margin: 0; }
 .section-heading-actions { display: flex; align-items: center; justify-content: space-between; gap: .55rem; }
 .section-heading-actions h2 { margin-bottom: 0; }
+.section-heading-actions-group { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .35rem; }
 .table-action-select { width: 84px; height: 30px; padding: 0 22px 0 8px; border-radius: 8px; font-size: 10px; }
 .task-code {
   width: fit-content;
@@ -2640,12 +2883,12 @@ async function applyPlanningMapAction() {
 }
 .planning-pipeline {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(9, minmax(0, 1fr));
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.pipeline-phase {
+.pipeline-step {
   position: relative;
   display: grid;
   justify-items: center;
@@ -2654,7 +2897,7 @@ async function applyPlanningMapAction() {
   color: #8e8e93;
   text-align: center;
 }
-.pipeline-phase::before {
+.pipeline-step::before {
   content: '';
   position: absolute;
   top: 13px;
@@ -2663,9 +2906,9 @@ async function applyPlanningMapAction() {
   height: 2px;
   background: #dedee3;
 }
-.pipeline-phase:first-child::before { display: none; }
-.pipeline-phase.done::before,
-.pipeline-phase.current::before { background: #71b88b; }
+.pipeline-step:first-child::before { display: none; }
+.pipeline-step.done::before,
+.pipeline-step.current::before { background: #71b88b; }
 .pipeline-marker {
   position: relative;
   z-index: 1;
@@ -2680,13 +2923,13 @@ async function applyPlanningMapAction() {
   font-size: 11px;
   font-weight: 700;
 }
-.pipeline-phase.done .pipeline-marker { border-color: #2f8f5b; background: #2f8f5b; color: #fff; }
-.pipeline-phase.current .pipeline-marker { border-color: #c98619; background: #fff7e8; color: #9a6211; }
+.pipeline-step.done .pipeline-marker { border-color: #2f8f5b; background: #2f8f5b; color: #fff; }
+.pipeline-step.current .pipeline-marker { border-color: #c98619; background: #fff7e8; color: #9a6211; }
 .pipeline-copy { display: grid; gap: 0.02rem; }
 .pipeline-copy strong { color: #68686d; font-size: 10px; font-weight: 600; }
 .pipeline-copy small { font-size: 9px; line-height: 1.25; }
-.pipeline-phase.done .pipeline-copy strong { color: #246f48; }
-.pipeline-phase.current .pipeline-copy strong { color: #8b5a12; }
+.pipeline-step.done .pipeline-copy strong { color: #246f48; }
+.pipeline-step.current .pipeline-copy strong { color: #8b5a12; }
 .step-page-card {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) 32px;
@@ -2816,9 +3059,168 @@ async function applyPlanningMapAction() {
 .relation-item dt { color: #6e6e73; font-size: 10px; }
 .relation-item dd { margin: 0; color: #3a3a3c; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .relation-item p { margin: 0.4rem 0 0; color: #515154; font-size: 11px; line-height: 1.55; }
+.candidate-card-list,
+.excluded-card-list {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.candidate-card-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); }
+.candidate-card,
+.excluded-card {
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid #e1e3e6;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(25, 35, 45, 0.04);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+.candidate-card { cursor: pointer; }
+.candidate-card:hover,
+.candidate-card:focus-visible {
+  border-color: #b7d7f7;
+  box-shadow: 0 6px 18px rgba(25, 35, 45, 0.08);
+  outline: none;
+  transform: translateY(-1px);
+}
+.candidate-card-head,
+.excluded-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+  min-width: 0;
+}
+.candidate-card-title,
+.excluded-card-head > div { display: grid; min-width: 0; gap: 0.16rem; }
+.candidate-card-title h3,
+.excluded-card-head h4 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #1d1d1f;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.candidate-card-title code,
+.excluded-card-head code {
+  max-width: 100%;
+  overflow: hidden;
+  color: #68686d;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.candidate-type {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.16rem 0.38rem;
+  border: 1px solid #e1e3e6;
+  border-radius: 999px;
+  background: #f6f7f8;
+  color: #68686d;
+  font-size: 9px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.candidate-total {
+  display: grid;
+  flex: 0 0 auto;
+  justify-items: end;
+  gap: 0.08rem;
+}
+.candidate-total span { color: #86868b; font-size: 9px; }
+.candidate-total strong { color: #246f48; font-size: 18px; font-variant-numeric: tabular-nums; line-height: 1; }
+.candidate-score-bar {
+  height: 4px;
+  margin: 0.6rem 0 0.65rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #edf0f2;
+}
+.candidate-score-bar i { display: block; height: 100%; border-radius: inherit; background: #71b88b; }
+.candidate-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.candidate-metrics li {
+  display: grid;
+  min-width: 0;
+  gap: 0.12rem;
+  padding: 0.34rem 0.22rem;
+  border-radius: 8px;
+  background: #f6f7f8;
+  text-align: center;
+}
+.candidate-metrics span { overflow: hidden; color: #86868b; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.candidate-metrics strong { color: #3a3a3c; font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.candidate-explanation {
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #eceef1;
+}
+.candidate-explanation summary { color: #515154; cursor: pointer; font-size: 10px; }
+.candidate-explanation p {
+  max-height: 5.5rem;
+  margin: 0.35rem 0 0;
+  overflow: auto;
+  color: #68686d;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.candidate-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+  color: #a0a0a5;
+  font-size: 9px;
+}
+.excluded-card-list { margin-bottom: 0.25rem; }
+.excluded-card { background: #fbfbfc; }
+.excluded-card-head { align-items: center; }
+.excluded-card-head h4 { font-size: 12px; }
+.excluded-reasons {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.45rem;
+  align-items: start;
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #eceef1;
+}
+.excluded-label {
+  padding: 0.16rem 0.35rem;
+  border-radius: 6px;
+  background: #fff4e5;
+  color: #9a6211;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.excluded-reasons ul { display: grid; gap: 0.18rem; margin: 0; padding-left: 0.9rem; color: #68686d; font-size: 10px; line-height: 1.45; }
+@media (max-width: 1100px) {
+  .business-route { padding: .36rem .5rem .3rem; }
+  .business-route-marker { display: none; }
+  .business-route-track button { gap: 0; padding-inline: .2rem; }
+  .business-route-copy strong { font-size: 11px; letter-spacing: 0; }
+}
 @media (max-width: 760px) {
   .area-control { align-items: stretch; flex-direction: column; }
   .step-page-card { grid-template-columns: 30px minmax(0, 1fr) 30px; gap: 0.4rem; padding: 0.55rem; }
   .step-page-button { width: 30px; height: 30px; }
+  .candidate-card-list { grid-template-columns: minmax(0, 1fr); }
+  .business-route-head { flex-direction: column; gap: .3rem; }
+  .business-route-head > span { white-space: normal; }
+  .business-route-track { gap: .15rem; }
+  .business-route-copy small { display: none; }
 }
 </style>

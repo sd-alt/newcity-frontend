@@ -19,9 +19,9 @@ const open = ref(false)
 
 const journey: JourneyItem[] = [
   { key: 'application', phase: '需求', center: '应用中心', question: '要解决什么场景问题？', outcome: '填写监测需求', to: '/application/tasks', matches: ['/application'], steps: ['选择手动、AI 辅助或多 Agent', '描述对象、区域、时间和成果要求', '在地图绘制任务范围并启动'] },
-  { key: 'tasks', phase: '指标', center: '任务中心', question: '具体需要监测什么？', outcome: '配置监测指标', to: '/tasks', matches: ['/tasks'], steps: ['选择或建立基础指标体系', '把需求拆成具体观测指标', '绑定任务草案并人工确认'] },
-  { key: 'resources', phase: '资源', center: '资源中心', question: '哪些资源和数据可以使用？', outcome: '检查可用资源', to: '/resources/sensors', matches: ['/resources'], steps: ['登记传感平台与传感器', '补齐能力、位置和服务档案', '核对数据、算法与在线状态'] },
-  { key: 'business', phase: '方案', center: '业务中心', question: '怎样组成可执行方案？', outcome: '制定并执行方案', to: '/business', matches: ['/business'], steps: ['选择任务并反算资源需求', '完成候选评分、关联和增补', '核对覆盖后发布、执行并回看成果'] },
+  { key: 'tasks', phase: '任务', center: '任务中心', question: '先把任务和指标说清楚？', outcome: '创建任务并配置指标', to: '/tasks?tab=task-create', matches: ['/tasks'], steps: ['创建任务并填写观测目标', '建立或选择指标体系', '提交任务后进入资源配置'] },
+  { key: 'resources', phase: '资源', center: '资源中心', question: '哪些资源和数据可以使用？', outcome: '检查资源与数据能力', to: '/resources/sensors?tab=capabilities', matches: ['/resources'], steps: ['登记传感器资源', '维护观测能力、位置和状态', '配置数据接入、算法服务和知识'] },
+  { key: 'business', phase: '配置', center: '业务中心', question: '怎样选择资源并完成配置？', outcome: '选择资源并完成配置', to: '/business?tab=candidates', matches: ['/business'], steps: ['查询并选中任务需求', '选择候选资源并查看能力评估', '完成资源配置后查看方案与成果'] },
 ]
 
 const current = computed<JourneyItem>(() => journey.find((item) => item.matches.some((prefix) => route.path.startsWith(prefix))) ?? journey[0]!)
@@ -32,12 +32,12 @@ onMounted(() => {
 
 function hide() {
   open.value = false
-  try { window.localStorage.setItem('newcity-workspace-guide', 'hidden') } catch { /* storage may be unavailable */ }
+  try { window.localStorage.setItem('newcity-workspace-guide', 'hidden') } catch { /* 当前环境可能无法使用本地存储 */ }
 }
 
 function show() {
   open.value = true
-  try { window.localStorage.removeItem('newcity-workspace-guide') } catch { /* storage may be unavailable */ }
+  try { window.localStorage.removeItem('newcity-workspace-guide') } catch { /* 当前环境可能无法使用本地存储 */ }
 }
 
 async function go(item: JourneyItem) {

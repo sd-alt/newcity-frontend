@@ -153,6 +153,53 @@ function polygonCentroid(degrees: number[]): [number, number] | null {
 // 高空视角隐藏文字标签，避免默认视图下标签堆叠成团；拉近后自动显示
 const LABEL_DISTANCE = () => new Cesium.DistanceDisplayCondition(0, 60000)
 
+const satelliteLabelVisibility = new WeakMap<Cesium.Entity, boolean>()
+
+function entityPropertyValue(entity: Cesium.Entity, key: string, time: Cesium.JulianDate) {
+  try {
+    const properties = entity.properties?.getValue(time) as Record<string, unknown> | undefined
+    return properties?.[key]
+  } catch {
+    return undefined
+  }
+}
+
+/** 让卫星名称跟随当前视口；同时保持广告牌可点选。 */
+export function updateSatelliteViewVisibility(viewer: Cesium.Viewer) {
+  if (!viewer || viewer.isDestroyed()) return
+  const sensors = viewer.dataSources.getByName('sensors')[0]
+  if (!sensors || !sensors.show) return
+  const canvas = viewer.scene.canvas
+  const time = viewer.clock.currentTime
+  let changed = false
+  for (const entity of sensors.entities.values) {
+    if (entityPropertyValue(entity, 'mapKind', time) !== 'satellite' || !entity.label) continue
+    const position = entity.position?.getValue(time)
+    let visible = false
+    if (position) {
+      const screen = Cesium.SceneTransforms.worldToWindowCoordinates(
+        viewer.scene,
+        position,
+        new Cesium.Cartesian2(),
+      )
+      visible = Boolean(
+        screen &&
+          Number.isFinite(screen.x) &&
+          Number.isFinite(screen.y) &&
+          screen.x >= -24 &&
+          screen.y >= -24 &&
+          screen.x <= canvas.clientWidth + 24 &&
+          screen.y <= canvas.clientHeight + 24,
+      )
+    }
+    if (satelliteLabelVisibility.get(entity) === visible) continue
+    entity.label.show = new Cesium.ConstantProperty(visible)
+    satelliteLabelVisibility.set(entity, visible)
+    changed = true
+  }
+  if (changed) viewer.scene.requestRender()
+}
+
 function addGeometryEntity(
   dataSource: Cesium.CustomDataSource,
   id: string,
@@ -178,7 +225,10 @@ function addGeometryEntity(
       id,
       name,
       description,
-      properties: options?.fitGroup ? { fitGroup: options.fitGroup } : undefined,
+      properties: {
+        ...(options?.fitGroup ? { fitGroup: options.fitGroup } : {}),
+        ...(markerKind ? { mapKind: markerKind } : {}),
+      },
       position: Cesium.Cartesian3.fromDegrees(lon, lat),
       billboard: markerKind ? markerBillboard(markerKind, color) : undefined,
       point: markerKind
@@ -226,6 +276,10 @@ function addGeometryEntity(
       id,
       name,
       description,
+      properties: {
+        ...(options?.fitGroup ? { fitGroup: options.fitGroup } : {}),
+        ...(markerKind ? { mapKind: markerKind } : {}),
+      },
       position: center
         ? Cesium.Cartesian3.fromDegrees(center[0], center[1])
         : undefined,
@@ -315,7 +369,7 @@ export function applyBasemap(viewer: Cesium.Viewer, key?: BasemapKey) {
 }
 
 export function createViewer(container: HTMLElement, basemap?: BasemapKey): Cesium.Viewer {
-  // 底图来自 /map-config.json，避免硬编码散落；无 Ion token 时不依赖 Cesium Ion
+  // 底图来自 /map-config.json，避免硬编码散落；无 Ion 令牌时不依赖 Cesium Ion。
   const cfg = getMapConfigSync()
   const viewer = new Cesium.Viewer(container, {
     animation: false,
@@ -329,6 +383,8 @@ export function createViewer(container: HTMLElement, basemap?: BasemapKey): Cesi
     infoBox: false,
     selectionIndicator: false,
     terrain: undefined,
+    requestRenderMode: true,
+    maximumRenderTimeChange: Number.POSITIVE_INFINITY,
   })
 
   applyBasemap(viewer, basemap || cfg.defaultBasemap)
@@ -360,7 +416,7 @@ function addDynamicTrajectory(
   color: Cesium.Color,
   description: string,
   markerKind: MapSymbolKind,
-) {
+): SatelliteTrajectoryPoint | null {
   const trajectory = (item.trajectory || {}) as {
     available?: boolean
     source?: string
@@ -373,7 +429,7 @@ function addDynamicTrajectory(
     Number.isFinite(Number(point.latitude)) &&
     Number.isFinite(Date.parse(String(point.time))),
   )
-  if (!trajectory.available || points.length < 1) return false
+  if (!trajectory.available || points.length < 1) return null
   const isSatellite = markerKind === 'satellite'
   const trajectoryColor = isSatellite
     ? Cesium.Color.fromCssColorString('#38BDF8')
@@ -405,7 +461,11 @@ function addDynamicTrajectory(
       id: `sensor-track-${id}-${index}`,
       name: `${name} ${trajectoryLabel}`,
       description,
-      properties: { fitGroup: isSatellite ? 'space' : 'ground' },
+      properties: {
+        fitGroup: isSatellite ? 'space' : 'ground',
+        mapKind: markerKind,
+        sensorId: id,
+      },
       polyline: {
         positions: segment.map((point) =>
           Cesium.Cartesian3.fromDegrees(
@@ -449,7 +509,11 @@ function addDynamicTrajectory(
     id: `sensor-${id}`,
     name,
     description: currentDescription,
-    properties: { fitGroup: isSatellite ? 'space' : 'ground' },
+    properties: {
+      fitGroup: isSatellite ? 'space' : 'ground',
+      mapKind: markerKind,
+      sensorId: id,
+    },
     position: Cesium.Cartesian3.fromDegrees(
       Number(current.longitude),
       Number(current.latitude),
@@ -478,6 +542,50 @@ function addDynamicTrajectory(
         0,
         isSatellite ? 30000000 : 600000,
       ),
+    },
+  })
+  return current
+}
+
+function addSatelliteFootprintEntity(
+  dataSource: Cesium.CustomDataSource,
+  id: string,
+  name: string,
+  current: SatelliteTrajectoryPoint,
+  item: Record<string, unknown>,
+  color: Cesium.Color,
+  description: string,
+) {
+  const typeSummary = (item.typeSummary || {}) as Record<string, unknown>
+  const swathKm = Number(typeSummary.swathKm)
+  if (!Number.isFinite(swathKm) || swathKm <= 0) return false
+  const longitude = Number(current.longitude)
+  const latitude = Number(current.latitude)
+  if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return false
+  const radiusMeters = (swathKm * 1000) / 2
+  dataSource.entities.add({
+    id: `sensor-footprint-${id}`,
+    name: `${name}-当前扫描范围`,
+    description: [
+      description,
+      `当前扫描范围: 轨迹地面投影 · 幅宽 ${swathKm.toFixed(1)} km`,
+      `位置时刻: ${new Date(current.time).toLocaleString('zh-CN')}`,
+    ].join('<br/>'),
+    properties: {
+      fitGroup: 'ground',
+      mapKind: 'satelliteCoverage',
+      sensorId: id,
+    },
+    position: Cesium.Cartesian3.fromDegrees(longitude, latitude),
+    ellipse: {
+      semiMajorAxis: radiusMeters,
+      semiMinorAxis: radiusMeters,
+      height: 0,
+      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      material: Cesium.Color.fromCssColorString('#38BDF8').withAlpha(0.14),
+      outline: true,
+      outlineColor: color.withAlpha(0.82),
+      outlineWidth: 2,
     },
   })
   return true
@@ -522,6 +630,8 @@ export async function loadSensorLayer(
       message?: string
       points?: unknown[]
     }
+    const typeSummary = (item.typeSummary || {}) as Record<string, unknown>
+    const swathKm = Number(typeSummary.swathKm)
     const trajectoryStatus = trajectory.available
       ? `轨迹: 已加载 ${Array.isArray(trajectory.points) ? trajectory.points.length : 0} 个位置点 · ${trajectory.source || '轨迹接口'}`
       : typeCode === 'satellite'
@@ -537,11 +647,25 @@ export async function loadSensorLayer(
       wkt ? '位置: 已加载' : '',
       coverage ? '覆盖范围: 已加载' : '',
       trajectoryStatus,
+      typeCode === 'satellite' && !coverage && Number.isFinite(swathKm) && swathKm > 0
+        ? `扫描范围: 按当前轨迹计算 · ${swathKm.toFixed(1)} km`
+        : typeCode === 'satellite' && !coverage
+          ? '扫描范围: 未配置有效观测幅宽'
+          : '',
     ]
       .filter(Boolean)
       .join('<br/>')
     if (typeCode === 'satellite') {
       const dynamicTrack = addDynamicTrajectory(ds, id, name, item, color, desc, markerKind)
+      if (coverage) {
+        addGeometryEntity(ds, `sensor-cov-${id}`, `${name}-覆盖范围`, coverage, color.withAlpha(0.22), desc, {
+          quiet: true,
+          polygonAlpha: 0.1,
+          fitGroup: 'ground',
+          markerKind: 'satellite',
+        })
+      }
+      if (dynamicTrack) addSatelliteFootprintEntity(ds, id, name, dynamicTrack, item, color, desc)
       if (!dynamicTrack && wkt) {
         addGeometryEntity(ds, `sensor-${id}`, name, wkt, color, desc, {
           markerKind,
@@ -596,13 +720,13 @@ export async function loadDataLayer(
       .join('<br/>')
     addGeometryEntity(ds, `data-${id}`, name, wkt, color, desc, { markerKind: 'data' })
 
-    // 收集点位，用于简易热力/聚合示意（Word C2/D4）
+      // 收集点位，用于简易热力/聚合示意（Word C2/D4）。
     const geometry = wktToGeoJson(wkt)
     if (geometry?.type === 'Point') {
       const [lon, lat] = geometry.coordinates as [number, number]
       if (Number.isFinite(lon) && Number.isFinite(lat)) points.push({ lon, lat })
     } else if (geometry?.type === 'LineString') {
-      // 轨迹线已在 addGeometryEntity 中绘制
+      // 轨迹线已在 addGeometryEntity 中绘制。
     }
   }
 
@@ -713,7 +837,7 @@ export async function flyToDataSources(viewer: Cesium.Viewer) {
     const ds = viewer.dataSources.get(i)
     if (!ds || ds.show === false) continue
     for (const ent of ds.entities.values) {
-      // 跳过无几何实体，降低 Cesium flyTo DeveloperError
+      // 跳过无几何实体，降低 Cesium flyTo DeveloperError 风险。
       if (ent.position || ent.polygon || ent.polyline || ent.rectangle || ent.ellipse || ent.corridor) {
         all.push(ent)
         const fitGroup = ent.properties?.getValue(viewer.clock.currentTime)?.fitGroup
@@ -727,7 +851,7 @@ export async function flyToDataSources(viewer: Cesium.Viewer) {
   }
   const targets = ground.length ? ground : all
   try {
-    // headless/部分环境下 flyTo Promise 可能不 resolve，必须超时兜底，避免业务按钮长期“加载中”
+    // 无界面或部分环境下 flyTo Promise 可能无法 resolve，必须超时兜底，避免业务按钮长期“加载中”。
     await Promise.race([
       viewer.flyTo(targets, { duration: 0.8 }),
       new Promise<void>((resolve) => {
@@ -738,7 +862,7 @@ export async function flyToDataSources(viewer: Cesium.Viewer) {
     try {
       flyToChina(viewer)
     } catch {
-      /* ignore */
+      /* 忽略异常 */
     }
   }
 }
@@ -816,7 +940,7 @@ export async function loadAssociationLinksLayer(
   }
   for (const link of links) {
     let color = modeColor[link.mode || 'candidate'] || modeColor.candidate
-    // candidate mode: score gradient grey -> yellow -> green
+    // 候选模式：评分颜色从灰色渐变为黄色，再渐变为绿色。
     if ((link.mode || 'candidate') === 'candidate' && link.score != null && Number.isFinite(Number(link.score))) {
       const s = Math.max(0, Math.min(100, Number(link.score)))
       if (s >= 80) color = Cesium.Color.fromCssColorString('#22C55E').withAlpha(0.95)

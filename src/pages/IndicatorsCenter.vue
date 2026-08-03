@@ -61,7 +61,7 @@ function applyMapDrawGeoJson() {
     return
   }
   if (g.type === 'point') {
-    // expand point to small polygon for instance spatial range
+    // 将点扩展为小多边形，作为指标实例空间范围。
     const lon = g.lon ?? 0
     const lat = g.lat ?? 0
     const d = 0.05
@@ -300,9 +300,9 @@ async function createInst() {
     })
     const newId = pickId(created.data as Record<string, unknown>) || (created.data as { id?: string | number } | null)?.id
     message.value = newId != null ? `实例已生成 #${newId}` : '实例已生成'
-    try { await showIndicatorsWorkspace('/indicators') } catch { /* map refresh optional */ }
+    try { await showIndicatorsWorkspace('/indicators') } catch { /* 地图刷新失败不影响主流程 */ }
     if (newId != null && instForm.value.spatialGeoJson) {
-      try { await selectShellFeature('indicator', String(newId), { openBubble: true, fly: true }) } catch { /* optional */ }
+      try { await selectShellFeature('indicator', String(newId), { openBubble: true, fly: true }) } catch { /* 地图定位为可选步骤 */ }
     }
     instForm.value.instanceName = ''
     await loadBase()
@@ -436,8 +436,8 @@ async function setInstanceStatus(id: unknown, status: string) {
     await api.updateInstance(String(id), { status })
     message.value = '实例状态已更新为 ' + status
     await loadBase()
-    try { await showIndicatorsWorkspace('/indicators') } catch { /* map refresh optional */ }
-    try { await selectShellFeature('indicator', String(id), { openBubble: true, fly: false }) } catch { /* optional */ }
+    try { await showIndicatorsWorkspace('/indicators') } catch { /* 地图刷新失败不影响主流程 */ }
+    try { await selectShellFeature('indicator', String(id), { openBubble: true, fly: false }) } catch { /* 地图定位为可选步骤 */ }
     if (tab.value === 'versions') await loadInstanceVersions()
   } catch (err) {
     error.value = errMessage(err, '更新实例状态失败')
@@ -455,7 +455,7 @@ async function removeInstance(id: unknown) {
   try {
     await api.deleteInstance(String(id))
     message.value = '实例已删除'
-    try { await showIndicatorsWorkspace('/indicators') } catch { /* map refresh optional */ }
+    try { await showIndicatorsWorkspace('/indicators') } catch { /* 地图刷新失败不影响主流程 */ }
     await loadBase()
   } catch (err) {
     error.value = errMessage(err, '删除实例失败')
@@ -472,7 +472,7 @@ onMounted(async () => {
 
 watch(shellSelected, (v) => {
   if (!v || v.kind !== 'indicator') return
-  // 仅高亮列表（selected class 已绑定 shellSelected）；必要时切到实例页
+  // 仅高亮列表（selected 类已绑定 shellSelected）；必要时切到实例页。
   if (tab.value !== 'instances' && tab.value !== 'query') {
     void setTab('instances')
   }
@@ -563,7 +563,7 @@ async function locateDefinitionOnMap(defId: unknown) {
   try {
     await showIndicatorsWorkspace('/indicators')
   } catch {
-    /* optional */
+    /* 可选步骤 */
   }
   const list = instancesForDef(id)
   if (!list.length) {

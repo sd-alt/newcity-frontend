@@ -1,5 +1,6 @@
 import { apiEnvelope, apiRequest } from './client'
 import type { UserInfo } from './types'
+import type { AiServiceMode } from '../utils/aiPreferences'
 
 function asList<T>(data: unknown): T[] {
   if (Array.isArray(data)) return data as T[]
@@ -88,19 +89,14 @@ async function postAction(path: string, body?: Record<string, unknown>) {
   })
 }
 
-async function fetchText(path: string) {
-  const response = await fetch(path, {
-    credentials: 'include',
+async function fetchText(path: string, timeoutMs = 120_000) {
+  return apiRequest<string>(path, {
     headers: { Accept: 'text/csv,application/json,text/plain,*/*' },
+    timeoutMs,
   })
-  const text = await response.text()
-  if (response.ok === false) {
-    throw new Error(text || response.statusText)
-  }
-  return text
 }
 
-// indicators
+// 指标
 export const listDomains = () => listAny('/api/v1/indicators/domains')
 export const listThemes = () => listAny('/api/v1/indicators/themes')
 export const listSubThemes = () => listAny('/api/v1/indicators/sub-themes')
@@ -126,7 +122,7 @@ export const exportInstancesCsv = (query = '') => {
 }
 export const getIndicatorTree = () => getAny('/api/v1/indicators/tree')
 
-// resources
+// 资源
 export const listPlatformTypes = () => listAny('/api/v1/observations/platform-types')
 export const listSensorTypes = () => listAny('/api/v1/observations/sensor-types')
 export const listPlatforms = (query = '') => listAny('/api/v1/observations/platforms' + query)
@@ -152,7 +148,7 @@ export const updatePositionSource = (platformId: number | string, body: Record<s
 export const ingestPlatformTrack = (body: Record<string, unknown>) =>
   postAction('/api/v1/observations/platform-tracks/ingest', body)
 
-// data
+// 数据
 export const listDatasets = () => listAny('/api/v1/observations/datasets')
 export const createDataset = (body: Record<string, unknown>) => createAny('/api/v1/observations/datasets', body)
 export const listObservationData = (query = '') => listAny('/api/v1/observations/data' + query)
@@ -182,7 +178,7 @@ export const exportObservationDataCsv = (query = '') =>
 export const exportObservationData = (query = '') => exportObservationDataCsv(query)
 export const getDataVisualization = () => getAny('/api/v1/observations/visualization')
 
-// assistant
+// AI 助手
 export type AssistantAction = {
   type: string
   label?: string
@@ -205,14 +201,34 @@ export type AssistantStatusData = {
   ready: boolean
   apiConfigured: boolean
 }
+export type AssistantApiConfig = {
+  apiBase: string
+  apiKey: string
+  model: string
+}
+export type AssistantModelsData = {
+  models: string[]
+  temporary: boolean
+}
 export const assistantStatus = () => apiEnvelope<AssistantStatusData>('/api/v1/assistant/status')
-export const assistantChat = (message: string) =>
+export const assistantChat = (message: string, mode?: AiServiceMode, apiConfig?: AssistantApiConfig) =>
   apiEnvelope<AssistantChatData>('/api/v1/assistant/chat', {
     method: 'POST',
-    body: JSON.stringify({ message }),
+    timeoutMs: 120_000,
+    body: JSON.stringify({
+      message,
+      ...(mode ? { mode } : {}),
+      ...(apiConfig?.apiBase && apiConfig.apiKey ? { apiConfig } : {}),
+    }),
+  })
+export const assistantModels = (apiConfig: AssistantApiConfig) =>
+  apiEnvelope<AssistantModelsData>('/api/v1/assistant/models', {
+    method: 'POST',
+    timeoutMs: 20_000,
+    body: JSON.stringify({ apiConfig }),
   })
 
-// planning
+// 规划
 export const listEvents = () => listAny('/api/v1/planning/events')
 export const listTasks = () => listAny('/api/v1/planning/tasks')
 export const getTask = (id: number | string) => getAny('/api/v1/planning/tasks/' + id)
@@ -221,6 +237,11 @@ export const updateTask = (id: number | string, body: Record<string, unknown>) =
 export const deleteTask = (id: number | string) => deleteAny('/api/v1/planning/tasks/' + id)
 export const submitTask = (id: number | string) => postAction('/api/v1/planning/tasks/' + id + '/submit')
 export const cancelTask = (id: number | string) => postAction('/api/v1/planning/tasks/' + id + '/cancel')
+export const approveTask = (id: number | string) => postAction('/api/v1/planning/tasks/' + id + '/approve')
+export const startTask = (id: number | string) => postAction('/api/v1/planning/tasks/' + id + '/start')
+export const pauseTask = (id: number | string) => postAction('/api/v1/planning/tasks/' + id + '/pause')
+export const completeTask = (id: number | string) => postAction('/api/v1/planning/tasks/' + id + '/complete')
+export const archiveTask = (id: number | string) => postAction('/api/v1/planning/tasks/' + id + '/archive')
 export const addTaskIndicators = (id: number | string, instanceIds: number[]) =>
   postAction('/api/v1/planning/tasks/' + id + '/add-indicators', { indicatorInstanceIds: instanceIds })
 export const screenTaskCandidates = (id: number | string) =>
@@ -246,7 +267,7 @@ export const approvePlan = (id: number | string) => postAction('/api/v1/associat
 export const comparePlans = (id: number | string, otherId: number | string) =>
   getAny('/api/v1/association/plans/' + id + '/compare?otherId=' + encodeURIComponent(String(otherId)))
 
-// algorithms
+// 算法
 export const listAlgorithmModels = () => listAny('/api/v1/algorithms/models')
 export const createAlgorithmModel = (body: Record<string, unknown>) => createAny('/api/v1/algorithms/models', body)
 export const deleteAlgorithmModel = (id: number | string) => deleteAny('/api/v1/algorithms/models/' + id)
@@ -276,7 +297,7 @@ export const archiveProcessingResult = (id: number | string) =>
 export const linkProcessingContext = (id: number | string, body: Record<string, unknown>) =>
   postAction('/api/v1/algorithms/processing-tasks/' + id + '/link-context', body)
 
-// applications
+// 应用
 export const resourceStatistics = (query = '') =>
   getAny<Record<string, unknown>>('/api/v1/applications/statistics/resources' + query)
 export const dataStatistics = (query = '') =>
@@ -294,35 +315,36 @@ export const getTaskGis = (query = '') =>
 export const getGisWorkbench = () => getAny('/api/v1/applications/workbench')
 export const listGisLayers = () => listAny('/api/v1/applications/gis-layers')
 
-// data source lifecycle
+// 数据源生命周期
 export const enableDataSource = (id: number | string) => postAction('/api/v1/observations/data-sources/' + id + '/enable')
 export const disableDataSource = (id: number | string) => postAction('/api/v1/observations/data-sources/' + id + '/disable')
 
-// file import pipeline
+// 文件导入流程
 export const executeFileImport = (id: number | string) => postAction('/api/v1/observations/file-imports/' + id + '/execute')
 export const pauseFileImport = (id: number | string) => postAction('/api/v1/observations/file-imports/' + id + '/pause')
 export const resumeFileImport = (id: number | string) => postAction('/api/v1/observations/file-imports/' + id + '/resume')
 export const retryFileImport = (id: number | string) => postAction('/api/v1/observations/file-imports/' + id + '/retry')
 
-// observation data quality / download
+// 观测数据质量 / 下载
 export const qualityCheckData = (id: number | string) => postAction('/api/v1/observations/data/' + id + '/quality-check')
 export const quarantineData = (id: number | string) => postAction('/api/v1/observations/data/' + id + '/quarantine')
 export const releaseData = (id: number | string) => postAction('/api/v1/observations/data/' + id + '/release')
 export const spatialPreviewData = (id: number | string) => getAny('/api/v1/observations/data/' + id + '/spatial-preview')
 export const dataProvenance = (id: number | string) => getAny('/api/v1/observations/data/' + id + '/provenance')
 
-// file import upload (multipart)
+// 文件导入上传（multipart）
 export async function importObservationFile(form: FormData) {
   return apiEnvelope('/api/v1/observations/file-imports/import-file', {
     method: 'POST',
     body: form,
+    timeoutMs: 120_000,
   })
 }
 
 export const downloadImportTemplate = (fileFormat = 'csv') =>
   fetchText('/api/v1/observations/file-imports/template?fileFormat=' + encodeURIComponent(fileFormat))
 
-// instance versions
+// 实例版本
 export const listInstanceVersions = (id: number | string) =>
   listAny('/api/v1/indicators/instances/' + id + '/versions')
 export const compareInstanceVersions = (id: number | string, fromV: number | string, toV: number | string) =>
@@ -330,7 +352,7 @@ export const compareInstanceVersions = (id: number | string, fromV: number | str
 export const rollbackInstanceVersion = (id: number | string, version: number | string) =>
   postAction('/api/v1/indicators/instances/' + id + '/versions/' + version + '/rollback')
 
-// four-center domain APIs
+// 四中心业务 API
 export const listSensingElements = () => listAny('/api/v1/task/sensing-elements')
 export const createSensingElement = (body: Record<string, unknown>) => createAny('/api/v1/task/sensing-elements', body)
 export const listIndicatorSystems = (query = '') => listAny('/api/v1/task/indicator-systems' + query)
@@ -353,6 +375,8 @@ export const listOmObservations = (query = '') => listAny('/api/v1/resource/obse
 export const createOmObservation = (body: Record<string, unknown>) => createAny('/api/v1/resource/observations', body)
 export const listAlgorithmServices = () => listAny('/api/v1/resource/algorithm-services')
 export const createAlgorithmService = (body: Record<string, unknown>) => createAny('/api/v1/resource/algorithm-services', body)
+export const updateAlgorithmService = (id: number | string, body: Record<string, unknown>) => updateAny('/api/v1/resource/algorithm-services/' + id, body)
+export const deleteAlgorithmService = (id: number | string) => deleteAny('/api/v1/resource/algorithm-services/' + id)
 export const listKnowledgeItems = (query = '') => listAny('/api/v1/resource/knowledge-items' + query)
 export const createKnowledgeItem = (body: Record<string, unknown>) => createAny('/api/v1/resource/knowledge-items', body)
 export const updateKnowledgeItem = (id: number | string, body: Record<string, unknown>) => updateAny('/api/v1/resource/knowledge-items/' + id, body)
@@ -368,12 +392,53 @@ export const listTaskResults = (query = '') => listAny('/api/v1/business/task-re
 export const runBusinessAction = (objectType: 'tasks' | 'plans', id: number | string, action: string, body: Record<string, unknown> = {}) =>
   postAction(`/api/v1/business/${objectType}/${id}/${action}`, body)
 
+export type AgentWorkflowNode = {
+  id: number
+  code: string
+  index: number
+  nodeId: string
+  nodeType: string
+  name: string
+  executorType: string
+  agentCode: string | null
+  agentName: string
+  status: string
+  mandatory: boolean
+  riskLevel: string
+  planningReason: string
+  topologicalLevel: number
+  dependsOn: string[]
+  toolNames: string[]
+  allowedToolNames: string[]
+  inputSummary: Record<string, unknown>
+  outputSummary: Record<string, unknown>
+  errorMessage: string
+  startedAt?: string | null
+  finishedAt?: string | null
+}
+export type AgentWorkflowData = {
+  name: string
+  mode: 'fixed-maf' | 'template-maf' | 'dynamic-maf'
+  source: 'llm' | 'template' | 'fallback' | 'manual'
+  graphType: string
+  goal: string
+  graphVersion: number
+  checkpointId: string
+  status: string
+  fallback: boolean
+  fallbackReason: string
+  nodeCount: number
+  edgeCount: number
+  nodes: AgentWorkflowNode[]
+  edges: Array<{ id: number; sourceNodeId: string; targetNodeId: string; relation: string }>
+}
 export type AgentRunData = Record<string, unknown> & {
   id: string
   status: string
   currentStage: string
   progress: number
-  stages?: Array<Record<string, unknown>>
+  workflow?: AgentWorkflowData
+  stages?: AgentWorkflowNode[]
   pendingApprovals?: Array<Record<string, unknown>>
   toolCalls?: Array<Record<string, unknown>>
   artifacts?: Array<Record<string, unknown>>
@@ -388,3 +453,20 @@ export const decideAgentApproval = (runId: string, approvalId: number | string, 
 export const controlAgentRun = (runId: string, action: 'pause' | 'resume' | 'retry' | 'cancel' | 'takeover') =>
   apiEnvelope<AgentRunData>(`/api/agent/runs/${runId}/${action}/`, { method: 'POST' })
 export const agentRunEventsUrl = (runId: string) => `/api/agent/runs/${runId}/events/`
+export type AgentPendingAction = {
+  runId: string
+  taskId: number | null
+  demandId: number
+  taskName: string
+  status: 'waiting_input' | 'waiting_approval'
+  currentStage: string
+  stageName: string
+  actionType: 'input' | 'approval'
+  approvalId: number
+  approvalType: string
+  title: string
+  description: string
+  createdAt: string
+  updatedAt: string
+}
+export const listAgentPendingActions = () => apiEnvelope<AgentPendingAction[]>('/api/agent/runs/pending-actions/')

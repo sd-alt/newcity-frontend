@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
 import CardPager from '../components/CardPager.vue'
 import { errMessage } from '../utils/errors'
 
 type Row = Record<string, any>
 const items = ref<Row[]>([])
+const route = useRoute()
+const router = useRouter()
 const scenes = ref<Row[]>([])
 const services = ref<Row[]>([])
 const observations = ref<Row[]>([])
@@ -16,7 +19,7 @@ const message = ref('')
 const keyword = ref('')
 const page = ref(1)
 const pageSize = 4
-const workspacePage = ref(1)
+const workspacePage = ref(route.query.tab === 'search' ? 2 : 1)
 const workspacePages = ['新增或编辑知识', '浏览知识资源']
 const form = ref({ id: '', code: '', title: '', itemType: 'historical_case', sceneId: '', content: '', keywords: '', sourceReference: '' })
 const filtered = computed(() => {
@@ -40,9 +43,13 @@ async function load() {
 }
 function edit(item: Row) {
   form.value = { id: String(item.id), code: item.code, title: item.title, itemType: item.itemType, sceneId: item.sceneId ? String(item.sceneId) : '', content: item.content, keywords: (item.keywords || []).join('，'), sourceReference: item.sourceReference || '' }
-  workspacePage.value = 1
+  setWorkspacePage(1)
 }
 function reset() { form.value = { id: '', code: '', title: '', itemType: 'historical_case', sceneId: '', content: '', keywords: '', sourceReference: '' } }
+function setWorkspacePage(page: number) {
+  workspacePage.value = page
+  void router.replace({ path: route.path, query: { ...route.query, tab: page === 1 ? 'edit' : 'search' } })
+}
 async function save() {
   if (!form.value.code.trim() || !form.value.title.trim() || !form.value.content.trim()) { error.value = '请填写编码、标题和知识内容'; return }
   saving.value = true
@@ -51,7 +58,7 @@ async function save() {
     if (form.value.id) await api.updateKnowledgeItem(form.value.id, body)
     else await api.createKnowledgeItem(body)
     message.value = form.value.id ? '知识条目已更新' : '知识条目已创建'
-    reset(); await load(); workspacePage.value = 2
+    reset(); await load(); setWorkspacePage(2)
   } catch (cause) { error.value = errMessage(cause, '知识条目保存失败') }
   finally { saving.value = false }
 }
@@ -84,7 +91,7 @@ onMounted(load)
       <CardPager v-model:page="page" kind="records" :pages="listPageLabels" :summary="`共 ${filtered.length} 条`" label="知识资源分页" />
       <div class="resource-evidence"><div><span>算法服务</span><strong>{{ services.length }}</strong><small>由业务中心和 Agent 通过统一工具调用</small></div><div><span>O&amp;M 观测记录</span><strong>{{ observations.length }}</strong><small>区分实际观测结果与资源能力</small></div></div>
     </section>
-    <CardPager v-model:page="workspacePage" :pages="workspacePages" label="知识库内容分页" />
+    <CardPager :page="workspacePage" :pages="workspacePages" label="知识库内容分页" @update:page="setWorkspacePage" />
   </section>
 </template>
 
