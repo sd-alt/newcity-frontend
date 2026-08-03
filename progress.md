@@ -1351,3 +1351,34 @@
 - `src/api/client.ts`、`src/api/endpoints.ts`：增加请求超时和取消处理。
 - `.github/workflows/frontend-ci.yml`、`docs/请求超时与自动验证说明.md`：增加自动验证和配置说明。
 - 回滚方式：选择性回滚上述文件；不影响后端、数据库和现有 API 契约。
+
+## 2026-08-03 - Task: 对接动态规划队列和分阶段 Agent 状态
+
+### What was done
+- 增加 `pending` 工作流来源和规划/执行阶段状态展示，明确告知用户任务图正在由后台 Worker 生成。
+- SSE 同时监听 `run`、`planning`、`execution`、`checkpoint` 和 `approval` 事件，保留轮询兜底。
+- 提交失败时按请求内容复用同一幂等键，避免网络超时后重复创建任务；请求内容发生变化时自动生成新键。
+- 修复运行详情页已有的乱码提示，并增加规划状态、规划排队中和执行排队中的中文状态文案。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `git diff --check`：通过，仅有既有 LF/CRLF 转换提示。
+
+### Notes
+- `src/api/endpoints.ts`：补充 `pending` 工作流来源类型。
+- `src/pages/AgentTaskWorkspace.vue`：增加幂等重试、分阶段 SSE、状态展示和中文提示。
+- 回滚方式：选择性回退上述两个前端文件；不影响后端、数据库和已有 Agent API。
+
+## 2026-08-03 - Task: 显示规划暂停状态
+
+### What was done
+- 增加 `planning_paused` 中文状态和规划阶段提示，暂停后用户仍能识别当前处于任务图规划阶段。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+
+### Notes
+- `src/pages/AgentTaskWorkspace.vue`：补充规划暂停状态展示。
+- 回滚方式：回退该文件本条状态文案改动即可。

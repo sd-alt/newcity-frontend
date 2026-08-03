@@ -419,7 +419,7 @@ export type AgentWorkflowNode = {
 export type AgentWorkflowData = {
   name: string
   mode: 'fixed-maf' | 'template-maf' | 'dynamic-maf'
-  source: 'llm' | 'template' | 'fallback' | 'manual'
+  source: 'llm' | 'template' | 'fallback' | 'pending' | 'manual'
   graphType: string
   goal: string
   graphVersion: number
