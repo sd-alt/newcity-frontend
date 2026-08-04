@@ -45,6 +45,7 @@ jobs:
           repository: sd-alt/newcity
           ref: agent
           path: newcity
+          token: ${{ secrets.NEWCITY_REPO_READ_TOKEN }}
 
       - name: 安装 Python
         uses: actions/setup-python@v5

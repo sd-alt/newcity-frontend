@@ -1521,3 +1521,18 @@
 ### Notes
 - `src/pages/PlanningCenter.vue`：增加取消发布按钮、状态校验和成功提示。
 - 回滚方式：本轮尚未提交；提交后使用 `git revert <本轮提交>`。
+
+## 2026-08-04 - Task: 修复跨仓库真实联调工作流权限
+
+### What was done
+- 根据 GitHub Actions 失败日志确认前端公开仓库无法使用默认 `GITHUB_TOKEN` 检出私有后端仓库。
+- 为后端 `agent` 分支检出步骤改用 `NEWCITY_REPO_READ_TOKEN` 仓库密钥，并在前端仓库配置该密钥；密钥值未写入代码或日志。
+
+### Testing
+- `gh repo view`：确认后端仓库为私有、前端仓库为公开。
+- `gh secret list --repo sd-alt/newcity-frontend`：确认 `NEWCITY_REPO_READ_TOKEN` 已配置。
+- 上一轮 Actions 失败原因已由日志确认是跨仓库权限，不是代码测试失败；修复后的工作流待本次推送后重新运行。
+
+### Notes
+- `.github/workflows/frontend-ci.yml`：为跨仓库检出增加专用只读令牌引用。
+- 回滚方式：使用 `git revert <本轮提交>`，并在前端仓库删除 `NEWCITY_REPO_READ_TOKEN` 密钥。
