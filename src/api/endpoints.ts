@@ -494,6 +494,7 @@ export type AgentRunData = Record<string, unknown> & {
   pendingApprovals?: Array<Record<string, unknown>>
   toolCalls?: Array<Record<string, unknown>>
   artifacts?: Array<Record<string, unknown>>
+  errors?: Array<Record<string, unknown>>
   modelCalls?: AgentModelCallData[]
   nextPollAt?: string | null
   pollAttempt?: number
@@ -501,6 +502,7 @@ export type AgentRunData = Record<string, unknown> & {
   planVersion?: number | null
   planVersions?: Array<Record<string, unknown>>
   executionControl?: AgentExecutionControl
+  resultSummary?: Record<string, unknown>
 }
 export const createAgentTask = (body: Record<string, unknown>) =>
   apiEnvelope<Record<string, unknown>>('/api/application/agent-tasks/', { method: 'POST', body: JSON.stringify(body) })

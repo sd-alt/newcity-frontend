@@ -2,7 +2,7 @@
 
 地学传感网前端（Vue 3 + TypeScript + Cesium），严格对齐《系统建设任务清单与工作量表》图1-3的四中心 **22 项**。
 
-当前发布分支为 `main`，前端仓库为 `sd-alt/newcity-frontend`。本地默认通过 Vite 将 `/api` 代理到 `http://127.0.0.1:8001`。
+当前 Agent 改造分支为 `agent`，前端仓库为 `sd-alt/newcity-frontend`。本地默认通过 Vite 将 `/api` 代理到 `http://127.0.0.1:8001`。
 
 ## 22 项入口
 
@@ -42,11 +42,14 @@ npm run dev -- --host 127.0.0.1 --port 5173
 npm run typecheck
 npm run build
 npm run test:e2e
+npm run test:e2e:integration
 ```
 
 Agent 任务工作区会把同一运行拆成两张图：Planning Workflow 展示需求理解、任务分类、图规划和图校验；Execution Workflow 展示校验后的实际执行节点。页面会显示当前 `fixed-maf`、`template-maf` 或 `dynamic-maf` 模式及来源，避免把模板选择误认为动态规划。
 
 Playwright E2E 需要 Chromium。CI 会通过 `npx playwright install --with-deps chromium` 安装；本地 Windows 若已安装 Chrome，配置会直接复用 Chrome。执行脚本会用接口桩验证两张工作流图和四个规划节点的展示。
+
+人工完成按钮在请求期间会禁用并显示“正在提交”，阻止连续点击产生重复请求；若 Checkpoint 或运行状态已变化，页面会提示刷新后重新操作。运行完成后页面展示最终节点、结果摘要和传感器数量。真实联调脚本会启动独立 Django、Worker、Fake Provider 和 MAF 环境，验证最终状态、动态图来源、模型审计与脱敏工件。
 
 浏览器：登录后从首页 22 项功能矩阵进入各中心，按 Tab 验收。
 

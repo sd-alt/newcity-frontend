@@ -44,8 +44,9 @@ const modes = [
   { key: 'agent', label: '多Agent自动规划', note: 'MAF专业Agent协同，关键节点人工确认' },
 ] as const
 const selectedMode = computed(() => modes.find((item) => item.key === mode.value) || modes[0])
-const workflow = computed(() => run.value?.workflow)
 const planningWorkflow = computed(() => run.value?.planningWorkflow)
+const executionWorkflow = computed(() => run.value?.executionWorkflow || run.value?.workflow)
+const workflow = computed(() => executionWorkflow.value)
 const stages = computed(() => workflow.value?.nodes || run.value?.stages || [])
 const planningNodes = computed(() => planningWorkflow.value?.nodes || [])
 const workflowLevels = computed(() => {
@@ -62,6 +63,7 @@ const planSelectionApprovals = computed(() => approvals.value.filter((item) => i
 const ordinaryApprovals = computed(() => approvals.value.filter((item) => !['execution_intervention', 'plan_resource_selection'].includes(String(item.type))))
 const executionControl = computed(() => (run.value?.executionControl || {}) as api.AgentExecutionControl)
 const manualExecutionItems = computed(() => rows(executionControl.value.executionItems).filter((item) => item.status === 'manual_intervention'))
+const manualCompleteSubmitting = ref<Record<number, boolean>>({})
 const interventionNotes = ref<Record<string, string>>({})
 type PlanSelection = {
   oldPlanResourceId: string
@@ -96,6 +98,24 @@ const workflowSourceLabel = computed(() => {
   const labels: Record<string, string> = { llm: 'MAF Agent', template: '可信模板', fallback: '安全回退', pending: '等待规划', manual: '人工定义' }
   return labels[workflow.value?.source || ''] || workflow.value?.source || '-'
 })
+const finalWorkflowNodes = computed(() => {
+  const sourceIds = new Set((workflow.value?.edges || []).map((item) => item.sourceNodeId))
+  return stages.value.filter((item) => !sourceIds.has(item.nodeId))
+})
+const finalNodeStatusLabel = computed(() => finalWorkflowNodes.value.length
+  ? finalWorkflowNodes.value.map((item) => `${item.nodeId}：${statusLabel(item.status)}`).join('；')
+  : '尚未生成')
+const finalResult = computed(() => {
+  const runResult = (run.value?.resultSummary || {}) as Row
+  if (Object.keys(runResult).length) return runResult
+  return (finalWorkflowNodes.value[0]?.outputSummary || {}) as Row
+})
+const finalResultText = computed(() => String(finalResult.value.summary || finalResult.value.reply || ''))
+const queriedSensorCount = computed(() => {
+  const queryNode = stages.value.find((item) => item.nodeType === 'direct_sensor_query')
+  return rows((queryNode?.outputSummary || {}).sensors).length
+})
+const hasSensorQuery = computed(() => stages.value.some((item) => item.nodeType === 'direct_sensor_query'))
 const workflowPhaseLabel = computed(() => {
   const status = workflow.value?.status || run.value?.status || ''
   if (['planning_queued', 'planning', 'planning_paused'].includes(status)) return '规划工作流'
@@ -134,6 +154,12 @@ function statusLabel(value: string) { return ({ pending: '待执行', planning_q
 function compactJson(value: unknown) {
   const text = JSON.stringify(value || {}, null, 2)
   return text === '{}' ? '暂无' : text
+}
+function humanActionError(cause: unknown, fallback: string) {
+  const detail = errMessage(cause, fallback)
+  return /Checkpoint|正在被其他|任务状态|人工请求|审批.*不匹配/.test(detail)
+    ? '任务状态已更新，请刷新后重新操作。'
+    : detail
 }
 async function loadScenes() {
   try {
@@ -295,19 +321,29 @@ async function decideExecution(approval: Row, item: Row, action: string) {
           ? '人工执行项已完成，工作流将恢复监控'
           : '执行项已提交重试操作'
     if (action !== 'manual' && action !== 'cancel') startTracking(runId.value)
-  } catch (cause) { error.value = errMessage(cause, '执行异常处置提交失败') }
+  } catch (cause) { error.value = humanActionError(cause, '执行异常处置提交失败') }
 }
 async function completeManualExecution(item: Row) {
   if (!runId.value) return
   const itemId = executionItemId(item)
   if (!itemId) { error.value = executionItemError(item); return }
+  if (manualCompleteSubmitting.value[itemId]) return
+  if (run.value?.status !== 'manual_required' || item.status !== 'manual_intervention') {
+    error.value = '任务状态已更新，请刷新后重新操作。'
+    return
+  }
   const note = interventionNotes.value['manual:' + itemId] || ''
+  manualCompleteSubmitting.value = { ...manualCompleteSubmitting.value, [itemId]: true }
   try {
     const response = await api.completeManualExecution(runId.value, itemId, note)
     run.value = response.data
     message.value = '人工执行项已完成，工作流将恢复监控'
     startTracking(runId.value)
-  } catch (cause) { error.value = errMessage(cause, '人工执行完成提交失败') }
+  } catch (cause) {
+    error.value = humanActionError(cause, '人工执行完成提交失败')
+  } finally {
+    manualCompleteSubmitting.value = { ...manualCompleteSubmitting.value, [itemId]: false }
+  }
 }
 function planSelectionValue(approval: Row) {
   const key = String(approval.id)
@@ -412,7 +448,7 @@ onUnmounted(() => {
           <div v-for="item in manualExecutionItems" :key="String(executionItemId(item) || item.executionItemId || item.id || item.name)" class="execution-item-row">
             <div><strong>{{ item.name || executionItemLabel(item) }}</strong><small>{{ executionItemLabel(item) }} · {{ statusLabel(item.status) }} · 进度 {{ item.progress || 0 }}%</small><p v-if="executionItemError(item)" class="node-error">{{ executionItemError(item) }}</p></div>
             <textarea v-model="interventionNotes['manual:' + (executionItemId(item) || item.id)]" rows="2" placeholder="可填写人工执行说明"></textarea>
-            <div class="execution-actions"><button class="btn primary tiny" :disabled="!executionItemId(item)" @click="completeManualExecution(item)">人工已完成</button></div>
+            <div class="execution-actions"><button class="btn primary tiny" :disabled="!executionItemId(item) || manualCompleteSubmitting[executionItemId(item) || 0] || run.status !== 'manual_required' || item.status !== 'manual_intervention'" @click="completeManualExecution(item)">{{ manualCompleteSubmitting[executionItemId(item) || 0] ? '正在提交' : '人工已完成' }}</button></div>
           </div>
         </article>
       </section>
@@ -432,13 +468,23 @@ onUnmounted(() => {
         <div class="workflow-title"><div><span>Microsoft Agent Framework</span><strong>{{ workflow.graphType }}</strong><p>{{ workflow.goal }}</p></div><b :class="['workflow-source', workflow.source]">{{ workflowSourceLabel }}</b></div>
         <dl>
           <div><dt>当前工作流</dt><dd>{{ workflowPhaseLabel }}</dd></div>
+          <div><dt>Planning状态</dt><dd>{{ planningWorkflow?.status || '-' }}</dd></div>
+          <div><dt>Execution状态</dt><dd>{{ executionWorkflow?.status || '-' }}</dd></div>
           <div><dt>运行模式</dt><dd>{{ workflowModeLabel }}</dd></div>
+          <div><dt>Workflow来源</dt><dd>{{ workflow.source }}</dd></div>
+          <div><dt>Graph类型</dt><dd>{{ workflow.graphType || '-' }}</dd></div>
+          <div><dt>Fallback状态</dt><dd>{{ workflow.fallback ? `是：${workflow.fallbackReason || '可信模板回退'}` : '否' }}</dd></div>
+          <div><dt>最终节点状态</dt><dd>{{ finalNodeStatusLabel }}</dd></div>
           <div><dt>图规模</dt><dd>{{ workflow.nodeCount }} 节点 · {{ workflow.edgeCount }} 条边</dd></div>
           <div><dt>并行节点</dt><dd>{{ parallelRunningNodes.length ? parallelRunningNodes.map((item) => item.name).join('、') : '当前无并行执行' }}</dd></div>
           <div><dt>Checkpoint</dt><dd :title="workflow.checkpointId">{{ workflow.checkpointId ? workflow.checkpointId.slice(0, 12) : '等待首次执行' }}</dd></div>
         </dl>
         <p v-if="['planning_queued', 'planning'].includes(run.status) || ['planning_queued', 'planning', 'planning_paused'].includes(workflow.status)" class="workflow-planning-notice">任务图正在由后台规划工作流生成；当前显示的是临时可信基线，规划完成后会自动替换为已校验的动态图。</p>
         <p v-if="workflow.fallback" class="workflow-fallback"><strong>已安全回退到可信模板</strong>{{ workflow.fallbackReason }}</p>
+      </section>
+
+      <section v-if="run.status === 'completed' && finalResultText" class="panel final-result" aria-label="Agent最终业务结果">
+        <span>查询完成</span><strong>{{ finalResultText }}</strong><small v-if="hasSensorQuery">传感器数量：{{ queriedSensorCount }}</small>
       </section>
 
       <div v-if="Object.keys(structured).length" class="panel structured-card"><h3>已识别需求</h3><dl><div><dt>对象</dt><dd>{{ structured.object || '-' }}</dd></div><div><dt>区域</dt><dd>{{ structured.area || '-' }}</dd></div><div><dt>时间</dt><dd>{{ structured.timeRange?.start || '-' }} → {{ structured.timeRange?.end || '-' }}</dd></div><div><dt>频次</dt><dd>{{ structured.updateFrequency || '-' }}</dd></div><div><dt>感知要素</dt><dd>{{ (structured.sensingElementCodes || []).join('、') || '-' }}</dd></div></dl></div>

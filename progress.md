@@ -1577,3 +1577,28 @@
 ### Notes
 - `playwright.integration.config.ts`：将真实联调测试超时设为 90 秒。
 - 回滚方式：使用 `git revert <本轮提交>`。
+
+## 2026-08-04 - Task: Agent人工操作幂等与真实闭环展示
+
+### What was done
+- 人工完成按钮在请求处理中禁用并阻止重复提交，Checkpoint 或运行状态变化时提示刷新后重新操作。
+- Workflow 概览明确展示 Planning、Execution、来源、图类型、回退和最终节点；完成态展示结果摘要和传感器数量，包括查询结果为零的情况。
+- Mock E2E 增加人工完成防重验证，真实联调强化为完成态、动态图节点、模型审计、脱敏工件和最终结果断言。
+- README 与操作说明同步 agent 分支、真实联调命令和人工续跑行为。
+
+### Testing
+- `npm.cmd ci`：通过，安装 126 个依赖；npm audit 报告 1 个 moderate 风险，本轮未越界升级依赖。
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run test:e2e`：4 项 Mock 浏览器用例通过。
+- `npm.cmd run test:e2e:integration`：1 项真实 Vue-Django-Worker-FakeProvider-MAF 闭环通过。
+- `git diff --check`：通过，仅有既有 LF/CRLF 转换提示。
+
+### Notes
+- `README.md`：补充 agent 分支、真实联调和人工操作说明。
+- `docs/Agent执行异常与方案版本操作说明.md`：说明防重、状态冲突和原 Checkpoint 续跑。
+- `e2e/agent-workflow.spec.ts`：增加人工完成请求处理中禁用和防重复提交用例。
+- `e2e/integration/agent-real-flow.spec.ts`：断言真实最终态、动态图、模型审计、工件和业务结果。
+- `src/api/endpoints.ts`：补充最终结果摘要和错误字段类型。
+- `src/pages/AgentTaskWorkspace.vue`：增加提交防重、冲突提示、双 Workflow 明细和最终结果卡。
+- 回滚方式：执行 `git revert <本轮前端提交>`；不涉及业务数据库删除。
