@@ -15,3 +15,12 @@ Agent 工作流进入 `waiting_input` 或 `waiting_approval` 时，任务不会�
 任务运行页面会展示规划状态、执行状态、当前节点、人工请求和补充入口。`waiting_input` 时用户可以在助手卡片点击“补充信息”，提交后 Worker 从规划或执行 Checkpoint 继续；不需要用户手动刷新阶段或重新创建任务。
 
 本地验证至少需要同时运行 Django 服务、Vite 开发服务和 Agent Worker。若助手没有待办卡片，先检查当前登录用户是否拥有 `waiting_input` 或 `waiting_approval` 状态的 Agent 运行。
+## 规划图与执行图
+
+任务运行接口同时返回 `planningWorkflow` 和 `executionWorkflow`。页面的 Planning Workflow 固定展示“需求理解 → 任务分类 → 图规划 → 图校验”四个真实规划节点，下面的 Workflow 概览展示已经校验并编译后的执行图；`workflow` 仅作为旧客户端兼容字段。
+
+页面会显示实际的 `fixed-maf`、`template-maf` 或 `dynamic-maf` 模式及其来源。`dynamic-maf` 在 `planning_queued` 或 `planning` 阶段不会伪装成已经开始执行，规划完成后才进入独立的 Execution Workflow。
+
+执行监控出现未完成执行项时，运行会显示排队/等待状态；出现执行失败或人工介入时，助手会显示对应的“处理执行异常”入口。用户提交处理意见后，运行会重新入队并从保存的 Checkpoint 继续。
+
+前端 E2E 使用 Playwright 验证同一 AgentRun 同时展示两张工作流图、四个规划节点、实际 MAF 来源和执行终点。开发机若已安装 Chrome，可直接执行 `npm run test:e2e`；CI 会安装 Playwright Chromium 后执行同一脚本。

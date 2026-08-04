@@ -1415,3 +1415,27 @@
 - `src/components/AssistantPanel.vue`：增加运行入口和携带 runId 的导航处理。
 - `docs/Agent人工节点与助手入口说明.md`：同步 AgentRun 入口说明。
 - 回滚方式：回退本条前端提交即可；不涉及数据库和后端接口结构变更。
+## 2026-08-04 - Task: 展示双工作流并接入 Agent 动态图 E2E
+
+### What was done
+- 前端运行详情新增 Planning Workflow，展示需求理解、任务分类、图规划和图校验四个真实规划节点，并保留独立 Execution Workflow 展示。
+- 类型定义支持 `planningWorkflow`、`executionWorkflow` 和模型调用审计摘要，页面显示实际工作流模式与来源。
+- 增加 Playwright 配置、Agent 动态任务图 E2E 用例、`test:e2e` 脚本和 GitHub Actions 浏览器测试步骤。
+- 更新中文入口说明、README 和环境依赖锁文件。
+
+### Testing
+- `npm.cmd install`：通过，锁文件已同步。
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run test:e2e`：1 项通过。
+- `git diff --check`：通过，仅有既有 LF/CRLF 提示。
+
+### Notes
+- `src/api/endpoints.ts`：补充双工作流和模型调用类型。
+- `src/pages/AgentTaskWorkspace.vue`：展示 Planning Workflow 和实际模式状态。
+- `e2e/agent-workflow.spec.ts`：验证双图、四个规划节点、MAF 来源和执行终点。
+- `playwright.config.ts`：配置本地 Chrome 复用、CI Chromium、开发服务器和测试目录。
+- `package.json`、`package-lock.json`：增加 `@playwright/test` 和 `test:e2e`。
+- `.github/workflows/frontend-ci.yml`：接入 Playwright 安装和 E2E 步骤。
+- `README.md`、`docs/Agent人工节点与助手入口说明.md`：同步双工作流和人工继续执行说明。
+- 回滚方式：执行 `git revert <本轮提交>`；不涉及数据库和业务数据。

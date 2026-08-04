@@ -25,3 +25,9 @@ jobs:
 
       - name: Vite 生产构建
         run: npm run build
+
+      - name: 安装 Playwright 浏览器
+        run: npx playwright install --with-deps chromium
+
+      - name: Agent 动态任务图端到端测试
+        run: npm run test:e2e

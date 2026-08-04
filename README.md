@@ -41,7 +41,12 @@ npm run dev -- --host 127.0.0.1 --port 5173
 ```powershell
 npm run typecheck
 npm run build
+npm run test:e2e
 ```
+
+Agent 任务工作区会把同一运行拆成两张图：Planning Workflow 展示需求理解、任务分类、图规划和图校验；Execution Workflow 展示校验后的实际执行节点。页面会显示当前 `fixed-maf`、`template-maf` 或 `dynamic-maf` 模式及来源，避免把模板选择误认为动态规划。
+
+Playwright E2E 需要 Chromium。CI 会通过 `npx playwright install --with-deps chromium` 安装；本地 Windows 若已安装 Chrome，配置会直接复用 Chrome。执行脚本会用接口桩验证两张工作流图和四个规划节点的展示。
 
 浏览器：登录后从首页 22 项功能矩阵进入各中心，按 Tab 验收。
 

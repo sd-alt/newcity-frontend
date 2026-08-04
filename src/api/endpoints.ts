@@ -433,6 +433,25 @@ export type AgentWorkflowData = {
   edgeCount: number
   nodes: AgentWorkflowNode[]
   edges: Array<{ id: number; sourceNodeId: string; targetNodeId: string; relation: string }>
+  events?: Array<Record<string, unknown>>
+}
+export type AgentModelCallData = {
+  id: number
+  stageId?: number | null
+  phase: string
+  agentCode: string
+  provider: string
+  model: string
+  promptVersion: string
+  status: string
+  requestTokens: number
+  responseTokens: number
+  totalTokens: number
+  latencyMs: number
+  schemaRepairAttempts: number
+  fallbackReason: string
+  userAdopted?: boolean | null
+  errorMessage: string
 }
 export type AgentRunData = Record<string, unknown> & {
   id: string
@@ -440,10 +459,13 @@ export type AgentRunData = Record<string, unknown> & {
   currentStage: string
   progress: number
   workflow?: AgentWorkflowData
+  planningWorkflow?: AgentWorkflowData
+  executionWorkflow?: AgentWorkflowData
   stages?: AgentWorkflowNode[]
   pendingApprovals?: Array<Record<string, unknown>>
   toolCalls?: Array<Record<string, unknown>>
   artifacts?: Array<Record<string, unknown>>
+  modelCalls?: AgentModelCallData[]
 }
 export const createAgentTask = (body: Record<string, unknown>) =>
   apiEnvelope<Record<string, unknown>>('/api/application/agent-tasks/', { method: 'POST', body: JSON.stringify(body) })
