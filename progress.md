@@ -1549,3 +1549,17 @@
 ### Notes
 - `.github/workflows/frontend-ci.yml`：增加手动触发入口。
 - 回滚方式：使用 `git revert <本轮提交>`，不删除已配置的跨仓库读取密钥。
+
+## 2026-08-04 - Task: 修复 Windows 联调 Python 输出编码
+
+### What was done
+- 根据最新联调日志确认种子数据命令的中文输出也会触发 Windows `cp1252` 编码错误。
+- 在真实联调 job 级别设置 `PYTHONUTF8=1` 和 `PYTHONIOENCODING=utf-8`，覆盖迁移、种子数据和 Worker 的 Python 输出。
+
+### Testing
+- 后端最新 Actions 已通过；前端基础检查已通过，上一轮真实联调仅因种子数据中文输出失败。
+- `git diff --check`：待提交前执行。
+
+### Notes
+- `.github/workflows/frontend-ci.yml`：为 Windows 真实联调 job 统一设置 Python UTF-8 输出。
+- 回滚方式：使用 `git revert <本轮提交>`，保留跨仓库读取密钥配置。

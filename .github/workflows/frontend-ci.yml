@@ -36,6 +36,9 @@ jobs:
   integration:
     name: Vue-Django-MAF真实联调
     runs-on: windows-latest
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
     steps:
       - name: 检出前端代码
         uses: actions/checkout@v4
