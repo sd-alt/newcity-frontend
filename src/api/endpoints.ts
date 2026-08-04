@@ -187,12 +187,14 @@ export type AssistantAction = {
   taskId?: number
   taskCode?: string
   taskName?: string
+  runId?: string
 }
 export type AssistantChatData = {
   reply: string
   intent: string
   mode: string
   actions: AssistantAction[]
+  runId?: string
   suggestions?: string[]
 }
 export type AssistantStatusData = {

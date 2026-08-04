@@ -199,6 +199,11 @@ async function send(text?: string) {
 }
 
 async function runAction(action: AssistantAction) {
+  if (action.type === 'agent_run_created' && action.runId) {
+    await router.push({ path: '/application/tasks', query: { runId: action.runId, focus: 'workflow' } })
+    open.value = false
+    return
+  }
   if (action.type === 'task_created' && action.taskId != null) {
     await router.push({ path: '/planning', query: { tab: 'tasks' } })
     await new Promise((r) => setTimeout(r, 200))
@@ -207,12 +212,19 @@ async function runAction(action: AssistantAction) {
     return
   }
   if (action.route) {
-    await router.push({ path: action.route, query: action.tab ? { tab: action.tab } : {} })
+    await router.push({
+      path: action.route,
+      query: {
+        ...(action.tab ? { tab: action.tab } : {}),
+        ...(action.runId ? { runId: action.runId, focus: 'workflow' } : {}),
+      },
+    })
     open.value = false
   }
 }
 
 function actionLabel(action: AssistantAction) {
+  if (action.type === 'agent_run_created') return '打开任务运行'
   if (action.type === 'task_created') return `查看任务 #${action.taskId}`
   return action.label || '打开'
 }

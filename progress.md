@@ -1397,3 +1397,21 @@
 ### Notes
 - `src/pages/AgentTaskWorkspace.vue`：更新模式说明、创建结果提示和查询运行卡片。
 - 回滚方式：选择性回退该文件本条改动即可。
+
+## 2026-08-04 - Task: 接入 AgentRun 助手任务入口
+
+### What was done
+- 助手创建任务按钮识别 `agent_run_created`，携带 `runId` 进入任务运行工作区。
+- 普通导航动作也会保留 `runId`，支持从对话直接定位规划或执行运行；类型定义同步补充运行字段。
+- 中文助手入口说明补充动态规划未提前建草稿、人工补充和 Checkpoint 恢复行为。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `git diff --check`：通过，仅有既有 LF/CRLF 转换提示。
+
+### Notes
+- `src/api/endpoints.ts`：补充 AgentRun 助手动作和响应字段。
+- `src/components/AssistantPanel.vue`：增加运行入口和携带 runId 的导航处理。
+- `docs/Agent人工节点与助手入口说明.md`：同步 AgentRun 入口说明。
+- 回滚方式：回退本条前端提交即可；不涉及数据库和后端接口结构变更。
