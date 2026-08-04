@@ -1449,3 +1449,14 @@
 
 ### Notes
 - 回滚方式：回滚 `dcac048` 后重新推送 `agent` 分支；不涉及业务数据。
+## 2026-08-04 - Task: Agent可靠性闭环与方案资源人工选择
+
+### What was done
+- 增加执行异常按执行项处置、轮询状态提示、方案资源选择参数提交、方案版本历史与回滚操作入口，并展示模型审计摘要。
+
+### Testing
+- `npm.cmd run typecheck`、`npm.cmd run build` 和 `npm.cmd run test:e2e` 全部通过。
+
+### Notes
+- 改动文件：src/api/endpoints.ts、src/pages/AgentTaskWorkspace.vue、src/pages/PlanningCenter.vue、docs/Agent执行异常与方案版本操作说明.md。
+- 回滚方式：执行本轮提交对应的 `git revert <commit>`；不涉及前端业务数据删除。

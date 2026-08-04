@@ -122,6 +122,11 @@ const instances = ref<Record<string, unknown>[]>([])
 const scales = ref<Record<string, unknown>[]>([])
 const tasks = ref<Record<string, unknown>[]>([])
 const plans = ref<Record<string, unknown>[]>([])
+type PlanHistoryRow = { id: number | string; version: number; changeType?: string; reason?: string }
+function planHistory(value: unknown): PlanHistoryRow[] {
+  return Array.isArray(value) ? value.filter((item): item is PlanHistoryRow => Boolean(item && typeof item === 'object' && 'id' in item && 'version' in item)) : []
+}
+function planVersion(value: unknown) { return Number(value || 1) }
 const lastCopiedPlanId = ref<string | number | null>(null)
 
 function sortPlans(list: Record<string, unknown>[]) {
@@ -1329,6 +1334,21 @@ async function doPublishPlan(planId: unknown, status?: unknown) {
     message.value = '方案 #' + planId + ' 已发布，已同步地图关联'
   } catch (err) {
     error.value = errMessage(err, '方案发布失败')
+  } finally {
+    pending.value = false
+  }
+}
+
+async function doRollbackPlan(plan: Record<string, unknown>, version: number) {
+  if (!window.confirm(`确认将方案 #${plan.id} 回滚到 v${version} 吗？`)) return
+  pending.value = true
+  error.value = null
+  try {
+    await api.rollbackPlan(String(plan.id), version, `网页端回滚到 v${version}`)
+    message.value = `方案 #${plan.id} 已回滚到 v${version}`
+    await loadLists()
+  } catch (err) {
+    error.value = errMessage(err, '方案回滚失败')
   } finally {
     pending.value = false
   }
@@ -2587,14 +2607,15 @@ async function applyPlanningMapAction() {
         <p class="muted">方案由任务关联流程生成；支持查看关联结果、复制草稿、审核、发布、归档与方案对比（文档：方案管理）。</p>
         <div v-if="planSectionPage === 1" class="plan-section-content">
         <table v-table-pager="{ label: '规划方案分页' }" class="table">
-          <thead><tr><th>ID</th><th>名称</th><th>任务</th><th>类型</th><th>状态</th><th>操作</th></tr></thead>
+          <thead><tr><th>ID</th><th>名称</th><th>任务</th><th>类型</th><th>版本</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
-            <tr v-if="!plans.length"><td colspan="6" class="muted">暂无方案。请先完成观测规划关联流程生成方案。</td></tr>
+            <tr v-if="!plans.length"><td colspan="7" class="muted">暂无方案。请先完成观测规划关联流程生成方案。</td></tr>
             <tr v-for="p in plans" :key="String(p.id)" class="row-click" :class="{ selected: isPlanRowSelected(p) || String(lastCopiedPlanId) === String(p.id) }" @click="onPlanRowClick(p)">
               <td>{{ p.id }}</td>
               <td>{{ p.name }}</td>
               <td>{{ p.taskId }}</td>
               <td>{{ p.planType || '-' }}</td>
+              <td>v{{ planVersion(p.version) }}</td>
               <td>{{ planStatusLabel(p.status) }}</td>
               <td class="ops">
                 <select class="table-action-select" :disabled="pending" aria-label="方案操作" @click.stop @change.stop="runPlanRowAction(p, $event)">
@@ -2605,6 +2626,13 @@ async function applyPlanningMapAction() {
                   <option value="publish" :disabled="!canPublishPlanStatus(planLiveStatus(p.id, p.status))">发布</option>
                   <option value="archive" :disabled="canByStatus(planLiveStatus(p.id, p.status), ['archived'])">归档</option>
                 </select>
+                <details v-if="planHistory(p.versionHistory).length" class="plan-history" @click.stop>
+                  <summary>历史</summary>
+                  <div v-for="history in planHistory(p.versionHistory)" :key="String(history.id)">
+                    <span>v{{ history.version }} · {{ history.changeType }}</span>
+                    <button v-if="Number(history.version) !== planVersion(p.version)" class="btn tiny ghost" type="button" @click.stop="doRollbackPlan(p, Number(history.version))">回滚</button>
+                  </div>
+                </details>
               </td>
             </tr>
           </tbody>

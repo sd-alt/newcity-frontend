@@ -263,6 +263,8 @@ export const listOptimizationTasks = () => listAny('/api/v1/association/optimiza
 export const getAssociationResult = (planId: number | string) => getAny('/api/v1/association/result/' + planId)
 export const archivePlan = (id: number | string) => postAction('/api/v1/association/plans/' + id + '/archive')
 export const publishPlan = (id: number | string) => postAction('/api/v1/association/plans/' + id + '/publish')
+export const rollbackPlan = (id: number | string, version: number, reason = '') =>
+  postAction('/api/v1/association/plans/' + id + '/rollback', { version, reason })
 export const copyPlan = (id: number | string, body: Record<string, unknown> = {}) =>
   postAction('/api/v1/association/plans/' + id + '/copy', body)
 export const approvePlan = (id: number | string) => postAction('/api/v1/association/plans/' + id + '/approve')
@@ -450,6 +452,13 @@ export type AgentModelCallData = {
   latencyMs: number
   schemaRepairAttempts: number
   fallbackReason: string
+  inputReference?: Record<string, unknown>
+  outputReference?: Record<string, unknown>
+  promptHash?: string
+  schemaVersion?: string
+  validatorStatus?: string
+  validatorErrors?: string[]
+  fallbackUsed?: boolean
   userAdopted?: boolean | null
   errorMessage: string
 }
@@ -466,14 +475,27 @@ export type AgentRunData = Record<string, unknown> & {
   toolCalls?: Array<Record<string, unknown>>
   artifacts?: Array<Record<string, unknown>>
   modelCalls?: AgentModelCallData[]
+  nextPollAt?: string | null
+  pollAttempt?: number
+  pollIntervalSeconds?: number
+  planVersion?: number | null
+  planVersions?: Array<Record<string, unknown>>
 }
 export const createAgentTask = (body: Record<string, unknown>) =>
   apiEnvelope<Record<string, unknown>>('/api/application/agent-tasks/', { method: 'POST', body: JSON.stringify(body) })
 export const getAgentRun = (runId: string) => apiEnvelope<AgentRunData>(`/api/agent/runs/${runId}/`)
 export const sendAgentMessage = (runId: string, message: string) =>
   apiEnvelope<AgentRunData>(`/api/agent/runs/${runId}/messages/`, { method: 'POST', body: JSON.stringify({ message }) })
-export const decideAgentApproval = (runId: string, approvalId: number | string, decision: 'approved' | 'rejected', note = '') =>
-  apiEnvelope<AgentRunData>(`/api/agent/runs/${runId}/approvals/${approvalId}/`, { method: 'POST', body: JSON.stringify({ decision, note }) })
+export const decideAgentApproval = (
+  runId: string,
+  approvalId: number | string,
+  decision: 'approved' | 'rejected',
+  note = '',
+  options: { executionItemId?: number | string; action?: 'retry' | 'manual' | 'cancel'; parameters?: Record<string, unknown> } = {},
+) => apiEnvelope<AgentRunData>(`/api/agent/runs/${runId}/approvals/${approvalId}/`, {
+  method: 'POST',
+  body: JSON.stringify({ decision, note, ...options }),
+})
 export const controlAgentRun = (runId: string, action: 'pause' | 'resume' | 'retry' | 'cancel' | 'takeover') =>
   apiEnvelope<AgentRunData>(`/api/agent/runs/${runId}/${action}/`, { method: 'POST' })
 export const agentRunEventsUrl = (runId: string) => `/api/agent/runs/${runId}/events/`

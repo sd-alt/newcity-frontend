@@ -57,7 +57,20 @@ const workflowLevels = computed(() => {
   return Array.from(groups.entries()).sort(([left], [right]) => left - right).map(([level, nodes]) => ({ level, nodes }))
 })
 const approvals = computed(() => ((run.value?.pendingApprovals || []) as Row[]).filter((item) => item.status === 'pending'))
+const executionInterventions = computed(() => approvals.value.filter((item) => item.type === 'execution_intervention'))
+const planSelectionApprovals = computed(() => approvals.value.filter((item) => item.type === 'plan_resource_selection'))
+const ordinaryApprovals = computed(() => approvals.value.filter((item) => !['execution_intervention', 'plan_resource_selection'].includes(String(item.type))))
+const interventionNotes = ref<Record<string, string>>({})
+type PlanSelection = {
+  oldPlanResourceId: string
+  oldResourceId: string
+  newResourceId: string
+  expectedPlanVersion: string
+  reason: string
+}
+const planSelections = ref<Record<string, PlanSelection>>({})
 const toolCalls = computed(() => (run.value?.toolCalls || []) as Row[])
+const modelCalls = computed(() => (run.value?.modelCalls || []) as Row[])
 const artifacts = computed(() => (run.value?.artifacts || []) as Row[])
 const reversedToolCalls = computed(() => toolCalls.value.slice().reverse())
 const auditPageCount = computed(() => Math.max(1, Math.ceil(reversedToolCalls.value.length / cardPageSize)))
@@ -87,8 +100,14 @@ const workflowPhaseLabel = computed(() => {
   if (['queued', 'running', 'waiting_input', 'waiting_approval', 'paused'].includes(status)) return '执行工作流'
   return statusLabel(status)
 })
+const pollDescription = computed(() => {
+  if (!run.value?.nextPollAt) return ''
+  const next = new Date(run.value.nextPollAt).toLocaleTimeString()
+  return `外部执行等待下一次状态查询：${next}；第 ${run.value.pollAttempt || 0} 次，间隔 ${run.value.pollIntervalSeconds || 0} 秒`
+})
 
 function rows(value: unknown): Row[] { return Array.isArray(value) ? value as Row[] : [] }
+function strings(value: unknown): string[] { return Array.isArray(value) ? value.map((item) => String(item)) : [] }
 function localIso(value: string) { return value ? new Date(value).toISOString() : undefined }
 function statusLabel(value: string) { return ({ pending: '待执行', planning_queued: '规划排队中', planning: '规划中', planning_paused: '规划已暂停', queued: '执行排队中', running: '执行中', completed: '已完成', waiting_approval: '待确认', waiting_input: '待补充', failed: '失败', manual_required: '需人工', rejected: '已拒绝', paused: '已暂停' } as Record<string, string>)[value] || value }
 function compactJson(value: unknown) {
@@ -175,7 +194,11 @@ async function refreshRun(id = runId.value, quiet = false) {
 }
 async function focusHumanAction() {
   await nextTick()
-  const target = run.value?.status === 'waiting_input' ? followupPanel.value : approvalPanel.value
+  const target = executionInterventions.value.length || planSelectionApprovals.value.length
+    ? approvalPanel.value
+    : run.value?.status === 'waiting_input'
+      ? followupPanel.value
+      : approvalPanel.value
   target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   if (run.value?.status === 'waiting_input') followupInput.value?.focus()
 }
@@ -228,6 +251,74 @@ function applyAiPreferences() {
   mode.value = value.defaultTaskMode
   showTechnicalDetails.value = value.showTechnicalDetails
 }
+async function decideExecution(approval: Row, item: Row, action: string) {
+  if (!['retry', 'manual', 'cancel'].includes(action)) return
+  const note = interventionNotes.value[`${approval.id}:${item.id}`] || ''
+  if (action === 'cancel' && !window.confirm('确认取消这个执行项吗？')) return
+  try {
+    const response = await api.decideAgentApproval(
+      runId.value,
+      approval.id,
+      'approved',
+      note,
+      { executionItemId: item.id, action: action as 'retry' | 'manual' | 'cancel' },
+    )
+    run.value = response.data
+    message.value = `执行项已提交${action === 'retry' ? '重试' : action === 'manual' ? '人工处理' : '取消'}操作`
+    startTracking(runId.value)
+  } catch (cause) { error.value = errMessage(cause, '执行异常处置提交失败') }
+}
+function planSelectionValue(approval: Row) {
+  const key = String(approval.id)
+  if (!planSelections.value[key]) {
+    const payload = (approval.payload || {}) as Row
+    const existing = rows(payload.existingResources)
+    const candidates = rows(payload.candidates).filter((item) => item.id && item.matched !== false)
+    const first = existing[0] || {}
+    planSelections.value[key] = {
+      oldPlanResourceId: String(first.id || ''),
+      oldResourceId: String(first.sensor_id || first.sensorId || first.resource_id || ''),
+      newResourceId: String(candidates[0]?.id || ''),
+      expectedPlanVersion: String(payload.planVersion || run.value?.planVersion || ''),
+      reason: '',
+    }
+  }
+  return planSelections.value[key]
+}
+function planExistingResources(approval: Row) { return rows((approval.payload || {}).existingResources) }
+function planCandidates(approval: Row) { return rows((approval.payload || {}).candidates).filter((item) => item.id && item.matched !== false) }
+function syncPlanOldResource(approval: Row) {
+  const value = planSelectionValue(approval)
+  const selected = planExistingResources(approval).find((item) => String(item.id) === value.oldPlanResourceId) || {}
+  value.oldResourceId = String(selected.sensor_id || selected.sensorId || selected.resource_id || '')
+}
+async function submitPlanSelection(approval: Row) {
+  const value = planSelectionValue(approval)
+  if (!value.oldPlanResourceId || !value.oldResourceId || !value.newResourceId || !value.expectedPlanVersion || !value.reason.trim()) {
+    error.value = '请完整选择旧方案资源、替代资源、方案版本并填写调整原因'
+    return
+  }
+  try {
+    const response = await api.decideAgentApproval(
+      runId.value,
+      approval.id,
+      'approved',
+      value.reason.trim(),
+      {
+        parameters: {
+          oldPlanResourceId: Number(value.oldPlanResourceId),
+          oldResourceId: Number(value.oldResourceId),
+          newResourceId: Number(value.newResourceId),
+          expectedPlanVersion: Number(value.expectedPlanVersion),
+          reason: value.reason.trim(),
+        },
+      },
+    )
+    run.value = response.data
+    message.value = '方案资源替换参数已提交，工作流将继续校验并生成新版本'
+    startTracking(runId.value)
+  } catch (cause) { error.value = errMessage(cause, '方案资源选择提交失败') }
+}
 watch(() => route.query.runId, () => void loadRunFromRoute())
 watch(mapDrawGeometry, (geometry) => {
   if (!geometry || geometry.type !== 'polygon') return
@@ -279,6 +370,7 @@ onUnmounted(() => {
       </section>
       <div class="run-summary"><div><span>当前节点</span><strong>{{ currentStageName }}</strong></div><div><span>运行状态</span><strong>{{ statusLabel(run.status) }}</strong></div><div><span>必需节点</span><strong>{{ completedMandatoryNodes }}/{{ mandatoryNodeCount }}</strong></div></div>
       <div class="run-progress"><i :style="{ width: `${Number(run.progress || 0)}%` }"></i></div>
+      <p v-if="pollDescription" class="poll-notice">{{ pollDescription }}</p>
       <div class="run-actions">
         <button v-if="['planning_queued', 'planning', 'running', 'queued'].includes(run.status)" class="btn tiny" @click="control('pause')">暂停</button>
         <button v-if="run.status === 'paused' || run.status === 'manual_required'" class="btn tiny" @click="control('resume')">恢复</button>
@@ -303,8 +395,40 @@ onUnmounted(() => {
 
       <div v-if="Object.keys(structured).length" class="panel structured-card"><h3>已识别需求</h3><dl><div><dt>对象</dt><dd>{{ structured.object || '-' }}</dd></div><div><dt>区域</dt><dd>{{ structured.area || '-' }}</dd></div><div><dt>时间</dt><dd>{{ structured.timeRange?.start || '-' }} → {{ structured.timeRange?.end || '-' }}</dd></div><div><dt>频次</dt><dd>{{ structured.updateFrequency || '-' }}</dd></div><div><dt>感知要素</dt><dd>{{ (structured.sensingElementCodes || []).join('、') || '-' }}</dd></div></dl></div>
 
-      <div v-if="approvals.length" ref="approvalPanel" class="approval-stack"><article v-for="item in approvals" :key="item.id"><span>待人工确认</span><strong>{{ item.title }}</strong><p>{{ item.description }}</p><div><button class="btn ghost tiny" @click="openAdjustment(item)">先人工调整</button><button class="btn danger tiny" @click="decide(item, 'rejected')">拒绝</button><button class="btn primary tiny" @click="decide(item, 'approved')">确认并继续</button></div></article></div>
-      <div v-if="run.status === 'waiting_input'" ref="followupPanel" class="panel followup"><strong>补充需求信息</strong><textarea ref="followupInput" v-model="followup" rows="3" placeholder="补充缺失的区域、时间、目标或约束"></textarea><button class="btn primary" @click="sendFollowup">提交并重新分析</button></div>
+      <section v-if="executionInterventions.length" ref="approvalPanel" class="execution-intervention-stack">
+        <article v-for="approval in executionInterventions" :key="approval.id" class="execution-intervention-card">
+          <span>执行异常需要人工处置</span><strong>{{ approval.title }}</strong><p>{{ approval.description }}</p>
+          <div v-for="item in rows(approval.payload?.executionItems)" :key="item.id" class="execution-item-row">
+            <div><strong>{{ item.name }} #{{ item.id }}</strong><small>{{ statusLabel(item.status) }} · 进度 {{ item.progress || 0 }}% · 重试 {{ item.retryCount || 0 }} 次</small><p v-if="item.errorMessage" class="node-error">{{ item.errorMessage }}</p></div>
+            <textarea v-model="interventionNotes[`${approval.id}:${item.id}`]" rows="2" placeholder="可填写处置说明"></textarea>
+            <div class="execution-actions"><button v-for="action in strings(item.availableActions)" :key="action" class="btn tiny" :class="action === 'cancel' ? 'danger' : 'primary'" @click="decideExecution(approval, item, action)">{{ action === 'retry' ? '重试' : action === 'manual' ? '转人工' : '取消执行项' }}</button></div>
+          </div>
+        </article>
+      </section>
+      <section v-if="planSelectionApprovals.length" ref="approvalPanel" class="plan-selection-stack">
+        <article v-for="approval in planSelectionApprovals" :key="approval.id" class="plan-selection-card">
+          <span>方案资源需要明确选择</span><strong>{{ approval.title }}</strong><p>{{ approval.description }}</p>
+          <div class="plan-selection-grid">
+            <label>旧方案资源
+              <select v-model="planSelectionValue(approval).oldPlanResourceId" @change="syncPlanOldResource(approval)">
+                <option value="">请选择方案资源</option>
+                <option v-for="item in planExistingResources(approval)" :key="item.id" :value="String(item.id)">{{ item.id }} · {{ item.resource_type || item.resourceType || '资源' }} · {{ item.sensor_id || item.sensorId || item.observation_data_id || item.observationDataId || '-' }}</option>
+              </select>
+            </label>
+            <label>替代资源
+              <select v-model="planSelectionValue(approval).newResourceId">
+                <option value="">请选择替代资源</option>
+                <option v-for="item in planCandidates(approval)" :key="item.id" :value="String(item.id)">{{ item.id }} · {{ item.name || item.sensorName || item.sensor_id || item.sensorId || '候选资源' }}</option>
+              </select>
+            </label>
+            <label>期望方案版本<input v-model="planSelectionValue(approval).expectedPlanVersion" inputmode="numeric" /></label>
+            <label>调整原因<textarea v-model="planSelectionValue(approval).reason" rows="2" placeholder="例如：原传感器不可用"></textarea></label>
+          </div>
+          <div class="execution-actions"><button class="btn primary tiny" @click="submitPlanSelection(approval)">提交资源替换</button></div>
+        </article>
+      </section>
+      <div v-if="ordinaryApprovals.length" ref="approvalPanel" class="approval-stack"><article v-for="item in ordinaryApprovals" :key="item.id"><span>待人工确认</span><strong>{{ item.title }}</strong><p>{{ item.description }}</p><div><button class="btn ghost tiny" @click="openAdjustment(item)">先人工调整</button><button class="btn danger tiny" @click="decide(item, 'rejected')">拒绝</button><button class="btn primary tiny" @click="decide(item, 'approved')">确认并继续</button></div></article></div>
+      <div v-if="run.status === 'waiting_input' && !planSelectionApprovals.length" ref="followupPanel" class="panel followup"><strong>补充需求信息</strong><textarea ref="followupInput" v-model="followup" rows="3" placeholder="补充缺失的区域、时间、目标或约束"></textarea><button class="btn primary" @click="sendFollowup">提交并重新分析</button></div>
 
       <h3 class="block-title">Workflow 拓扑</h3>
       <div class="workflow-map" aria-label="按依赖层级排列的 Workflow 节点">
@@ -335,6 +459,7 @@ onUnmounted(() => {
         <h3 class="block-title">工具调用与数据来源</h3>
         <div v-if="toolCalls.length" class="audit-list"><article v-for="item in pagedToolCalls" :key="item.id"><span>{{ item.status }}</span><strong>{{ item.toolName }}</strong><small>{{ item.source || '业务 Service' }} · {{ item.durationMs }}ms · 对象 {{ JSON.stringify(item.objectIds || {}) }}</small></article></div><div v-else class="empty-state">尚无工具调用记录。后台 Worker 开始处理后会实时显示。</div>
         <CardPager v-model:page="auditPage" kind="records" :pages="auditPageLabels" :summary="`共 ${toolCalls.length} 条`" label="工具调用分页" />
+        <details class="model-audit"><summary>模型调用审计（{{ modelCalls.length }} 次）</summary><div class="audit-list"><article v-for="item in modelCalls" :key="item.id"><span>{{ item.phase }} · {{ item.validatorStatus || item.status }}</span><strong>{{ item.agentCode }} · {{ item.model || '-' }}</strong><small>{{ item.promptVersion }} · schema {{ item.schemaVersion || '-' }} · {{ item.totalTokens || 0 }} tokens · {{ item.latencyMs || 0 }}ms<span v-if="item.fallbackUsed"> · 已回退</span></small></article></div></details>
       </template>
       <p v-else class="technical-details-hidden">技术运行记录已隐藏，可在右下角 AI 助手的“设置”中开启。</p>
 
@@ -354,5 +479,24 @@ onUnmounted(() => {
 .planning-node > span { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; background: #edf4fa; color: #365c7d; font: 700 9px/1 ui-monospace, monospace; }
 .planning-node div { min-width: 0; }.planning-node strong { display: block; color: #354655; font-size: 9px; overflow-wrap: anywhere; }.planning-node small { color: #78838d; font-size: 8px; }.planning-node.completed { border-color: #b9ddca; background: #f5fbf7; }.planning-node.running { border-color: #82b5dd; box-shadow: 0 0 0 2px rgba(48,127,194,.1); }
 .technical-details-hidden { margin: .65rem 0 0; padding: .5rem .55rem; border: 1px solid #e1e3e6; border-radius: 8px; background: #f6f7f8; color: #6e6e73; font-size: 9px; }
+.poll-notice { margin: .35rem 0; padding: .45rem .55rem; border: 1px solid #cfe0ef; border-radius: 8px; background: #f0f7fd; color: #46657d; font-size: 10px; }
+.execution-intervention-stack { display: grid; gap: .45rem; margin-top: .5rem; }
+.execution-intervention-card { padding: .6rem; border: 1px solid #e0aca7; border-radius: 10px; background: #fff8f7; }
+.execution-intervention-card > span { color: #a4322c; font-size: 9px; }
+.execution-intervention-card > strong { display: block; margin-top: .15rem; color: #3a3a3c; font-size: 12px; }
+.execution-intervention-card > p { margin: .2rem 0; color: #515154; font-size: 10px; }
+.execution-item-row { display: grid; gap: .3rem; margin-top: .4rem; padding: .45rem; border: 1px solid #ead3d0; border-radius: 8px; background: #fff; }
+.execution-item-row > div:first-child { display: grid; gap: .1rem; }
+.execution-item-row small { color: #6e6e73; font-size: 9px; }
+.execution-item-row textarea { width: 100%; min-height: 34px; }
+.execution-actions { display: flex; justify-content: flex-end; gap: .25rem; }
+.plan-selection-stack { display: grid; gap: .45rem; margin-top: .5rem; }
+.plan-selection-card { padding: .6rem; border: 1px solid #d5c6a1; border-radius: 10px; background: #fffaf0; }
+.plan-selection-card > span { color: #956116; font-size: 9px; }
+.plan-selection-card > strong { display: block; margin-top: .15rem; color: #3a3a3c; font-size: 12px; }
+.plan-selection-card > p { margin: .2rem 0; color: #515154; font-size: 10px; }
+.plan-selection-grid { display: grid; gap: .35rem; margin-top: .4rem; }
+.plan-selection-grid label { display: grid; gap: .18rem; color: #6e6e73; font-size: 9px; }
+.plan-selection-grid select,.plan-selection-grid input,.plan-selection-grid textarea { width: 100%; }
 @media (prefers-reduced-motion: reduce) { .run-progress i { transition: none; } }
 </style>
