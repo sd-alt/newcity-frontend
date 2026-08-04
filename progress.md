@@ -1536,3 +1536,16 @@
 ### Notes
 - `.github/workflows/frontend-ci.yml`：为跨仓库检出增加专用只读令牌引用。
 - 回滚方式：使用 `git revert <本轮提交>`，并在前端仓库删除 `NEWCITY_REPO_READ_TOKEN` 密钥。
+
+## 2026-08-04 - Task: 增加真实联调工作流手动触发
+
+### What was done
+- 增加 `workflow_dispatch`，允许后端 `agent` 分支单独更新后手动重跑前端真实联调，不再需要制造无关前端代码提交。
+
+### Testing
+- 已确认前一轮失败由后端 Windows 迁移输出编码导致；后端修复提交 `570607e` 已推送，待本轮工作流推送后重新验证。
+- `git diff --check`：待提交前执行。
+
+### Notes
+- `.github/workflows/frontend-ci.yml`：增加手动触发入口。
+- 回滚方式：使用 `git revert <本轮提交>`，不删除已配置的跨仓库读取密钥。
