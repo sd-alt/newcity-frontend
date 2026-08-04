@@ -60,7 +60,7 @@ const approvals = computed(() => ((run.value?.pendingApprovals || []) as Row[]).
 const executionInterventions = computed(() => approvals.value.filter((item) => item.type === 'execution_intervention'))
 const planSelectionApprovals = computed(() => approvals.value.filter((item) => item.type === 'plan_resource_selection'))
 const ordinaryApprovals = computed(() => approvals.value.filter((item) => !['execution_intervention', 'plan_resource_selection'].includes(String(item.type))))
-const executionControl = computed(() => (run.value?.executionControl || {}) as Row)
+const executionControl = computed(() => (run.value?.executionControl || {}) as api.AgentExecutionControl)
 const manualExecutionItems = computed(() => rows(executionControl.value.executionItems).filter((item) => item.status === 'manual_intervention'))
 const interventionNotes = ref<Record<string, string>>({})
 type PlanSelection = {
@@ -110,6 +110,25 @@ const pollDescription = computed(() => {
 
 function rows(value: unknown): Row[] { return Array.isArray(value) ? value as Row[] : [] }
 function strings(value: unknown): string[] { return Array.isArray(value) ? value.map((item) => String(item)) : [] }
+function executionItemId(item: Row): number | null {
+  const value = Number(item.id ?? item.executionItemId)
+  return Number.isInteger(value) && value > 0 ? value : null
+}
+function executionItemLabel(item: Row) {
+  const id = executionItemId(item)
+  return id ? `执行项 #${id}` : '执行项数据不完整'
+}
+function executionItemError(item: Row) {
+  return executionItemId(item) ? '' : '执行项数据不完整，请刷新任务状态后重试。'
+}
+function planResourceId(item: Row): number | null {
+  const value = Number(item.planResourceId ?? item.id)
+  return Number.isInteger(value) && value > 0 ? value : null
+}
+function planLinkedResourceId(item: Row): number | null {
+  const value = Number(item.resourceId ?? item.sensorId ?? item.sensor_id ?? item.observationDataId ?? item.observation_data_id ?? item.id)
+  return Number.isInteger(value) && value > 0 ? value : null
+}
 function localIso(value: string) { return value ? new Date(value).toISOString() : undefined }
 function statusLabel(value: string) { return ({ pending: '待执行', planning_queued: '规划排队中', planning: '规划中', planning_paused: '规划已暂停', queued: '执行排队中', running: '执行中', completed: '已完成', waiting_approval: '待确认', waiting_input: '待补充', failed: '失败', manual_required: '需人工', rejected: '已拒绝', paused: '已暂停', cancelled: '已取消' } as Record<string, string>)[value] || value }
 function compactJson(value: unknown) {
@@ -255,7 +274,9 @@ function applyAiPreferences() {
 }
 async function decideExecution(approval: Row, item: Row, action: string) {
   if (!['retry', 'manual', 'manual_complete', 'cancel'].includes(action)) return
-  const note = interventionNotes.value[`${approval.id}:${item.id}`] || ''
+  const itemId = executionItemId(item)
+  if (!itemId) { error.value = executionItemError(item); return }
+  const note = interventionNotes.value[`${approval.id}:${itemId}`] || ''
   if (action === 'cancel' && !window.confirm('确认取消这个执行项吗？')) return
   try {
     const response = await api.decideAgentApproval(
@@ -263,7 +284,7 @@ async function decideExecution(approval: Row, item: Row, action: string) {
       approval.id,
       'approved',
       note,
-      { executionItemId: item.id, action: action as 'retry' | 'manual' | 'manual_complete' | 'cancel' },
+      { executionItemId: itemId, action: action as 'retry' | 'manual' | 'manual_complete' | 'cancel' },
     )
     run.value = response.data
     message.value = action === 'manual'
@@ -278,9 +299,11 @@ async function decideExecution(approval: Row, item: Row, action: string) {
 }
 async function completeManualExecution(item: Row) {
   if (!runId.value) return
-  const note = interventionNotes.value['manual:' + item.id] || ''
+  const itemId = executionItemId(item)
+  if (!itemId) { error.value = executionItemError(item); return }
+  const note = interventionNotes.value['manual:' + itemId] || ''
   try {
-    const response = await api.completeManualExecution(runId.value, item.id, note)
+    const response = await api.completeManualExecution(runId.value, itemId, note)
     run.value = response.data
     message.value = '人工执行项已完成，工作流将恢复监控'
     startTracking(runId.value)
@@ -300,12 +323,12 @@ function planSelectionValue(approval: Row) {
   }
   return planSelections.value[key]
 }
-function planExistingResources(approval: Row) { return rows((approval.payload || {}).existingResources) }
-function planCandidates(approval: Row) { return rows((approval.payload || {}).candidates).filter((item) => item.id && item.matched !== false) }
+function planExistingResources(approval: Row) { return rows((approval.payload || {}).existingResources).filter((item) => planResourceId(item)) }
+function planCandidates(approval: Row) { return rows((approval.payload || {}).candidates).filter((item) => planLinkedResourceId(item) && item.matched !== false) }
 function syncPlanOldResource(approval: Row) {
   const value = planSelectionValue(approval)
-  const selected = planExistingResources(approval).find((item) => String(item.id) === value.oldPlanResourceId) || {}
-  value.oldResourceId = String(selected.sensor_id || selected.sensorId || selected.resource_id || '')
+  const selected = planExistingResources(approval).find((item) => String(planResourceId(item)) === value.oldPlanResourceId) || {}
+  value.oldResourceId = String(planLinkedResourceId(selected) || '')
 }
 async function submitPlanSelection(approval: Row) {
   const value = planSelectionValue(approval)
@@ -386,10 +409,10 @@ onUnmounted(() => {
       <section v-if="run.status === 'manual_required' && executionControl.action === 'manual' && manualExecutionItems.length" ref="approvalPanel" class="execution-intervention-stack">
         <article class="execution-intervention-card">
           <span>人工执行中</span><strong>自动监控已暂停</strong><p>任务已转人工处理，完成后请提交人工执行结果。</p>
-          <div v-for="item in manualExecutionItems" :key="item.id" class="execution-item-row">
-            <div><strong>{{ item.name || ('执行项 #' + item.id) }}</strong><small>{{ statusLabel(item.status) }} · 进度 {{ item.progress || 0 }}%</small></div>
-            <textarea v-model="interventionNotes['manual:' + item.id]" rows="2" placeholder="可填写人工执行说明"></textarea>
-            <div class="execution-actions"><button class="btn primary tiny" @click="completeManualExecution(item)">人工已完成</button></div>
+          <div v-for="item in manualExecutionItems" :key="String(executionItemId(item) || item.executionItemId || item.id || item.name)" class="execution-item-row">
+            <div><strong>{{ item.name || executionItemLabel(item) }}</strong><small>{{ executionItemLabel(item) }} · {{ statusLabel(item.status) }} · 进度 {{ item.progress || 0 }}%</small><p v-if="executionItemError(item)" class="node-error">{{ executionItemError(item) }}</p></div>
+            <textarea v-model="interventionNotes['manual:' + (executionItemId(item) || item.id)]" rows="2" placeholder="可填写人工执行说明"></textarea>
+            <div class="execution-actions"><button class="btn primary tiny" :disabled="!executionItemId(item)" @click="completeManualExecution(item)">人工已完成</button></div>
           </div>
         </article>
       </section>
@@ -398,8 +421,8 @@ onUnmounted(() => {
       <p v-if="pollDescription" class="poll-notice">{{ pollDescription }}</p>
       <div class="run-actions">
         <button v-if="['planning_queued', 'planning', 'running', 'queued'].includes(run.status)" class="btn tiny" @click="control('pause')">暂停</button>
-        <button v-if="run.status === 'paused' || run.status === 'manual_required'" class="btn tiny" @click="control('resume')">恢复</button>
-        <button v-if="run.status === 'failed' || run.status === 'manual_required'" class="btn tiny" @click="control('retry')">重试</button>
+        <button v-if="(run.status === 'paused' || run.status === 'manual_required') && !['manual', 'cancel'].includes(String(executionControl.action || ''))" class="btn tiny" @click="control('resume')">恢复</button>
+        <button v-if="(run.status === 'failed' || run.status === 'manual_required') && !['manual', 'cancel'].includes(String(executionControl.action || ''))" class="btn tiny" @click="control('retry')">重试</button>
         <button v-if="run.status !== 'completed' && run.status !== 'cancelled'" class="btn ghost tiny" @click="control('takeover')">人工接管</button>
         <button class="btn ghost tiny" @click="refreshRun()">刷新</button>
         <button v-if="run.status !== 'completed' && run.status !== 'cancelled'" class="btn danger tiny" @click="control('cancel')">取消</button>
@@ -423,10 +446,10 @@ onUnmounted(() => {
       <section v-if="executionInterventions.length" ref="approvalPanel" class="execution-intervention-stack">
         <article v-for="approval in executionInterventions" :key="approval.id" class="execution-intervention-card">
           <span>执行异常需要人工处置</span><strong>{{ approval.title }}</strong><p>{{ approval.description }}</p>
-          <div v-for="item in rows(approval.payload?.executionItems)" :key="item.id" class="execution-item-row">
-            <div><strong>{{ item.name }} #{{ item.id }}</strong><small>{{ statusLabel(item.status) }} · 进度 {{ item.progress || 0 }}% · 重试 {{ item.retryCount || 0 }} 次</small><p v-if="item.errorMessage" class="node-error">{{ item.errorMessage }}</p></div>
-            <textarea v-model="interventionNotes[`${approval.id}:${item.id}`]" rows="2" placeholder="可填写处置说明"></textarea>
-            <div class="execution-actions"><button v-for="action in strings(item.availableActions)" :key="action" class="btn tiny" :class="action === 'cancel' ? 'danger' : 'primary'" @click="decideExecution(approval, item, action)">{{ action === 'retry' ? '重试' : action === 'manual' ? '转人工' : action === 'manual_complete' ? '人工已完成' : '取消执行项' }}</button></div>
+          <div v-for="item in rows(approval.payload?.executionItems)" :key="String(executionItemId(item) || item.executionItemId || item.id || item.name)" class="execution-item-row">
+            <div><strong>{{ item.name || executionItemLabel(item) }}</strong><small>{{ executionItemLabel(item) }} · {{ statusLabel(item.status) }} · 进度 {{ item.progress || 0 }}% · 重试 {{ item.retryCount || 0 }} 次</small><p v-if="item.errorMessage" class="node-error">{{ item.errorMessage }}</p><p v-if="executionItemError(item)" class="node-error">{{ executionItemError(item) }}</p></div>
+            <textarea v-model="interventionNotes[`${approval.id}:${executionItemId(item) || item.id}`]" rows="2" placeholder="可填写处置说明"></textarea>
+            <div class="execution-actions"><button v-for="action in strings(executionItemId(item) ? item.availableActions : [])" :key="action" :disabled="!executionItemId(item)" class="btn tiny" :class="action === 'cancel' ? 'danger' : 'primary'" @click="decideExecution(approval, item, action)">{{ action === 'retry' ? '重试' : action === 'manual' ? '转人工' : action === 'manual_complete' ? '人工已完成' : '取消执行项' }}</button></div>
           </div>
         </article>
       </section>
@@ -437,13 +460,13 @@ onUnmounted(() => {
             <label>旧方案资源
               <select v-model="planSelectionValue(approval).oldPlanResourceId" @change="syncPlanOldResource(approval)">
                 <option value="">请选择方案资源</option>
-                <option v-for="item in planExistingResources(approval)" :key="item.id" :value="String(item.id)">{{ item.id }} · {{ item.resourceName || item.resource_name || item.resource_type || item.resourceType || '资源' }} · {{ item.sensor_id || item.sensorId || item.observation_data_id || item.observationDataId || '-' }}</option>
+                <option v-for="item in planExistingResources(approval)" :key="String(planResourceId(item))" :value="String(planResourceId(item))">{{ planResourceId(item) }} · {{ item.resourceName || item.resourceType || '资源' }} · {{ planLinkedResourceId(item) || '-' }}</option>
               </select>
             </label>
             <label>替代资源
               <select v-model="planSelectionValue(approval).newResourceId">
                 <option value="">请选择替代资源</option>
-                <option v-for="item in planCandidates(approval)" :key="item.id" :value="String(item.id)">{{ item.id }} · {{ item.resourceName || item.name || item.sensorName || item.sensor_id || item.sensorId || '候选资源' }}</option>
+                <option v-for="item in planCandidates(approval)" :key="String(planLinkedResourceId(item))" :value="String(planLinkedResourceId(item))">{{ planLinkedResourceId(item) }} · {{ item.resourceName || item.name || item.sensorName || '候选资源' }}</option>
               </select>
             </label>
             <label>期望方案版本<input v-model="planSelectionValue(approval).expectedPlanVersion" inputmode="numeric" /></label>

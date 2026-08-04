@@ -1310,6 +1310,9 @@ function canApprovePlanStatus(status: unknown) {
 function canPublishPlanStatus(status: unknown) {
   return canByStatus(status, ['approved']) && !canByStatus(status, ['published', 'archived'])
 }
+function canUnpublishPlanStatus(status: unknown) {
+  return canByStatus(status, ['published'])
+}
 
 async function doPublishPlan(planId: unknown, status?: unknown) {
   status = planLiveStatus(planId, status)
@@ -1349,6 +1352,26 @@ async function doRollbackPlan(plan: Record<string, unknown>, version: number) {
     await loadLists()
   } catch (err) {
     error.value = errMessage(err, '方案回滚失败')
+  } finally {
+    pending.value = false
+  }
+}
+
+async function doUnpublishPlan(planId: unknown, status?: unknown) {
+  status = planLiveStatus(planId, status)
+  if (!canUnpublishPlanStatus(status)) {
+    error.value = '只有已发布方案可以取消发布'
+    return
+  }
+  if (window.confirm('确认取消发布方案 #' + planId + '？方案版本和评价版本不会改变。') === false) return
+  pending.value = true
+  error.value = null
+  try {
+    await api.unpublishPlan(String(planId))
+    await loadLists()
+    message.value = '方案 #' + planId + ' 已取消发布，配置版本保持不变'
+  } catch (err) {
+    error.value = errMessage(err, '取消发布失败')
   } finally {
     pending.value = false
   }
@@ -1436,6 +1459,7 @@ function runPlanRowAction(plan: Record<string, unknown>, event: Event) {
   else if (action === 'copy') void doCopyPlan(plan.id)
   else if (action === 'approve') void doApprovePlan(plan.id, plan.status)
   else if (action === 'publish') void doPublishPlan(plan.id, plan.status)
+  else if (action === 'unpublish') void doUnpublishPlan(plan.id, plan.status)
   else if (action === 'archive') void doArchivePlan(plan.id, plan.status)
 }
 
@@ -2604,7 +2628,7 @@ async function applyPlanningMapAction() {
 
       <section v-if="tab === 'plans'" class="panel">
         <h2>规划方案管理</h2>
-        <p class="muted">方案由任务关联流程生成；支持查看关联结果、复制草稿、审核、发布、归档与方案对比（文档：方案管理）。</p>
+        <p class="muted">方案由任务关联流程生成；支持查看关联结果、复制草稿、审核、发布、取消发布、归档与方案对比（文档：方案管理）。</p>
         <div v-if="planSectionPage === 1" class="plan-section-content">
         <table v-table-pager="{ label: '规划方案分页' }" class="table">
           <thead><tr><th>ID</th><th>名称</th><th>任务</th><th>类型</th><th>版本</th><th>状态</th><th>操作</th></tr></thead>
@@ -2624,6 +2648,7 @@ async function applyPlanningMapAction() {
                   <option value="copy">复制为草稿</option>
                   <option value="approve" :disabled="!canApprovePlanStatus(planLiveStatus(p.id, p.status))">审核</option>
                   <option value="publish" :disabled="!canPublishPlanStatus(planLiveStatus(p.id, p.status))">发布</option>
+                  <option value="unpublish" :disabled="!canUnpublishPlanStatus(planLiveStatus(p.id, p.status))">取消发布</option>
                   <option value="archive" :disabled="canByStatus(planLiveStatus(p.id, p.status), ['archived'])">归档</option>
                 </select>
                 <details v-if="planHistory(p.versionHistory).length" class="plan-history" @click.stop>

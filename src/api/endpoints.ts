@@ -263,6 +263,7 @@ export const listOptimizationTasks = () => listAny('/api/v1/association/optimiza
 export const getAssociationResult = (planId: number | string) => getAny('/api/v1/association/result/' + planId)
 export const archivePlan = (id: number | string) => postAction('/api/v1/association/plans/' + id + '/archive')
 export const publishPlan = (id: number | string) => postAction('/api/v1/association/plans/' + id + '/publish')
+export const unpublishPlan = (id: number | string) => postAction('/api/v1/association/plans/' + id + '/unpublish')
 export const rollbackPlan = (id: number | string, version: number, reason = '') =>
   postAction('/api/v1/association/plans/' + id + '/rollback', { version, reason })
 export const copyPlan = (id: number | string, body: Record<string, unknown> = {}) =>
@@ -462,6 +463,25 @@ export type AgentModelCallData = {
   userAdopted?: boolean | null
   errorMessage: string
 }
+export type ExecutionItemSummary = {
+  id: number
+  executionItemId: number
+  taskId?: number
+  planId?: number
+  name: string
+  status: string
+  progress: number
+  retryCount: number
+  errorMessage?: string
+  startedAt?: string | null
+  finishedAt?: string | null
+}
+export type AgentExecutionControl = {
+  action?: 'manual' | 'manual_complete' | 'cancel' | 'retry' | string
+  manualReasonCode?: 'execution_manual' | 'execution_cancelled' | 'model_unavailable' | 'checkpoint_error' | 'tool_error' | 'human_rejected' | string
+  message?: string
+  executionItems?: ExecutionItemSummary[]
+}
 export type AgentRunData = Record<string, unknown> & {
   id: string
   status: string
@@ -480,7 +500,7 @@ export type AgentRunData = Record<string, unknown> & {
   pollIntervalSeconds?: number
   planVersion?: number | null
   planVersions?: Array<Record<string, unknown>>
-  executionControl?: Record<string, unknown>
+  executionControl?: AgentExecutionControl
 }
 export const createAgentTask = (body: Record<string, unknown>) =>
   apiEnvelope<Record<string, unknown>>('/api/application/agent-tasks/', { method: 'POST', body: JSON.stringify(body) })

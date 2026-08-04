@@ -1482,3 +1482,42 @@
 - `playwright.config.ts`：固定 E2E 单 Worker，避免共享 Mock API 竞争。
 - `docs/Agent执行异常与方案版本操作说明.md`：补充人工完成、取消、资源版本和界面操作说明。
 - 回滚方式：在前端仓库执行 `git revert <本轮提交>`，不删除已有构建产物和业务数据。
+
+## 2026-08-04 - Task: 真实 Vue-Django-MAF 联调与 CI 收口
+
+### What was done
+- 修复真实联调脚本路径、PowerShell 工作目录、CSRF 4173 Origin 和 SSE 协商问题，确保浏览器请求真实经过 Django、Worker、Fake Provider 和 MAF。
+- 增加独立真实联调 Playwright 配置与用例，默认 Mock E2E 排除 integration 目录；增加后端 `agent` 分支联调 CI job。
+- 增加方案取消发布 API，并支持通过环境变量指定 CI 中的后端仓库路径。
+
+### Testing
+- `npm.cmd ci`：通过，安装 126 个依赖；npm audit 报告 1 个 moderate 级风险，未执行越界升级。
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run test:e2e`：3 个 Mock 用例通过。
+- `npm.cmd run test:e2e:integration`：1 个真实 Vue-Django-Worker-FakeProvider-MAF 联调用例通过。
+- `git diff --check`：通过。
+
+### Notes
+- `.github/workflows/frontend-ci.yml`：增加 Windows Runner 真实联调 job，检出后端 `agent` 分支后执行同一联调命令。
+- `package.json`：保留 Mock E2E 并增加 `test:e2e:integration` 命令。
+- `playwright.config.ts`：排除真实联调目录，避免 Mock 测试重复执行。
+- `playwright.integration.config.ts`：启动真实后端脚本和 Vite，并支持 CI 后端路径环境变量。
+- `src/api/endpoints.ts`：增加取消发布接口和统一执行项/运行控制类型。
+- `src/pages/AgentTaskWorkspace.vue`：统一执行项 ID 解析、人工按钮和结构化方案资源选择。
+- `e2e/agent-workflow.spec.ts`：验证双 Workflow、人工处置和资源选择 Mock 页面。
+- `e2e/integration/agent-real-flow.spec.ts`：验证真实登录、任务创建、动态规划图和 MAF 来源展示。
+- `docs/真实Vue-Django-MAF联调说明.md`：记录真实联调数据库、CI 和 Fake Provider 使用方式。
+- 回滚方式：本轮尚未提交；提交后使用 `git revert <本轮提交>`，不会删除业务数据库和已有构建产物。
+
+## 2026-08-04 - Task: 方案取消发布入口
+
+### What was done
+- 在方案管理页面增加取消发布操作，明确提示配置版本和评价版本保持不变，并调用后端生命周期事件接口。
+
+### Testing
+- `npm.cmd run typecheck`、`npm.cmd run build`、`npm.cmd run test:e2e`：全部通过，Mock E2E 3 个用例通过。
+
+### Notes
+- `src/pages/PlanningCenter.vue`：增加取消发布按钮、状态校验和成功提示。
+- 回滚方式：本轮尚未提交；提交后使用 `git revert <本轮提交>`。

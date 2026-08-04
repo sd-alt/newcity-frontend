@@ -2,6 +2,8 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
+  // 真实联调由独立配置启动 Django、Worker 和 Fake Provider，默认 Mock 测试不重复执行。
+  testIgnore: '**/integration/**',
   // 当前测试共享同一套本地Mock API，串行执行可避免多个页面同时初始化时互相抢占开发服务器。
   fullyParallel: false,
   workers: 1,

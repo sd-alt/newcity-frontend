@@ -31,3 +31,46 @@ jobs:
 
       - name: Agent 动态任务图端到端测试
         run: npm run test:e2e
+
+  integration:
+    name: Vue-Django-MAF真实联调
+    runs-on: windows-latest
+    steps:
+      - name: 检出前端代码
+        uses: actions/checkout@v4
+
+      - name: 检出后端agent分支
+        uses: actions/checkout@v4
+        with:
+          repository: sd-alt/newcity
+          ref: agent
+          path: newcity
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: 安装后端依赖
+        working-directory: newcity
+        run: uv sync --frozen
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 安装 Playwright 浏览器
+        run: npx playwright install --with-deps chromium
+
+      - name: Vue-Django-Worker-MAF真实联调
+        env:
+          NEWCITY_INTEGRATION_BACKEND_ROOT: ${{ github.workspace }}\newcity
+        run: npm run test:e2e:integration
