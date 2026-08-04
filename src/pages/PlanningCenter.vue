@@ -122,7 +122,7 @@ const instances = ref<Record<string, unknown>[]>([])
 const scales = ref<Record<string, unknown>[]>([])
 const tasks = ref<Record<string, unknown>[]>([])
 const plans = ref<Record<string, unknown>[]>([])
-type PlanHistoryRow = { id: number | string; version: number; changeType?: string; reason?: string }
+type PlanHistoryRow = { id: number | string; version: number; changeType?: string; reason?: string; resourceCount?: number; createdAt?: string }
 function planHistory(value: unknown): PlanHistoryRow[] {
   return Array.isArray(value) ? value.filter((item): item is PlanHistoryRow => Boolean(item && typeof item === 'object' && 'id' in item && 'version' in item)) : []
 }
@@ -2629,7 +2629,7 @@ async function applyPlanningMapAction() {
                 <details v-if="planHistory(p.versionHistory).length" class="plan-history" @click.stop>
                   <summary>历史</summary>
                   <div v-for="history in planHistory(p.versionHistory)" :key="String(history.id)">
-                    <span>v{{ history.version }} · {{ history.changeType }}</span>
+                    <span>v{{ history.version }} · {{ history.changeType }} · {{ history.reason || '无原因' }} · {{ history.resourceCount ?? 0 }}项资源 · {{ history.createdAt || '-' }}</span>
                     <button v-if="Number(history.version) !== planVersion(p.version)" class="btn tiny ghost" type="button" @click.stop="doRollbackPlan(p, Number(history.version))">回滚</button>
                   </div>
                 </details>

@@ -1460,3 +1460,25 @@
 ### Notes
 - 改动文件：src/api/endpoints.ts、src/pages/AgentTaskWorkspace.vue、src/pages/PlanningCenter.vue、docs/Agent执行异常与方案版本操作说明.md。
 - 回滚方式：执行本轮提交对应的 `git revert <commit>`；不涉及前端业务数据删除。
+## 2026-08-04 - Task: Agent执行异常闭环与方案资源结构化操作
+
+### What was done
+- 增加人工执行中、人工完成、取消执行项和自动监控暂停/恢复的页面状态与操作入口。
+- 方案资源选择改为明确的旧方案资源、旧业务资源、替代资源、期望版本和调整原因，不再默认选择第一项。
+- 隐藏结构化处置场景下的普通文本补充框，展示双 Workflow、模型审计摘要和方案版本历史。
+- 补充 Agent 动态任务图 Playwright E2E，覆盖执行异常处置和方案资源选择。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run test:e2e`：通过，3 个用例、1 个 Worker 全部通过。
+- `git diff --check`：通过，仅有既有 LF/CRLF 转换提示。
+
+### Notes
+- `src/api/endpoints.ts`：增加人工完成执行项 API 和运行控制字段。
+- `src/pages/AgentTaskWorkspace.vue`：增加人工处置面板、结构化资源选择和双 Workflow 展示。
+- `src/pages/PlanningCenter.vue`：展示方案版本、变更类型、资源数和时间。
+- `e2e/agent-workflow.spec.ts`：增加结构化处置和资源选择 E2E。
+- `playwright.config.ts`：固定 E2E 单 Worker，避免共享 Mock API 竞争。
+- `docs/Agent执行异常与方案版本操作说明.md`：补充人工完成、取消、资源版本和界面操作说明。
+- 回滚方式：在前端仓库执行 `git revert <本轮提交>`，不删除已有构建产物和业务数据。

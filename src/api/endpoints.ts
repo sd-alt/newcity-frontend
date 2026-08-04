@@ -480,6 +480,7 @@ export type AgentRunData = Record<string, unknown> & {
   pollIntervalSeconds?: number
   planVersion?: number | null
   planVersions?: Array<Record<string, unknown>>
+  executionControl?: Record<string, unknown>
 }
 export const createAgentTask = (body: Record<string, unknown>) =>
   apiEnvelope<Record<string, unknown>>('/api/application/agent-tasks/', { method: 'POST', body: JSON.stringify(body) })
@@ -491,11 +492,13 @@ export const decideAgentApproval = (
   approvalId: number | string,
   decision: 'approved' | 'rejected',
   note = '',
-  options: { executionItemId?: number | string; action?: 'retry' | 'manual' | 'cancel'; parameters?: Record<string, unknown> } = {},
+  options: { executionItemId?: number | string; action?: 'retry' | 'manual' | 'manual_complete' | 'cancel'; parameters?: Record<string, unknown> } = {},
 ) => apiEnvelope<AgentRunData>(`/api/agent/runs/${runId}/approvals/${approvalId}/`, {
   method: 'POST',
   body: JSON.stringify({ decision, note, ...options }),
 })
+export const completeManualExecution = (runId: string, executionItemId: number | string, note = '') =>
+  apiEnvelope<AgentRunData>(`/api/agent/runs/${runId}/manual-complete/`, { method: 'POST', body: JSON.stringify({ executionItemId, note }) })
 export const controlAgentRun = (runId: string, action: 'pause' | 'resume' | 'retry' | 'cancel' | 'takeover') =>
   apiEnvelope<AgentRunData>(`/api/agent/runs/${runId}/${action}/`, { method: 'POST' })
 export const agentRunEventsUrl = (runId: string) => `/api/agent/runs/${runId}/events/`

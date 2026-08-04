@@ -60,6 +60,8 @@ const approvals = computed(() => ((run.value?.pendingApprovals || []) as Row[]).
 const executionInterventions = computed(() => approvals.value.filter((item) => item.type === 'execution_intervention'))
 const planSelectionApprovals = computed(() => approvals.value.filter((item) => item.type === 'plan_resource_selection'))
 const ordinaryApprovals = computed(() => approvals.value.filter((item) => !['execution_intervention', 'plan_resource_selection'].includes(String(item.type))))
+const executionControl = computed(() => (run.value?.executionControl || {}) as Row)
+const manualExecutionItems = computed(() => rows(executionControl.value.executionItems).filter((item) => item.status === 'manual_intervention'))
 const interventionNotes = ref<Record<string, string>>({})
 type PlanSelection = {
   oldPlanResourceId: string
@@ -109,7 +111,7 @@ const pollDescription = computed(() => {
 function rows(value: unknown): Row[] { return Array.isArray(value) ? value as Row[] : [] }
 function strings(value: unknown): string[] { return Array.isArray(value) ? value.map((item) => String(item)) : [] }
 function localIso(value: string) { return value ? new Date(value).toISOString() : undefined }
-function statusLabel(value: string) { return ({ pending: '待执行', planning_queued: '规划排队中', planning: '规划中', planning_paused: '规划已暂停', queued: '执行排队中', running: '执行中', completed: '已完成', waiting_approval: '待确认', waiting_input: '待补充', failed: '失败', manual_required: '需人工', rejected: '已拒绝', paused: '已暂停' } as Record<string, string>)[value] || value }
+function statusLabel(value: string) { return ({ pending: '待执行', planning_queued: '规划排队中', planning: '规划中', planning_paused: '规划已暂停', queued: '执行排队中', running: '执行中', completed: '已完成', waiting_approval: '待确认', waiting_input: '待补充', failed: '失败', manual_required: '需人工', rejected: '已拒绝', paused: '已暂停', cancelled: '已取消' } as Record<string, string>)[value] || value }
 function compactJson(value: unknown) {
   const text = JSON.stringify(value || {}, null, 2)
   return text === '{}' ? '暂无' : text
@@ -252,7 +254,7 @@ function applyAiPreferences() {
   showTechnicalDetails.value = value.showTechnicalDetails
 }
 async function decideExecution(approval: Row, item: Row, action: string) {
-  if (!['retry', 'manual', 'cancel'].includes(action)) return
+  if (!['retry', 'manual', 'manual_complete', 'cancel'].includes(action)) return
   const note = interventionNotes.value[`${approval.id}:${item.id}`] || ''
   if (action === 'cancel' && !window.confirm('确认取消这个执行项吗？')) return
   try {
@@ -261,24 +263,37 @@ async function decideExecution(approval: Row, item: Row, action: string) {
       approval.id,
       'approved',
       note,
-      { executionItemId: item.id, action: action as 'retry' | 'manual' | 'cancel' },
+      { executionItemId: item.id, action: action as 'retry' | 'manual' | 'manual_complete' | 'cancel' },
     )
     run.value = response.data
-    message.value = `执行项已提交${action === 'retry' ? '重试' : action === 'manual' ? '人工处理' : '取消'}操作`
-    startTracking(runId.value)
+    message.value = action === 'manual'
+      ? '任务已转人工处理，自动监控已暂停'
+      : action === 'cancel'
+        ? '必需执行项已取消，任务无法自动完成'
+        : action === 'manual_complete'
+          ? '人工执行项已完成，工作流将恢复监控'
+          : '执行项已提交重试操作'
+    if (action !== 'manual' && action !== 'cancel') startTracking(runId.value)
   } catch (cause) { error.value = errMessage(cause, '执行异常处置提交失败') }
+}
+async function completeManualExecution(item: Row) {
+  if (!runId.value) return
+  const note = interventionNotes.value['manual:' + item.id] || ''
+  try {
+    const response = await api.completeManualExecution(runId.value, item.id, note)
+    run.value = response.data
+    message.value = '人工执行项已完成，工作流将恢复监控'
+    startTracking(runId.value)
+  } catch (cause) { error.value = errMessage(cause, '人工执行完成提交失败') }
 }
 function planSelectionValue(approval: Row) {
   const key = String(approval.id)
   if (!planSelections.value[key]) {
     const payload = (approval.payload || {}) as Row
-    const existing = rows(payload.existingResources)
-    const candidates = rows(payload.candidates).filter((item) => item.id && item.matched !== false)
-    const first = existing[0] || {}
     planSelections.value[key] = {
-      oldPlanResourceId: String(first.id || ''),
-      oldResourceId: String(first.sensor_id || first.sensorId || first.resource_id || ''),
-      newResourceId: String(candidates[0]?.id || ''),
+      oldPlanResourceId: '',
+      oldResourceId: '',
+      newResourceId: '',
       expectedPlanVersion: String(payload.planVersion || run.value?.planVersion || ''),
       reason: '',
     }
@@ -368,6 +383,16 @@ onUnmounted(() => {
           </article>
         </div>
       </section>
+      <section v-if="run.status === 'manual_required' && executionControl.action === 'manual' && manualExecutionItems.length" ref="approvalPanel" class="execution-intervention-stack">
+        <article class="execution-intervention-card">
+          <span>人工执行中</span><strong>自动监控已暂停</strong><p>任务已转人工处理，完成后请提交人工执行结果。</p>
+          <div v-for="item in manualExecutionItems" :key="item.id" class="execution-item-row">
+            <div><strong>{{ item.name || ('执行项 #' + item.id) }}</strong><small>{{ statusLabel(item.status) }} · 进度 {{ item.progress || 0 }}%</small></div>
+            <textarea v-model="interventionNotes['manual:' + item.id]" rows="2" placeholder="可填写人工执行说明"></textarea>
+            <div class="execution-actions"><button class="btn primary tiny" @click="completeManualExecution(item)">人工已完成</button></div>
+          </div>
+        </article>
+      </section>
       <div class="run-summary"><div><span>当前节点</span><strong>{{ currentStageName }}</strong></div><div><span>运行状态</span><strong>{{ statusLabel(run.status) }}</strong></div><div><span>必需节点</span><strong>{{ completedMandatoryNodes }}/{{ mandatoryNodeCount }}</strong></div></div>
       <div class="run-progress"><i :style="{ width: `${Number(run.progress || 0)}%` }"></i></div>
       <p v-if="pollDescription" class="poll-notice">{{ pollDescription }}</p>
@@ -401,7 +426,7 @@ onUnmounted(() => {
           <div v-for="item in rows(approval.payload?.executionItems)" :key="item.id" class="execution-item-row">
             <div><strong>{{ item.name }} #{{ item.id }}</strong><small>{{ statusLabel(item.status) }} · 进度 {{ item.progress || 0 }}% · 重试 {{ item.retryCount || 0 }} 次</small><p v-if="item.errorMessage" class="node-error">{{ item.errorMessage }}</p></div>
             <textarea v-model="interventionNotes[`${approval.id}:${item.id}`]" rows="2" placeholder="可填写处置说明"></textarea>
-            <div class="execution-actions"><button v-for="action in strings(item.availableActions)" :key="action" class="btn tiny" :class="action === 'cancel' ? 'danger' : 'primary'" @click="decideExecution(approval, item, action)">{{ action === 'retry' ? '重试' : action === 'manual' ? '转人工' : '取消执行项' }}</button></div>
+            <div class="execution-actions"><button v-for="action in strings(item.availableActions)" :key="action" class="btn tiny" :class="action === 'cancel' ? 'danger' : 'primary'" @click="decideExecution(approval, item, action)">{{ action === 'retry' ? '重试' : action === 'manual' ? '转人工' : action === 'manual_complete' ? '人工已完成' : '取消执行项' }}</button></div>
           </div>
         </article>
       </section>
@@ -412,13 +437,13 @@ onUnmounted(() => {
             <label>旧方案资源
               <select v-model="planSelectionValue(approval).oldPlanResourceId" @change="syncPlanOldResource(approval)">
                 <option value="">请选择方案资源</option>
-                <option v-for="item in planExistingResources(approval)" :key="item.id" :value="String(item.id)">{{ item.id }} · {{ item.resource_type || item.resourceType || '资源' }} · {{ item.sensor_id || item.sensorId || item.observation_data_id || item.observationDataId || '-' }}</option>
+                <option v-for="item in planExistingResources(approval)" :key="item.id" :value="String(item.id)">{{ item.id }} · {{ item.resourceName || item.resource_name || item.resource_type || item.resourceType || '资源' }} · {{ item.sensor_id || item.sensorId || item.observation_data_id || item.observationDataId || '-' }}</option>
               </select>
             </label>
             <label>替代资源
               <select v-model="planSelectionValue(approval).newResourceId">
                 <option value="">请选择替代资源</option>
-                <option v-for="item in planCandidates(approval)" :key="item.id" :value="String(item.id)">{{ item.id }} · {{ item.name || item.sensorName || item.sensor_id || item.sensorId || '候选资源' }}</option>
+                <option v-for="item in planCandidates(approval)" :key="item.id" :value="String(item.id)">{{ item.id }} · {{ item.resourceName || item.name || item.sensorName || item.sensor_id || item.sensorId || '候选资源' }}</option>
               </select>
             </label>
             <label>期望方案版本<input v-model="planSelectionValue(approval).expectedPlanVersion" inputmode="numeric" /></label>
@@ -428,7 +453,8 @@ onUnmounted(() => {
         </article>
       </section>
       <div v-if="ordinaryApprovals.length" ref="approvalPanel" class="approval-stack"><article v-for="item in ordinaryApprovals" :key="item.id"><span>待人工确认</span><strong>{{ item.title }}</strong><p>{{ item.description }}</p><div><button class="btn ghost tiny" @click="openAdjustment(item)">先人工调整</button><button class="btn danger tiny" @click="decide(item, 'rejected')">拒绝</button><button class="btn primary tiny" @click="decide(item, 'approved')">确认并继续</button></div></article></div>
-      <div v-if="run.status === 'waiting_input' && !planSelectionApprovals.length" ref="followupPanel" class="panel followup"><strong>补充需求信息</strong><textarea ref="followupInput" v-model="followup" rows="3" placeholder="补充缺失的区域、时间、目标或约束"></textarea><button class="btn primary" @click="sendFollowup">提交并重新分析</button></div>
+      <div v-if="executionControl.message && ['manual_required', 'cancelled'].includes(run.status)" class="panel followup"><strong>执行状态</strong><p>{{ executionControl.message }}</p></div>
+      <div v-if="run.status === 'waiting_input' && !executionInterventions.length && !planSelectionApprovals.length" ref="followupPanel" class="panel followup"><strong>补充需求信息</strong><textarea ref="followupInput" v-model="followup" rows="3" placeholder="补充缺失的区域、时间、目标或约束"></textarea><button class="btn primary" @click="sendFollowup">提交并重新分析</button></div>
 
       <h3 class="block-title">Workflow 拓扑</h3>
       <div class="workflow-map" aria-label="按依赖层级排列的 Workflow 节点">

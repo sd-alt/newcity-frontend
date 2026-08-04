@@ -2,7 +2,9 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
-  fullyParallel: true,
+  // 当前测试共享同一套本地Mock API，串行执行可避免多个页面同时初始化时互相抢占开发服务器。
+  fullyParallel: false,
+  workers: 1,
   reporter: [['list']],
   use: {
     baseURL: 'http://127.0.0.1:4173',
