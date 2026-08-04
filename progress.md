@@ -1563,3 +1563,17 @@
 ### Notes
 - `.github/workflows/frontend-ci.yml`：为 Windows 真实联调 job 统一设置 Python UTF-8 输出。
 - 回滚方式：使用 `git revert <本轮提交>`，保留跨仓库读取密钥配置。
+
+## 2026-08-04 - Task: 放宽 Windows 真实联调测试时限
+
+### What was done
+- 根据 Actions 日志确认真实链路已完成登录、任务创建、后端规划和页面轮询，但 CI 页面轮询超过默认 30 秒测试时限。
+- 将真实联调 Playwright 配置的单测时限调整为 90 秒，覆盖 Windows Runner 的启动和轮询开销。
+
+### Testing
+- 最新 Actions 已确认真实后端请求成功到达，失败点仅为 Playwright `Test timeout of 30000ms exceeded`。
+- `git diff --check`：待提交前执行。
+
+### Notes
+- `playwright.integration.config.ts`：将真实联调测试超时设为 90 秒。
+- 回滚方式：使用 `git revert <本轮提交>`。
