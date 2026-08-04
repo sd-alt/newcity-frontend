@@ -1439,3 +1439,13 @@
 - `.github/workflows/frontend-ci.yml`：接入 Playwright 安装和 E2E 步骤。
 - `README.md`、`docs/Agent人工节点与助手入口说明.md`：同步双工作流和人工继续执行说明。
 - 回滚方式：执行 `git revert <本轮提交>`；不涉及数据库和业务数据。
+## 2026-08-04 - Task: GitHub Actions 回归验证
+
+### What was done
+- 推送前端 `agent` 分支并确认 Playwright 动态任务图测试进入 CI。
+
+### Testing
+- GitHub Actions `30872660769`：TypeScript、Vite 构建和 Agent 动态任务图 Playwright E2E 全部通过。
+
+### Notes
+- 回滚方式：回滚 `dcac048` 后重新推送 `agent` 分支；不涉及业务数据。
