@@ -97,14 +97,14 @@ test('人工完成按钮提交期间禁用并阻止重复请求', async ({ page 
   await page.goto(`/application/tasks?runId=${runId}`)
   // 使用稳定容器定位，按钮文案在提交后会变为“正在提交”。
   const button = page.locator('.execution-intervention-card .execution-actions button')
-  const firstClick = button.click()
+  await expect(button).toBeEnabled()
+  await button.click()
   await expect.poll(() => submitCount).toBe(1)
   await expect(button).toBeDisabled()
   await expect(button).toHaveText('正在提交')
   await button.click({ force: true })
   await expect.poll(() => submitCount).toBe(1)
   releaseManualRequest?.()
-  await firstClick
 })
 
 test('Checkpoint绑定前禁用审批并在绑定后自动解锁', async ({ page }) => {

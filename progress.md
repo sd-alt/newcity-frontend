@@ -1668,3 +1668,20 @@
 - `docs/真实Vue-Django-MAF联调说明.md`：补充真实联调时限和失败判定说明。
 - `progress.md`：追加本轮实现与验证记录。
 - 回滚方式：执行 `git revert <本轮前端提交>`；不涉及业务数据和数据库结构。
+
+## 2026-08-05 - Task: 稳定人工完成防重 Mock E2E
+
+### What was done
+- 根据 Actions 日志确认业务真实联调已通过，失败来自 Mock 用例在点击动作尚未派发时提前检查请求计数。
+- 用例改为先确认按钮可用并等待点击动作派发，再断言请求仅提交一次、按钮禁用和提交中文案。
+
+### Testing
+- `npm.cmd run test:e2e -- --grep "人工完成按钮" --repeat-each=10 --workers=1`：10 次全部通过。
+- `npm.cmd run test:e2e -- --workers=1`：6 项 Mock 浏览器用例全部通过。
+- `git diff --check`：通过，仅有既有 LF/CRLF 转换提示。
+- GitHub Actions：待推送后确认两个 job 均成功。
+
+### Notes
+- `e2e/agent-workflow.spec.ts`：消除异步点击与请求计数之间的 Linux Runner 时序竞争。
+- `progress.md`：追加本轮问题定位和验证记录。
+- 回滚方式：执行 `git revert <本轮前端提交>`；不涉及业务代码和业务数据。
