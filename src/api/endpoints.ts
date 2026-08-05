@@ -482,6 +482,28 @@ export type AgentExecutionControl = {
   message?: string
   executionItems?: ExecutionItemSummary[]
 }
+export type AgentCurrentAction = {
+  type: string
+  title: string
+  description: string
+  severity: 'info' | 'warning' | 'error' | 'success' | string
+  primaryAction: { key: string; label: string; approvalId?: number }
+  secondaryActions: Array<{ key: string; label: string }>
+  blockingReasons: string[]
+}
+export type AgentEvaluationSummary = {
+  totalScore: number
+  indicatorSatisfaction: number
+  spatialCoverageRatio: number
+  timelinessScore: number
+  resourceUtilization: number
+  costScore: number
+  riskScore: number
+  approvalAllowed?: boolean
+  blockingReasons?: string[]
+  policyCode?: string
+  policyVersion?: number
+}
 export type AgentRunData = Record<string, unknown> & {
   id: string
   status: string
@@ -503,6 +525,8 @@ export type AgentRunData = Record<string, unknown> & {
   planVersions?: Array<Record<string, unknown>>
   executionControl?: AgentExecutionControl
   resultSummary?: Record<string, unknown>
+  currentAction?: AgentCurrentAction
+  evaluationSummary?: AgentEvaluationSummary | null
 }
 export const createAgentTask = (body: Record<string, unknown>) =>
   apiEnvelope<Record<string, unknown>>('/api/application/agent-tasks/', { method: 'POST', body: JSON.stringify(body) })

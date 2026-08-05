@@ -1714,3 +1714,26 @@
 - `src/pages/AgentTaskWorkspace.vue`：展示故障说明与两个可执行恢复入口。
 - `progress.md`：追加本轮实现和验证记录。
 - 回滚方式：执行 `git revert <本轮前端提交>`；本轮不修改后端数据和数据库结构，如需更换兼容后端仅更新`.github/backend-agent.sha`并重新验证。
+
+## 2026-08-05 - Task: Agent工作台创建运行分离与当前动作收口
+
+### What was done
+- 创建态默认不预填需求，任务方式改为手动、AI辅助和多Agent业务卡片；时间、区域、更新频次等明确约束收纳到可展开区域，并提供点击示例。
+- 运行态隐藏完整创建表单，顶部提供任务标识和新建任务；增加“当前需要处理”面板，保证页面只有一个主要动作，恢复、接管、取消等动作收纳到更多菜单。
+- 增加概览、任务图、结果、技术记录四个页签；默认任务图只显示业务步骤，技术记录才显示 MAF、节点代码、执行方式、模型调用、工具调用和恢复点信息。
+- 方案资源选择的期望版本改为只读当前版本；最终结果兼容顶层摘要和嵌套 `result.summary`/`result.reply`；调整 Mock 与真实浏览器用例适配新交互。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run test:e2e`：7 项全部通过。
+- 真实联调：完整规划三次人工确认链路通过；资源查询动态规划链路通过。
+- `git diff --check`：通过，仅有既有 LF/CRLF 换行提示。
+
+### Notes
+- `src/components/CurrentActionPanel.vue`：新增统一当前动作面板。
+- `src/pages/AgentTaskWorkspace.vue`：实现创建/运行分离、页签、业务化标签、唯一主动作和响应式布局。
+- `src/api/endpoints.ts`：补充当前动作和方案评价摘要类型。
+- `e2e/agent-workflow.spec.ts`、`e2e/integration/agent-real-flow.spec.ts`：覆盖页签、唯一主动作、动态规划和完整运行闭环。
+- `docs/Agent任务工作台交互说明.md`：记录信息架构、动作映射和响应式规则。
+- 回滚方式：执行 `git revert <本轮前端提交>`；不涉及业务数据库删除。
