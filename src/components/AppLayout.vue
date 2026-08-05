@@ -49,7 +49,6 @@ const DRAWER_TABS: Array<{ key: DrawerTabKey; label: string }> = [
 ]
 const drawerTab = ref<DrawerTabKey>('overview')
 const detailEditing = ref(false)
-const detailLoading = ref(false)
 const detailSaving = ref(false)
 type DetailEditForm = {
   name: string
@@ -196,7 +195,7 @@ const centers: CenterItem[] = [
       { key: 'workbench', label: '场景主题配置', to: '/application', tab: 'workbench' },
       { key: 'agent-tasks', label: '场景任务发起', to: '/application/tasks' },
       { key: 'gis', label: 'GIS综合展示', to: '/application', tab: 'gis' },
-      { key: 'progress', label: '任务进程与成果查看', to: '/application/tasks', tab: 'progress' },
+      { key: 'progress', label: '任务进程与成果查看', to: '/business/execution' },
       { key: 'stats', label: '场景统计分析', to: '/application', tab: 'stats' },
     ],
   },
@@ -285,63 +284,6 @@ watch(shellSelected, (v) => {
   }
 })
 
-const canEditSelected = computed(() => Boolean(user.value && shellSelected.value?.kind !== 'unknown'))
-function fieldText(record: Record<string, unknown>, key: string) {
-  const value = record[key]
-  return value == null ? '' : String(value)
-}
-function fieldIds(record: Record<string, unknown>, key: string) {
-  const value = record[key]
-  return Array.isArray(value) ? value.map((item) => String(item)) : []
-}
-function toDetailOptions(records: Record<string, unknown>[], nameKey = 'name'): DetailOption[] {
-  return records.map((record) => {
-    const value = fieldText(record, 'id')
-    const name = fieldText(record, nameKey) || `#${value}`
-    const code = fieldText(record, 'code')
-    return { value, label: code ? `${name}（${code}）` : name }
-  })
-}
-async function loadDetailOptions(kind: ShellFeatureKind) {
-  if (kind === 'sensor') {
-    const response = await api.listPlatformTypes()
-    detailOptions.value.platformTypes = toDetailOptions(response.data)
-    return
-  }
-  if (kind === 'data') {
-    const [datasets, platforms] = await Promise.all([api.listDatasets(), api.listPlatforms('?pageSize=200')])
-    detailOptions.value.datasets = toDetailOptions(datasets.data)
-    detailOptions.value.platforms = toDetailOptions(platforms.data)
-    return
-  }
-  if (kind === 'task') {
-    const [events, scenes, scales, instances] = await Promise.all([
-      api.listEvents(), api.listScenes(), api.listScales(), api.listInstances('?pageSize=200'),
-    ])
-    detailOptions.value.events = toDetailOptions(events.data)
-    detailOptions.value.scenes = toDetailOptions(scenes.data)
-    detailOptions.value.scales = toDetailOptions(scales.data)
-    detailOptions.value.instances = toDetailOptions(instances.data, 'instanceName')
-    return
-  }
-  if (kind === 'indicator') {
-    const [definitions, subThemes, scenes, scales] = await Promise.all([
-      api.listDefinitions(), api.listSubThemes(), api.listScenes(), api.listScales(),
-    ])
-    detailOptions.value.definitions = toDetailOptions(definitions.data)
-    detailOptions.value.subThemes = toDetailOptions(subThemes.data)
-    detailOptions.value.scenes = toDetailOptions(scenes.data)
-    detailOptions.value.scales = toDetailOptions(scales.data)
-  }
-}
-function dateTimeLocal(value: unknown) {
-  const text = String(value ?? '')
-  if (!text) return ''
-  const date = new Date(text)
-  if (Number.isNaN(date.getTime())) return text.slice(0, 16)
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
-  return local.toISOString().slice(0, 19)
-}
 function isoDateTime(value: string) {
   return value ? new Date(value).toISOString() : null
 }
@@ -392,102 +334,6 @@ const detailStatusOptions = computed(() => {
   ]
   return []
 })
-
-async function beginDetailEdit() {
-  const selected = shellSelected.value
-  if (!selected || !canEditSelected.value) return
-  detailLoading.value = true
-  try {
-    let record: Record<string, unknown> = {}
-    if (selected.kind === 'sensor') record = (await api.getPlatform(selected.id)).data
-    else if (selected.kind === 'data') record = (await api.getObservationData(selected.id)).data
-    else if (selected.kind === 'task') record = (await api.getTask(selected.id)).data
-    else if (selected.kind === 'indicator') record = (await api.getInstance(selected.id)).data
-    await loadDetailOptions(selected.kind)
-    if (selected.kind === 'sensor') {
-      detailEditForm.value = {
-        ...emptyDetailEditForm(),
-        name: fieldText(record, 'name'),
-        platformTypeId: fieldText(record, 'platformTypeId'),
-        identifier: fieldText(record, 'identifier'),
-        description: fieldText(record, 'description'),
-        model: fieldText(record, 'model'),
-        manufacturer: fieldText(record, 'manufacturer'),
-        userType: fieldText(record, 'userType'),
-        owner: fieldText(record, 'owner'),
-        status: fieldText(record, 'status'),
-      }
-    } else if (selected.kind === 'data') {
-      detailEditForm.value = {
-        ...emptyDetailEditForm(),
-        name: fieldText(record, 'name'),
-        datasetId: fieldText(record, 'datasetId'),
-        platformId: fieldText(record, 'platformId'),
-        dataType: fieldText(record, 'dataType'),
-        sourceName: fieldText(record, 'sourceName'),
-        sourceReference: fieldText(record, 'sourceReference'),
-        dataFormat: fieldText(record, 'dataFormat'),
-        coordinateSystem: fieldText(record, 'coordinateSystem'),
-        timeStart: dateTimeLocal(record.timeStart),
-        timeEnd: dateTimeLocal(record.timeEnd),
-        qualityStatus: fieldText(record, 'qualityStatus'),
-        accessLevel: fieldText(record, 'accessLevel'),
-        version: fieldText(record, 'version'),
-      }
-    } else if (selected.kind === 'task') {
-      detailEditForm.value = {
-        ...emptyDetailEditForm(),
-        name: fieldText(record, 'name'),
-        code: fieldText(record, 'code'),
-        description: fieldText(record, 'description'),
-        observationTarget: fieldText(record, 'observationTarget'),
-        priority: fieldText(record, 'priority'),
-        taskType: fieldText(record, 'taskType'),
-        eventId: fieldText(record, 'eventId'),
-        sceneId: fieldText(record, 'sceneId'),
-        scaleId: fieldText(record, 'scaleId'),
-        timeStart: dateTimeLocal(record.timeStart),
-        timeEnd: dateTimeLocal(record.timeEnd),
-        resolution: fieldText(record, 'resolution'),
-        temporalRes: fieldText(record, 'temporalRes'),
-        targetAccuracy: fieldText(record, 'targetAccuracy'),
-        maxOptimizeSats: fieldText(record, 'maxOptimizeSats'),
-        minCoverageRatio: fieldText(record, 'minCoverageRatio'),
-        wTheme: fieldText(record, 'wTheme'),
-        wSpace: fieldText(record, 'wSpace'),
-        wTime: fieldText(record, 'wTime'),
-        wCapability: fieldText(record, 'wCapability'),
-        wReliability: fieldText(record, 'wReliability'),
-        indicatorInstanceIds: fieldIds(record, 'indicatorInstanceIds'),
-      }
-    } else {
-      detailEditForm.value = {
-        ...emptyDetailEditForm(),
-        name: fieldText(record, 'instanceName'),
-        defId: fieldText(record, 'defId'),
-        subThemeId: fieldText(record, 'subThemeId'),
-        scaleId: fieldText(record, 'scaleId'),
-        sceneId: fieldText(record, 'sceneId'),
-        timeStart: dateTimeLocal(record.timeStart),
-        timeEnd: dateTimeLocal(record.timeEnd),
-        resolution: fieldText(record, 'resolution'),
-        temporalRes: fieldText(record, 'temporalRes'),
-        targetAccuracy: fieldText(record, 'targetAccuracy'),
-        status: fieldText(record, 'status'),
-      }
-    }
-    detailInitialForm.value = {
-      ...detailEditForm.value,
-      indicatorInstanceIds: [...detailEditForm.value.indicatorInstanceIds],
-    }
-    detailEditing.value = true
-    drawerTab.value = 'overview'
-  } catch (error) {
-    toast.error(errMessage(error, '无法加载可编辑信息'))
-  } finally {
-    detailLoading.value = false
-  }
-}
 
 async function saveDetailEdit() {
   const selected = shellSelected.value
@@ -780,11 +626,18 @@ async function jumpSelectedCenter() {
   if (!s) return
   closeShellRight()
   leftOpen.value = true
-  if (s.kind === 'sensor') await router.push({ path: '/resources/sensors', query: { tab: 'crud' } })
-  else if (s.kind === 'data') await router.push({ path: '/resources/data', query: { tab: 'query' } })
-  else if (s.kind === 'task') await router.push({ path: '/business', query: { tab: 'tasks' } })
-  else if (s.kind === 'indicator') await router.push({ path: '/tasks', query: { tab: 'task-systems' } })
-  else await router.push({ path: '/resources/algorithms', query: { tab: 'tasks' } })
+  const returnContext = route.path === '/application/tasks' && route.query.runId
+    ? {
+        runId: String(route.query.runId),
+        returnTo: '/application/tasks',
+        currentTab: String(route.query.tab || 'overview'),
+      }
+    : {}
+  if (s.kind === 'sensor') await router.push({ path: '/resources/sensors', query: { tab: 'crud', ...returnContext } })
+  else if (s.kind === 'data') await router.push({ path: '/resources/data', query: { tab: 'query', ...returnContext } })
+  else if (s.kind === 'task') await router.push({ path: '/business', query: { tab: 'tasks', ...returnContext } })
+  else if (s.kind === 'indicator') await router.push({ path: '/tasks', query: { tab: 'task-systems', ...returnContext } })
+  else await router.push({ path: '/resources/algorithms', query: { tab: 'tasks', ...returnContext } })
 }
 
 function reflySelected() {
@@ -1056,7 +909,7 @@ async function doLogout() {
     </aside>
 
     <!-- 区块 -->
-    <aside v-show="leftOpen && !rightOpen" class="left-panel" :style="{ width: leftWidth + 'px' }">
+    <aside v-show="leftOpen" class="left-panel" :style="{ width: leftWidth + 'px' }">
       <div class="left-panel-head">
         <span>{{ pageLabel }}</span>
         <button type="button" class="btn ghost tiny" @click="toggleLeft">收起面板</button>
@@ -1086,13 +939,6 @@ async function doLogout() {
           </strong>
         </div>
         <div class="drawer-head-actions">
-          <button
-            v-if="shellSelected && !detailEditing && canEditSelected"
-            type="button"
-            class="btn ghost tiny"
-            :disabled="detailLoading"
-            @click="beginDetailEdit"
-          >{{ detailLoading ? '加载中' : '编辑资料' }}</button>
           <button type="button" class="icon-btn drawer-close" title="关闭详情" aria-label="关闭详情" @click="closeRight">×</button>
         </div>
       </div>

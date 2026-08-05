@@ -1603,6 +1603,30 @@
 - `src/pages/AgentTaskWorkspace.vue`：增加提交防重、冲突提示、双 Workflow 明细和最终结果卡。
 - 回滚方式：执行 `git revert <本轮前端提交>`；不涉及业务数据库删除。
 
+## 2026-08-05 - Task: Agent动作聚焦、方案评价卡与地图工作区收口
+
+### What was done
+- 当前动作提交统一使用互斥键，人工结果、审批、执行处置、资源替换和刷新期间按钮禁用并展示提交状态。
+- 从任务图、结果和技术记录进入人工动作时，工作台先恢复概览，再定位并聚焦需求补充、普通审批、方案选择、执行异常或人工完成表单。
+- 增加方案评价摘要卡并在概览、方案确认和结果页复用；展示覆盖率要求、指标满足度、时效、利用率、成本、风险、策略版本和阻断原因。
+- 地图详情抽屉调整为快速查看，复杂编辑跳转业务中心并保留任务运行返回上下文；宽屏保留 Agent 左侧区，修正任务进程导航入口。
+- 增加候选资源能力、匹配原因和不可用候选展示，需求补充不再出现普通审批按钮。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run test:e2e`：8 项 Mock Playwright 用例全部通过。
+- `git diff --check`：通过，仅有既有 LF/CRLF 转换提示。
+
+### Notes
+- `src/pages/AgentTaskWorkspace.vue`：实现动作互斥、表单聚焦、评价卡和候选详情。
+- `src/components/PlanEvaluationSummary.vue`：新增方案评价摘要卡。
+- `src/components/CurrentActionPanel.vue`：增加动作提交状态和互斥禁用。
+- `src/components/AppLayout.vue`、`src/styles.css`：调整地图详情快速查看和响应式三列布局。
+- `e2e/agent-workflow.spec.ts`：增加五类人工动作跨页聚焦测试。
+- `docs/Agent任务工作台交互说明.md`：补充动作映射、评价展示和抽屉导航规则。
+- 回滚方式：执行 `git revert <本轮前端提交>`；不涉及业务数据库删除。
+
 ## 2026-08-05 - Task: 需求补充入口分离与真实联调版本固定
 
 ### What was done

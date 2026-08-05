@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
 import CardPager from '../components/CardPager.vue'
 import CurrentActionPanel from '../components/CurrentActionPanel.vue'
+import PlanEvaluationSummary from '../components/PlanEvaluationSummary.vue'
 import { shellViewer } from '../gis/mapShell'
 import { mapDrawGeometry, setMapToolMode } from '../gis/mapTools'
 import { AI_PREFERENCES_EVENT, readAiPreferences } from '../utils/aiPreferences'
@@ -25,6 +26,7 @@ const updateFrequency = ref('')
 const customFrequency = ref('')
 const runTab = ref<'overview' | 'graph' | 'results' | 'technical'>('overview')
 const submitting = ref(false)
+const activeActionKey = ref<string | null>(null)
 const error = ref('')
 const message = ref('')
 const draft = ref<Row | null>(null)
@@ -33,6 +35,10 @@ const followup = ref('')
 const followupPanel = ref<HTMLElement | null>(null)
 const followupInput = ref<HTMLTextAreaElement | null>(null)
 const approvalPanel = ref<HTMLElement | null>(null)
+const manualExecutionPanel = ref<HTMLElement | null>(null)
+const executionInterventionPanel = ref<HTMLElement | null>(null)
+const planSelectionPanel = ref<HTMLElement | null>(null)
+const ordinaryApprovalPanel = ref<HTMLElement | null>(null)
 const auditPage = ref(1)
 const artifactPage = ref(1)
 const cardPageSize = 4
@@ -79,6 +85,7 @@ const ordinaryApprovals = computed(() => approvals.value.filter((item) => ![
   'plan_resource_selection',
   'requirement_clarification',
 ].includes(String(item.type))))
+const nonRetryableFailureStages = new Set(['indicator_confirmation', 'plan_confirmation', 'dispatch_confirmation'])
 const executionControl = computed(() => (run.value?.executionControl || {}) as api.AgentExecutionControl)
 const currentAction = computed(() => {
   if (!run.value) return null
@@ -103,10 +110,27 @@ const currentAction = computed(() => {
     blockingReasons: ['恢复点物理记录或人工请求绑定异常'],
   }
   if (run.value.status === 'completed') return { type: 'completed', title: '任务已完成', description: '成果已经生成，可以查看结果。', severity: 'success', primaryAction: { key: 'view-results', label: '查看结果' }, secondaryActions: [], blockingReasons: [] }
-  if (run.value.status === 'failed') return { type: 'retry', title: '任务需要重试', description: '当前阶段执行失败，请重试或人工接管。', severity: 'error', primaryAction: { key: 'retry', label: '重试任务' }, secondaryActions: [{ key: 'takeover', label: '人工接管' }, { key: 'cancel', label: '取消任务' }], blockingReasons: [] }
+  if (run.value.executionControl?.action === 'manual_complete') return { type: 'manual_complete_recovering', title: '正在恢复自动执行', description: '人工结果已提交，系统正在从恢复点继续执行。', severity: 'info', primaryAction: { key: 'refresh', label: '刷新状态' }, secondaryActions: [{ key: 'cancel', label: '取消任务' }], blockingReasons: [] }
+  if (run.value.status === 'manual_required') return run.value.executionControl?.action === 'manual'
+    ? { type: 'manual_execution', title: '提交人工执行结果', description: '自动监控已暂停，请在线下处理完成后提交人工执行结果。', severity: 'warning', primaryAction: { key: 'manual-complete', label: '填写人工结果' }, secondaryActions: [{ key: 'cancel', label: '取消任务' }], blockingReasons: [] }
+    : { type: 'manual_required', title: '任务需要人工接管', description: '当前运行不能自动继续，请选择人工接管或取消任务。', severity: 'warning', primaryAction: { key: 'takeover', label: '人工接管' }, secondaryActions: [{ key: 'cancel', label: '取消任务' }], blockingReasons: [] }
+  if (run.value.status === 'failed' && nonRetryableFailureStages.has(String(run.value.currentStage || ''))) return { type: 'failed_manual_review', title: '任务执行失败', description: '当前阶段不支持整体重试，请人工接管处理。', severity: 'error', primaryAction: { key: 'takeover', label: '人工接管' }, secondaryActions: [{ key: 'cancel', label: '取消任务' }], blockingReasons: ['当前失败节点不允许整体重试'] }
+  if (run.value.status === 'failed') return { type: 'retry', title: '任务执行失败', description: '当前阶段执行失败，可以整体重试。', severity: 'error', primaryAction: { key: 'retry', label: '重试任务' }, secondaryActions: [{ key: 'takeover', label: '人工接管' }, { key: 'cancel', label: '取消任务' }], blockingReasons: [] }
   if (run.value.status === 'running') return { type: 'running', title: '任务正在执行', description: '系统正在处理当前任务。', severity: 'info', primaryAction: { key: 'pause', label: '暂时暂停' }, secondaryActions: [{ key: 'takeover', label: '人工接管' }, { key: 'cancel', label: '取消任务' }], blockingReasons: [] }
   return { type: 'waiting', title: '任务处理中', description: '系统正在准备下一步处理。', severity: 'info', primaryAction: { key: 'refresh', label: '刷新状态' }, secondaryActions: [{ key: 'cancel', label: '取消任务' }], blockingReasons: [] }
 })
+const evaluationSummary = computed(() => run.value?.evaluationSummary || null)
+function approvalEvaluationSummary(approval: Row) {
+  return (approval.payload?.evaluationSummary || evaluationSummary.value) as api.AgentEvaluationSummary | null
+}
+function approvalConfirmDisabled(approval: Row) {
+  const summary = approvalEvaluationSummary(approval)
+  return !approvalCheckpointReady(approval)
+    || (approval.type === 'plan_confirmation' && summary?.approvalAllowed === false)
+}
+function actionBusy(key: string) {
+  return activeActionKey.value === key
+}
 const manualExecutionItems = computed(() => rows(executionControl.value.executionItems).filter((item) => item.status === 'manual_intervention'))
 const manualCompleteSubmitting = ref<Record<number, boolean>>({})
 const interventionNotes = ref<Record<string, string>>({})
@@ -301,14 +325,26 @@ async function refreshRun(id = runId.value, quiet = false) {
   } catch (cause) { if (!quiet) error.value = errMessage(cause, '运行状态刷新失败') }
 }
 async function focusHumanAction() {
+  runTab.value = 'overview'
   await nextTick()
-  const target = executionInterventions.value.length || planSelectionApprovals.value.length
-    ? approvalPanel.value
-    : run.value?.status === 'waiting_input'
-      ? followupPanel.value
-      : approvalPanel.value
-  target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  if (run.value?.status === 'waiting_input') followupInput.value?.focus()
+  const target = requirementApproval.value
+    ? followupPanel.value
+    : executionInterventions.value.length
+      ? executionInterventionPanel.value
+      : manualExecutionItems.value.length
+        ? manualExecutionPanel.value
+        : planSelectionApprovals.value.length
+          ? planSelectionPanel.value
+          : ordinaryApprovals.value.length
+            ? ordinaryApprovalPanel.value
+            : approvalPanel.value
+  if (!target) {
+    error.value = '当前动作表单尚未加载，请刷新任务状态后重试。'
+    return
+  }
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  if (requirementApproval.value) followupInput.value?.focus()
+  else (target.querySelector('textarea, input, select, button.primary') as HTMLElement | null)?.focus()
 }
 function startNewTask() {
   stopTracking()
@@ -335,13 +371,16 @@ async function loadRunFromRoute() {
 }
 async function control(action: 'pause' | 'resume' | 'retry' | 'cancel' | 'takeover' | 'rebind-checkpoint' | 'retry-checkpoint') {
   if (!runId.value) return
+  if (activeActionKey.value) return
   if ((action === 'cancel' || action === 'takeover') && !window.confirm(action === 'cancel' ? '确认取消本次 Agent 运行？' : '确认接管并转为完全手动处理？')) return
+  activeActionKey.value = action
   try {
     const response = await api.controlAgentRun(runId.value, action)
     run.value = response.data
     message.value = ({ pause: 'Agent 已暂停', resume: 'Agent 已恢复并重新入队', retry: '失败阶段已重新入队', cancel: 'Agent 运行已取消', takeover: '已转为人工接管', 'rebind-checkpoint': 'Checkpoint 已重新绑定，请继续当前人工请求', 'retry-checkpoint': '已从最后有效 Checkpoint 重新入队' })[action]
     if (['resume', 'retry', 'retry-checkpoint'].includes(action)) startTracking(runId.value)
   } catch (cause) { error.value = errMessage(cause, '运行控制失败') }
+  finally { activeActionKey.value = null }
 }
 async function decide(approval: Row, decision: 'approved' | 'rejected') {
   if (!approvalCheckpointReady(approval)) {
@@ -350,12 +389,15 @@ async function decide(approval: Row, decision: 'approved' | 'rejected') {
     return
   }
   if (decision === 'rejected' && !window.confirm('拒绝后工作流将转为人工处理，是否继续？')) return
+  if (activeActionKey.value) return
+  activeActionKey.value = `approval:${approval.id}:${decision}`
   try {
     const response = await api.decideAgentApproval(runId.value, approval.id, decision, decision === 'approved' ? '人工核验通过' : '需要人工调整')
     run.value = response.data
     message.value = decision === 'approved' ? '已人工确认，工作流继续' : '已拒绝并转为人工处理'
     if (decision === 'approved') startTracking(runId.value)
   } catch (cause) { error.value = humanActionError(cause, '确认提交失败') }
+  finally { activeActionKey.value = null }
 }
 async function sendFollowup() {
   if (!runId.value || !followup.value.trim()) return
@@ -364,10 +406,13 @@ async function sendFollowup() {
     startTracking(runId.value)
     return
   }
+  if (activeActionKey.value) return
+  activeActionKey.value = 'requirement_clarification'
   try {
     const response = await api.sendAgentMessage(runId.value, followup.value.trim())
     run.value = response.data; followup.value = ''; message.value = '补充信息已提交，需求理解阶段将重新执行'; startTracking(runId.value)
   } catch (cause) { error.value = humanActionError(cause, '补充信息发送失败') }
+  finally { activeActionKey.value = null }
 }
 function drawArea() { setMapToolMode(shellViewer.value, 'draw-polygon'); message.value = '请在地图上逐点绘制任务区域，双击结束' }
 function clearArea() { areaWkt.value = ''; mapDrawGeometry.value = null; setMapToolMode(shellViewer.value, 'none') }
@@ -387,10 +432,14 @@ function openAdjustment(approval: Row) {
 async function primaryAction() {
   const action = currentAction.value?.primaryAction?.key
   if (!action) return
-  if (['open', 'manual_complete'].includes(action)) return focusHumanAction()
+  if (['open', 'manual_complete', 'manual-complete'].includes(action)) return focusHumanAction()
   if (action === 'view-results') { runTab.value = 'results'; return }
-  if (['pause', 'retry', 'retry-checkpoint'].includes(action)) return control(action as Parameters<typeof control>[0])
-  if (action === 'refresh') return refreshRun()
+  if (['pause', 'retry', 'retry-checkpoint', 'takeover'].includes(action)) return control(action as Parameters<typeof control>[0])
+  if (action === 'refresh') {
+    if (activeActionKey.value) return
+    activeActionKey.value = 'refresh'
+    try { await refreshRun() } finally { activeActionKey.value = null }
+  }
 }
 async function secondaryAction(key: string) {
   if (key === 'cancel' || key === 'takeover' || key === 'rebind-checkpoint' || key === 'retry-checkpoint') return control(key as Parameters<typeof control>[0])
@@ -413,6 +462,8 @@ async function decideExecution(approval: Row, item: Row, action: string) {
   if (!itemId) { error.value = executionItemError(item); return }
   const note = interventionNotes.value[`${approval.id}:${itemId}`] || ''
   if (action === 'cancel' && !window.confirm('确认取消这个执行项吗？')) return
+  if (activeActionKey.value) return
+  activeActionKey.value = `execution:${approval.id}:${itemId}:${action}`
   try {
     const response = await api.decideAgentApproval(
       runId.value,
@@ -431,6 +482,7 @@ async function decideExecution(approval: Row, item: Row, action: string) {
           : '执行项已提交重试操作'
     if (action !== 'manual' && action !== 'cancel') startTracking(runId.value)
   } catch (cause) { error.value = humanActionError(cause, '执行异常处置提交失败') }
+  finally { activeActionKey.value = null }
 }
 async function completeManualExecution(item: Row) {
   if (!runId.value) return
@@ -442,6 +494,8 @@ async function completeManualExecution(item: Row) {
     return
   }
   const note = interventionNotes.value['manual:' + itemId] || ''
+  if (activeActionKey.value) return
+  activeActionKey.value = `manual-complete:${itemId}`
   manualCompleteSubmitting.value = { ...manualCompleteSubmitting.value, [itemId]: true }
   try {
     const response = await api.completeManualExecution(runId.value, itemId, note)
@@ -452,6 +506,7 @@ async function completeManualExecution(item: Row) {
     error.value = humanActionError(cause, '人工执行完成提交失败')
   } finally {
     manualCompleteSubmitting.value = { ...manualCompleteSubmitting.value, [itemId]: false }
+    activeActionKey.value = null
   }
 }
 function planSelectionValue(approval: Row) {
@@ -470,6 +525,11 @@ function planSelectionValue(approval: Row) {
 }
 function planExistingResources(approval: Row) { return rows((approval.payload || {}).existingResources).filter((item) => planResourceId(item)) }
 function planCandidates(approval: Row) { return rows((approval.payload || {}).candidates).filter((item) => planLinkedResourceId(item) && item.matched !== false) }
+function planUnavailableCandidates(approval: Row) { return rows((approval.payload || {}).candidates).filter((item) => planLinkedResourceId(item) && item.matched === false) }
+function selectedPlanCandidate(approval: Row) {
+  const selectedId = planSelectionValue(approval).newResourceId
+  return planCandidates(approval).find((item) => String(planLinkedResourceId(item)) === selectedId) || null
+}
 function syncPlanOldResource(approval: Row) {
   const value = planSelectionValue(approval)
   const selected = planExistingResources(approval).find((item) => String(planResourceId(item)) === value.oldPlanResourceId) || {}
@@ -486,6 +546,8 @@ async function submitPlanSelection(approval: Row) {
     error.value = '请完整选择旧方案资源、替代资源、方案版本并填写调整原因'
     return
   }
+  if (activeActionKey.value) return
+  activeActionKey.value = `plan-resource-selection:${approval.id}`
   try {
     const response = await api.decideAgentApproval(
       runId.value,
@@ -506,6 +568,7 @@ async function submitPlanSelection(approval: Row) {
     message.value = '方案资源替换参数已提交，工作流将继续校验并生成新版本'
     startTracking(runId.value)
   } catch (cause) { error.value = errMessage(cause, '方案资源选择提交失败') }
+  finally { activeActionKey.value = null }
 }
 watch(() => route.query.runId, () => void loadRunFromRoute())
 watch(mapDrawGeometry, (geometry) => {
@@ -551,7 +614,7 @@ onUnmounted(() => {
     <article v-if="draft" class="draft-card"><div><span>{{ draft.taskId ? '任务草案' : '查询运行' }}</span><strong v-if="draft.taskId">#{{ draft.taskId }} · 需求 #{{ draft.demandId }}</strong><strong v-else>仅查询 · 需求 #{{ draft.demandId }}</strong><small>{{ draft.mode }} · {{ draft.status }}</small></div><p>{{ draft.originalRequirement }}</p><button v-if="draft.mode === 'manual'" class="btn tiny" @click="router.push({ path: '/tasks', query: { tab: 'task-systems', taskId: draft.taskId, sceneId } })">继续配置任务指标</button></article>
 
     <template v-if="run">
-      <CurrentActionPanel :action="currentAction" :disabled="submitting" @primary="primaryAction" @secondary="secondaryAction" />
+      <CurrentActionPanel :action="currentAction" :disabled="submitting" :active-key="activeActionKey" @primary="primaryAction" @secondary="secondaryAction" />
       <nav class="run-tabs" aria-label="任务运行内容"><button v-for="item in runTabItems" :key="item.key" :class="{ active: runTab === item.key }" @click="runTab = item.key">{{ item.label }}</button></nav>
       <section v-if="planningWorkflow && runTab === 'graph'" class="workflow-identity planning-workflow-identity" aria-label="任务规划">
         <div class="workflow-title"><div><span>任务规划</span><strong>需求理解 → 任务分类 → 图规划 → 图校验</strong><p>{{ planningWorkflow.goal }}</p></div><b class="workflow-source llm">{{ planningWorkflow.status === 'validated' ? '已校验' : '规划中' }}</b></div>
@@ -561,19 +624,19 @@ onUnmounted(() => {
           </article>
         </div>
       </section>
-      <section v-if="runTab === 'overview' && run.status === 'manual_required' && executionControl.action === 'manual' && manualExecutionItems.length" ref="approvalPanel" class="execution-intervention-stack">
+      <section v-if="runTab === 'overview' && run.status === 'manual_required' && executionControl.action === 'manual' && manualExecutionItems.length" ref="manualExecutionPanel" class="execution-intervention-stack">
         <article class="execution-intervention-card">
           <span>人工执行中</span><strong>自动监控已暂停</strong><p>任务已转人工处理，完成后请提交人工执行结果。</p>
           <div v-for="item in manualExecutionItems" :key="String(executionItemId(item) || item.executionItemId || item.id || item.name)" class="execution-item-row">
             <div><strong>{{ item.name || executionItemLabel(item) }}</strong><small>{{ executionItemLabel(item) }} · {{ statusLabel(item.status) }} · 进度 {{ item.progress || 0 }}%</small><p v-if="executionItemError(item)" class="node-error">{{ executionItemError(item) }}</p></div>
             <textarea v-model="interventionNotes['manual:' + (executionItemId(item) || item.id)]" rows="2" placeholder="可填写人工执行说明"></textarea>
-            <div class="execution-actions"><button class="btn primary tiny" :disabled="!executionItemId(item) || manualCompleteSubmitting[executionItemId(item) || 0] || run.status !== 'manual_required' || item.status !== 'manual_intervention'" @click="completeManualExecution(item)">{{ manualCompleteSubmitting[executionItemId(item) || 0] ? '正在提交' : '人工已完成' }}</button></div>
+            <div class="execution-actions"><button class="btn primary tiny" :disabled="!executionItemId(item) || manualCompleteSubmitting[executionItemId(item) || 0] || actionBusy(`manual-complete:${executionItemId(item) || 0}`) || run.status !== 'manual_required' || item.status !== 'manual_intervention'" @click="completeManualExecution(item)">{{ actionBusy(`manual-complete:${executionItemId(item) || 0}`) ? '正在提交' : '提交人工结果' }}</button></div>
           </div>
         </article>
       </section>
       <div v-if="runTab === 'overview'" class="run-overview-content"><div class="run-summary"><div><span>当前步骤</span><strong>{{ currentStageName }}</strong></div><div><span>运行状态</span><strong>{{ statusLabel(run.status) }}</strong></div><div><span>完成进度</span><strong>{{ Number(run.progress || 0) }}%</strong></div></div>
       <div class="run-progress"><i :style="{ width: `${Number(run.progress || 0)}%` }"></i></div>
-      <p v-if="pollDescription" class="poll-notice">{{ pollDescription }}</p></div>
+      <p v-if="pollDescription" class="poll-notice">{{ pollDescription }}</p><PlanEvaluationSummary :summary="evaluationSummary" /></div>
 
       <section v-if="workflow && runTab === 'technical'" class="workflow-identity" aria-label="技术记录">
         <div class="workflow-title"><div><span>Microsoft Agent Framework</span><strong>{{ workflow.graphType }}</strong><p>{{ workflow.goal }}</p></div><b :class="['workflow-source', workflow.source]">{{ workflowSourceLabel }}</b></div>
@@ -597,21 +660,22 @@ onUnmounted(() => {
       <section v-if="runTab === 'results' && run.status === 'completed' && displayedFinalResultText" class="panel final-result" aria-label="最终业务结果">
         <span>查询完成</span><strong>{{ displayedFinalResultText }}</strong><small v-if="hasSensorQuery">传感器数量：{{ queriedSensorCount }}</small>
       </section>
+      <PlanEvaluationSummary v-if="runTab === 'results'" :summary="evaluationSummary" />
 
       <div v-if="runTab === 'overview' && Object.keys(structured).length" class="panel structured-card"><h3>已识别需求</h3><dl><div><dt>对象</dt><dd>{{ structured.object || '-' }}</dd></div><div><dt>区域</dt><dd>{{ structured.area || '-' }}</dd></div><div><dt>时间</dt><dd>{{ structured.timeRange?.start || '-' }} → {{ structured.timeRange?.end || '-' }}</dd></div><div><dt>频次</dt><dd>{{ structured.updateFrequency || '-' }}</dd></div><div><dt>感知要素</dt><dd>{{ (structured.sensingElementCodes || []).join('、') || '-' }}</dd></div></dl></div>
 
-      <section v-if="runTab === 'overview' && executionInterventions.length" ref="approvalPanel" class="execution-intervention-stack">
+      <section v-if="runTab === 'overview' && executionInterventions.length" ref="executionInterventionPanel" class="execution-intervention-stack">
         <small v-if="waitingForCheckpoint">正在保存工作流检查点</small>
         <article v-for="approval in executionInterventions" :key="approval.id" class="execution-intervention-card">
           <span>执行异常需要人工处置</span><strong>{{ approval.title }}</strong><p>{{ approval.description }}</p>
           <div v-for="item in rows(approval.payload?.executionItems)" :key="String(executionItemId(item) || item.executionItemId || item.id || item.name)" class="execution-item-row">
             <div><strong>{{ item.name || executionItemLabel(item) }}</strong><small>{{ executionItemLabel(item) }} · {{ statusLabel(item.status) }} · 进度 {{ item.progress || 0 }}% · 重试 {{ item.retryCount || 0 }} 次</small><p v-if="item.errorMessage" class="node-error">{{ item.errorMessage }}</p><p v-if="executionItemError(item)" class="node-error">{{ executionItemError(item) }}</p></div>
             <textarea v-model="interventionNotes[`${approval.id}:${executionItemId(item) || item.id}`]" rows="2" placeholder="可填写处置说明"></textarea>
-            <div class="execution-actions"><button v-for="action in strings(executionItemId(item) ? item.availableActions : [])" :key="action" :disabled="!executionItemId(item) || !approvalCheckpointReady(approval)" class="btn tiny" :class="action === 'cancel' ? 'danger' : 'primary'" @click="decideExecution(approval, item, action)">{{ action === 'retry' ? '重试' : action === 'manual' ? '转人工' : action === 'manual_complete' ? '人工已完成' : '取消执行项' }}</button></div>
+            <div class="execution-actions"><button v-for="action in strings(executionItemId(item) ? item.availableActions : [])" :key="action" :disabled="!executionItemId(item) || !approvalCheckpointReady(approval) || Boolean(activeActionKey)" class="btn tiny" :class="action === 'cancel' ? 'danger' : 'primary'" @click="decideExecution(approval, item, action)">{{ actionBusy(`execution:${approval.id}:${executionItemId(item) || 0}:${action}`) ? '正在提交…' : action === 'retry' ? '重试' : action === 'manual' ? '转人工' : action === 'manual_complete' ? '人工已完成' : '取消执行项' }}</button></div>
           </div>
         </article>
       </section>
-      <section v-if="runTab === 'overview' && planSelectionApprovals.length" ref="approvalPanel" class="plan-selection-stack">
+      <section v-if="runTab === 'overview' && planSelectionApprovals.length" ref="planSelectionPanel" class="plan-selection-stack">
         <small v-if="waitingForCheckpoint">正在保存工作流检查点</small>
         <article v-for="approval in planSelectionApprovals" :key="approval.id" class="plan-selection-card">
           <span>方案资源需要明确选择</span><strong>{{ approval.title }}</strong><p>{{ approval.description }}</p>
@@ -625,18 +689,21 @@ onUnmounted(() => {
             <label>替代资源
               <select v-model="planSelectionValue(approval).newResourceId">
                 <option value="">请选择替代资源</option>
-                <option v-for="item in planCandidates(approval)" :key="String(planLinkedResourceId(item))" :value="String(planLinkedResourceId(item))">{{ planLinkedResourceId(item) }} · {{ item.resourceName || item.name || item.sensorName || '候选资源' }}</option>
+                <option v-for="item in planCandidates(approval)" :key="String(planLinkedResourceId(item))" :value="String(planLinkedResourceId(item))">{{ item.resourceName || item.name || item.sensorName || '候选资源' }} · {{ item.resourceType || '传感器' }} · {{ (item.sensingElementCodes || []).join('、') || '能力待核验' }}</option>
               </select>
             </label>
+            <div v-if="selectedPlanCandidate(approval)" class="candidate-summary"><strong>{{ selectedPlanCandidate(approval)?.resourceName || selectedPlanCandidate(approval)?.name || selectedPlanCandidate(approval)?.sensorName || '已选资源' }}</strong><span>{{ selectedPlanCandidate(approval)?.resourceType || '传感器' }} · 感知要素 {{ (selectedPlanCandidate(approval)?.sensingElementCodes || []).join('、') || '待核验' }}</span><span>覆盖率 {{ selectedPlanCandidate(approval)?.coverageRatio == null ? '-' : `${(Number(selectedPlanCandidate(approval)?.coverageRatio) * 100).toFixed(1)}%` }} · 时间分辨率 {{ selectedPlanCandidate(approval)?.temporalResolutionSeconds ?? '-' }} 秒 · 可靠性 {{ selectedPlanCandidate(approval)?.reliabilityPercent ?? '-' }}%</span><span v-if="selectedPlanCandidate(approval)?.recommendationReason">推荐原因：{{ selectedPlanCandidate(approval)?.recommendationReason }}</span><span v-if="selectedPlanCandidate(approval)?.failureReasons?.length">不满足原因：{{ selectedPlanCandidate(approval)?.failureReasons.join('；') }}</span></div>
+            <p v-if="planCandidates(approval).length" class="candidate-hint">选中后将显示匹配摘要；不满足条件的候选不会进入可选列表。</p>
+            <details v-if="planUnavailableCandidates(approval).length" class="unavailable-candidates"><summary>查看不可用候选（{{ planUnavailableCandidates(approval).length }}）</summary><ul><li v-for="item in planUnavailableCandidates(approval)" :key="String(planLinkedResourceId(item))">{{ item.resourceName || item.name || item.sensorName || `资源 #${planLinkedResourceId(item)}` }}：{{ (item.failureReasons || item.reasons || ['不满足任务约束']).join('；') }}</li></ul></details>
             <label>当前方案版本<input :value="`v${planSelectionValue(approval).expectedPlanVersion || '-'}`" readonly aria-readonly="true" /></label>
             <label>调整原因<textarea v-model="planSelectionValue(approval).reason" rows="2" placeholder="例如：原传感器不可用"></textarea></label>
           </div>
-          <div class="execution-actions"><button class="btn primary tiny" :disabled="!approvalCheckpointReady(approval)" @click="submitPlanSelection(approval)">提交资源替换</button></div>
+          <div class="execution-actions"><button class="btn primary tiny" :disabled="!approvalCheckpointReady(approval) || Boolean(activeActionKey)" @click="submitPlanSelection(approval)">{{ actionBusy(`plan-resource-selection:${approval.id}`) ? '正在提交…' : '提交资源替换' }}</button></div>
         </article>
       </section>
-      <div v-if="runTab === 'overview' && ordinaryApprovals.length" ref="approvalPanel" class="approval-stack"><article v-for="item in ordinaryApprovals" :key="item.id"><span>待人工确认</span><strong>{{ item.title }}</strong><p>{{ item.description }}</p><small v-if="!approvalCheckpointReady(item)">正在保存工作流检查点</small><div><button class="btn ghost tiny" @click="openAdjustment(item)">先人工调整</button><button class="btn danger tiny" :disabled="!approvalCheckpointReady(item)" @click="decide(item, 'rejected')">拒绝</button><button class="btn primary tiny" :disabled="!approvalCheckpointReady(item)" @click="decide(item, 'approved')">确认并继续</button></div></article></div>
+      <div v-if="runTab === 'overview' && ordinaryApprovals.length" ref="ordinaryApprovalPanel" class="approval-stack"><article v-for="item in ordinaryApprovals" :key="item.id"><span>待人工确认</span><strong>{{ item.title }}</strong><p>{{ item.description }}</p><PlanEvaluationSummary v-if="item.type === 'plan_confirmation'" :summary="approvalEvaluationSummary(item)" compact /><small v-if="!approvalCheckpointReady(item)">正在保存工作流检查点</small><small v-if="item.type === 'plan_confirmation' && approvalConfirmDisabled(item) && approvalEvaluationSummary(item)?.blockingReasons?.length" class="approval-blocked-reason">确认已禁用：{{ approvalEvaluationSummary(item)?.blockingReasons?.join('；') }}</small><div><button class="btn ghost tiny" :disabled="Boolean(activeActionKey)" @click="openAdjustment(item)">先人工调整</button><button class="btn danger tiny" :disabled="!approvalCheckpointReady(item) || Boolean(activeActionKey)" @click="decide(item, 'rejected')">{{ actionBusy(`approval:${item.id}:rejected`) ? '正在提交…' : '拒绝' }}</button><button class="btn primary tiny" :disabled="approvalConfirmDisabled(item) || Boolean(activeActionKey)" @click="decide(item, 'approved')">{{ actionBusy(`approval:${item.id}:approved`) ? '正在提交…' : '确认并继续' }}</button></div></article></div>
       <div v-if="runTab === 'overview' && executionControl.message && ['manual_required', 'cancelled'].includes(run.status)" class="panel followup"><strong>执行状态</strong><p>{{ executionControl.message }}</p></div>
-      <div v-if="runTab === 'overview' && run.status === 'waiting_input' && !executionInterventions.length && !planSelectionApprovals.length" ref="followupPanel" class="panel followup"><strong>补充需求信息</strong><small v-if="waitingForCheckpoint">正在保存工作流检查点</small><textarea ref="followupInput" v-model="followup" :disabled="waitingForCheckpoint" rows="3" placeholder="补充缺失的区域、时间、目标或约束"></textarea><button class="btn primary" :disabled="waitingForCheckpoint" @click="sendFollowup">提交并重新分析</button></div>
+      <div v-if="runTab === 'overview' && run.status === 'waiting_input' && !executionInterventions.length && !planSelectionApprovals.length" ref="followupPanel" class="panel followup"><strong>补充需求信息</strong><small v-if="waitingForCheckpoint">正在保存工作流检查点</small><textarea ref="followupInput" v-model="followup" :disabled="waitingForCheckpoint || Boolean(activeActionKey)" rows="3" placeholder="补充缺失的区域、时间、目标或约束"></textarea><button class="btn primary" :disabled="waitingForCheckpoint || Boolean(activeActionKey)" @click="sendFollowup">{{ actionBusy('requirement_clarification') ? '正在提交…' : '提交并重新分析' }}</button></div>
 
       <h3 v-if="['graph', 'technical'].includes(runTab)" class="block-title">{{ runTab === 'graph' ? '业务任务图' : '完整技术任务图' }}</h3>
       <div v-if="['graph', 'technical'].includes(runTab)" class="workflow-map" aria-label="按依赖层级排列的任务图">
@@ -711,6 +778,7 @@ onUnmounted(() => {
 .mode-card.selected { border-color: #4b8fc6; background: #f0f7fd; box-shadow: 0 0 0 2px rgba(48,127,194,.1); }.mode-card strong { color: #263746; font-size: 13px; }.mode-card small { color: #63798d; font-size: 11px; line-height: 1.35; }
 .example-list { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; color: #63798d; font-size: 12px; }.constraint-details { border-top: 1px solid #eceef1; padding-top: .55rem; }.constraint-details summary { cursor: pointer; color: #385875; font-size: 12px; }.constraint-body { display: grid; gap: .5rem; margin-top: .5rem; }.run-tabs { display: flex; gap: .2rem; margin-top: .65rem; padding: .2rem; border-bottom: 1px solid #e1e3e6; overflow-x: auto; }.run-tabs button { border: 0; border-bottom: 2px solid transparent; padding: .5rem .75rem; background: transparent; color: #63798d; font-size: 13px; cursor: pointer; white-space: nowrap; }.run-tabs button.active { border-bottom-color: var(--brand); color: #17649c; font-weight: 700; }.run-overview-content { margin-top: .35rem; }
 .run-summary span,.structured-card dt,.approval-stack span,.plan-selection-grid label,.execution-item-row small { font-size: 11px; }.run-summary strong,.structured-card dd { font-size: 13px; }.poll-notice,.structured-card dd,.approval-stack p,.plan-selection-card > p,.execution-intervention-card > p { line-height: 1.5; }
+.approval-blocked-reason { display: block; margin-top: .25rem; color: #a4322c; font-size: 12px; line-height: 1.45; }.candidate-summary { display: grid; gap: .12rem; padding: .45rem .55rem; border: 1px solid #cfe0ef; border-radius: 8px; background: #f5faff; color: #52616d; font-size: 12px; line-height: 1.45; }.candidate-summary strong { color: #263746; font-size: 13px; }.candidate-hint { color: #63798d; font-size: 12px; }.unavailable-candidates { padding: .35rem .45rem; border: 1px dashed #d5c6a1; border-radius: 7px; color: #76521d; font-size: 12px; }.unavailable-candidates ul { margin: .25rem 0 0; padding-left: 1.1rem; }
 .workflow-title span,.workflow-source,.workflow-identity dt,.workflow-identity dd,.workflow-title p,.workflow-planning-notice,.planning-node strong,.planning-node small,.workflow-level > header small,.node-head span,.workflow-node > small,.workflow-node > p,.node-dependencies,.node-tools span,.workflow-node summary,.workflow-node pre,.technical-details-hidden,.audit-list span,.audit-list strong,.audit-list small,.artifact-list span,.artifact-list strong,.artifact-list small,.empty-state { font-size: 11px; }
 .workflow-lane { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
  .run-tabs { scroll-margin-top: 5rem; }

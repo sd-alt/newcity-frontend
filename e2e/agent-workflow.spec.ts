@@ -1,4 +1,30 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
+
+async function mockAgentRun(page: Page, runId: string, run: Record<string, any>) {
+  await page.route('**/api/v1/auth/csrf', async (route) => route.fulfill({ json: { data: { csrfToken: 'test' } } }))
+  await page.route('**/api/v1/auth/me', async (route) => route.fulfill({ json: { data: { id: 1, username: 'e2e', displayName: 'E2E 用户', isStaff: true } } }))
+  await page.route('**/api/v1/association/scenes', async (route) => route.fulfill({ json: { data: [{ id: 1, name: '测试场景' }] } }))
+  await page.route(`**/api/agent/runs/${runId}/**`, async (route) => route.fulfill({ json: { data: run } }))
+}
+
+function focusActionRun(runId: string, status: string, currentStage: string, action: Record<string, any>, approvals: Record<string, any>[] = [], executionControl: Record<string, any> = {}) {
+  const checkpointId = 'focus-checkpoint'
+  return {
+    id: runId,
+    status,
+    currentStage,
+    progress: 40,
+    workflow: {
+      name: 'execution', mode: 'dynamic-maf', source: 'llm', graphType: 'full_observation_planning', goal: '聚焦人工动作', graphVersion: 1,
+      checkpointId, status, fallback: false, fallbackReason: '', nodeCount: 1, edgeCount: 0,
+      nodes: [{ nodeId: currentStage, nodeType: currentStage, code: currentStage, name: currentStage, status, mandatory: true, riskLevel: 'high', planningReason: '', topologicalLevel: 0, dependsOn: [], toolNames: [], allowedToolNames: [], inputSummary: {}, outputSummary: {}, errorMessage: '' }], edges: [],
+    },
+    currentAction: action,
+    pendingApprovals: approvals.map((item) => ({ checkpointId, status: 'pending', ...item })),
+    executionControl,
+    toolCalls: [], artifacts: [], modelCalls: [], demand: { id: 1, sceneName: '测试场景', originalRequirement: '测试人工动作定位', structuredRequirement: {} },
+  }
+}
 
 test('Agent 工作台展示独立的规划图和执行图', async ({ page }) => {
   const planningNodes = [
@@ -195,4 +221,48 @@ test('Checkpoint故障提供重新绑定和最后有效检查点重试入口', a
   await expect(rebind).toBeVisible()
   await rebind.click()
   await expect.poll(() => actions).toContain('rebind')
+})
+
+test('从不同工作台页进入人工动作时恢复概览并聚焦对应表单', async ({ page }) => {
+  const cases = [
+    {
+      id: 'focus-requirement', tab: '任务图', status: 'waiting_input', stage: 'completeness_check',
+      action: { type: 'requirement_clarification', title: '补充监测需求', description: '请补充监测条件。', severity: 'warning', primaryAction: { key: 'open', label: '补充需求' }, secondaryActions: [] },
+      approvals: [{ id: 21, type: 'requirement_clarification', title: '补充监测需求', description: '请补充监测时间。', payload: { missingFields: ['监测时间'] } }],
+      focus: page.locator('textarea[placeholder="补充缺失的区域、时间、目标或约束"]'),
+    },
+    {
+      id: 'focus-ordinary', tab: '结果', status: 'waiting_approval', stage: 'indicator_confirmation',
+      action: { type: 'indicator_confirmation', title: '确认任务指标', description: '请确认指标。', severity: 'warning', primaryAction: { key: 'open', label: '确认指标' }, secondaryActions: [] },
+      approvals: [{ id: 22, type: 'indicator_confirmation', title: '确认任务指标', description: '请确认指标体系。', payload: {} }],
+      focus: page.locator('.approval-stack .btn.primary'),
+    },
+    {
+      id: 'focus-plan', tab: '技术记录', status: 'waiting_input', stage: 'update_existing_plan',
+      action: { type: 'plan_resource_selection', title: '选择替代资源', description: '请明确替代资源。', severity: 'warning', primaryAction: { key: 'open', label: '选择资源' }, secondaryActions: [] },
+      approvals: [{ id: 23, type: 'plan_resource_selection', title: '选择替代资源', description: '请选择新的传感器。', payload: { planId: 1, planVersion: 2, existingResources: [{ id: 12, resourceId: 101, resourceName: '旧资源' }], candidates: [{ id: 205, resourceId: 205, name: '新资源', matched: true }] } }],
+      focus: page.locator('.plan-selection-card select').first(),
+    },
+    {
+      id: 'focus-execution', tab: '任务图', status: 'waiting_input', stage: 'execution_active_monitor',
+      action: { type: 'execution_intervention', title: '处理执行异常', description: '请处理执行项。', severity: 'warning', primaryAction: { key: 'open', label: '处理异常' }, secondaryActions: [] },
+      approvals: [{ id: 24, type: 'execution_intervention', title: '处理执行异常', description: '执行项失败。', payload: { executionItems: [{ id: 9, name: '雨量观测', status: 'failed', availableActions: ['retry'] }] } }],
+      focus: page.locator('.execution-intervention-card textarea').first(),
+    },
+    {
+      id: 'focus-manual', tab: '结果', status: 'manual_required', stage: 'execution_active_monitor',
+      action: { type: 'manual_execution', title: '提交人工执行结果', description: '请填写人工结果。', severity: 'warning', primaryAction: { key: 'manual-complete', label: '填写人工结果' }, secondaryActions: [] },
+      approvals: [], executionControl: { action: 'manual', executionItems: [{ id: 15, executionItemId: 15, name: '人工观测', status: 'manual_intervention', progress: 50 }] },
+      focus: page.locator('.execution-intervention-card textarea').first(),
+    },
+  ]
+
+  for (const item of cases) {
+    const run = focusActionRun(item.id, item.status, item.stage, item.action, item.approvals, item.executionControl)
+    await mockAgentRun(page, item.id, run)
+    await page.goto(`/application/tasks?runId=${item.id}`)
+    await page.getByRole('button', { name: item.tab, exact: true }).dispatchEvent('click')
+    await page.getByRole('region', { name: '当前需要处理的事项' }).getByRole('button', { name: item.action.primaryAction.label }).dispatchEvent('click')
+    await expect(item.focus).toBeFocused()
+  }
 })

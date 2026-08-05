@@ -4,12 +4,12 @@ type Action = {
   title: string
   description: string
   severity?: string
-  primaryAction?: { key: string; label: string; approvalId?: number }
+  primaryAction?: { key: string; label: string; approvalId?: number | null }
   secondaryActions?: Array<{ key: string; label: string }>
   blockingReasons?: string[]
 }
 
-defineProps<{ action: Action | null; disabled?: boolean }>()
+const props = defineProps<{ action: Action | null; disabled?: boolean; activeKey?: string | null }>()
 const emit = defineEmits<{
   primary: []
   secondary: [key: string]
@@ -27,11 +27,11 @@ const emit = defineEmits<{
       </ul>
     </div>
     <div class="current-action-buttons">
-      <button class="btn primary" :disabled="disabled" @click="emit('primary')">{{ action.primaryAction?.label || '处理' }}</button>
+      <button class="btn primary" :disabled="disabled || Boolean(props.activeKey)" @click="emit('primary')">{{ props.activeKey === action.primaryAction?.key ? '正在提交…' : (action.primaryAction?.label || '处理') }}</button>
       <details v-if="action.secondaryActions?.length" class="current-action-more">
         <summary>更多</summary>
         <div>
-          <button v-for="item in action.secondaryActions" :key="item.key" class="btn ghost tiny" :disabled="disabled" @click="emit('secondary', item.key)">{{ item.label }}</button>
+          <button v-for="item in action.secondaryActions" :key="item.key" class="btn ghost tiny" :disabled="disabled || Boolean(props.activeKey)" @click="emit('secondary', item.key)">{{ props.activeKey === item.key ? '正在提交…' : item.label }}</button>
         </div>
       </details>
     </div>

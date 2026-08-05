@@ -1007,6 +1007,11 @@ html, body, #app {
   box-shadow: var(--shadow-float);
   overflow: hidden;
 }
+/* 地图详情打开时，Agent业务区仍保留在左侧；窄屏由详情抽屉临时覆盖，关闭后原位置自然恢复。 */
+.app-shell.right-open .left-panel {
+  right: calc(var(--drawer-w) + 32px);
+  max-width: min(520px, calc(100vw - var(--rail-w) - var(--drawer-w) - 48px));
+}
 .left-panel-head {
   flex: 0 0 auto;
   display: flex;
@@ -1511,6 +1516,7 @@ textarea:focus {
   .topbar-search { flex: 1 1 220px; }
   .user-menu-trigger { min-width: 42px; width: 42px; padding: 0.25rem 0.35rem; }
   .user-menu-copy, .user-chevron { display: none; }
+  .app-shell.right-open .left-panel { right: 16px; max-width: calc(100vw - var(--rail-w) - 32px); }
 }
 @media (max-width: 620px) {
   .topbar { padding-inline: 0.55rem; }

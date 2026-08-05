@@ -487,7 +487,7 @@ export type AgentCurrentAction = {
   title: string
   description: string
   severity: 'info' | 'warning' | 'error' | 'success' | string
-  primaryAction: { key: string; label: string; approvalId?: number }
+  primaryAction: { key: string; label: string; approvalId?: number | null }
   secondaryActions: Array<{ key: string; label: string }>
   blockingReasons: string[]
 }
@@ -495,6 +495,7 @@ export type AgentEvaluationSummary = {
   totalScore: number
   indicatorSatisfaction: number
   spatialCoverageRatio: number
+  requiredCoverageRatio: number
   timelinessScore: number
   resourceUtilization: number
   costScore: number
@@ -503,6 +504,8 @@ export type AgentEvaluationSummary = {
   blockingReasons?: string[]
   policyCode?: string
   policyVersion?: number
+  strategySelectionSource?: string
+  isLegacyUnversioned?: boolean
 }
 export type AgentRunData = Record<string, unknown> & {
   id: string
