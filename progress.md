@@ -1791,3 +1791,18 @@
 - `.github/backend-agent.sha`：锁定已通过真实联调的后端提交。
 - `progress.md`：记录跨仓库版本和联调验证结果。
 - 回滚方式：将 `.github/backend-agent.sha` 恢复为 `37065e069e3fb8924a44566c00713c010c04f0aa` 后提交并重新运行联调；不涉及业务数据。
+
+## 2026-08-05 - Task: 更新工具超时修复后的真实联调后端版本
+
+### What was done
+- 将真实联调默认后端 SHA 更新为 `a62290394aef35b34503e10517d1eaba733481f6`，纳入 Windows 工具子进程超时配置修复。
+- 保持跨仓库联调按固定后端提交执行，避免后端分支更新造成旧前端结果不可复现。
+
+### Testing
+- 对应后端 `agent` 分支已推送并确认远端 SHA 一致。
+- 本地完整真实联调 2 项全部通过；后端 Agent/运行专项测试 70 项全部通过。
+
+### Notes
+- `.github/backend-agent.sha`：锁定工具超时修复后的后端提交。
+- `progress.md`：记录本轮跨仓库版本更新。
+- 回滚方式：将 `.github/backend-agent.sha` 恢复为 `2dac9e12f7e0b67d9d6c90b1ccc6dc6c9c2be4c8` 后提交并重新运行联调；不涉及业务数据。
