@@ -1825,3 +1825,17 @@
 - `e2e/agent-workflow.spec.ts`：增加传感器档案查询参数定位、量测项编辑和结构化提交用例。
 - `docs/传感器完整档案交互说明.md`：记录入口、返回上下文和编辑行为。
 - 回滚方式：执行本轮前端提交的 `git revert`，不涉及后端数据。
+## 2026-08-05 - Task: 修正真实联调后端固定版本
+
+### What was done
+- 将真实 Vue-Django-Worker-MAF 联调固定的后端 SHA 从旧版本 `a62290394aef35b34503e10517d1eaba733481f6` 更新为本轮后端提交 `21e10ea1604b7775f203cb6ff787ed38467c0fd0`。
+- 根据失败日志确认旧组合在第二次审批时发生 SQLite `database is locked`，避免继续用旧后端组合误判本轮前端改动。
+
+### Testing
+- 前端普通检查、构建和 9 项 Mock E2E 已通过。
+- 更新 SHA 后等待 GitHub Actions 重新执行真实联调。
+
+### Notes
+- `.github/backend-agent.sha`：锁定当前后端 `agent` 提交，保证跨仓库真实联调可复现。
+- `progress.md`：记录失败原因和版本修复。
+- 回滚方式：将 `.github/backend-agent.sha` 恢复为 `a62290394aef35b34503e10517d1eaba733481f6` 后提交并重跑；不涉及业务数据。
