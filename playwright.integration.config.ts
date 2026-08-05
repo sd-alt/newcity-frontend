@@ -13,7 +13,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: [['list']],
-  timeout: 90_000,
+  timeout: 180_000,
   use: {
     baseURL: 'http://127.0.0.1:4173',
     trace: 'retain-on-failure',

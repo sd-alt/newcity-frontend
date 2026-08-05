@@ -43,7 +43,7 @@ test('真实 Vue → Django → Worker → FakeProvider → MAF 链路可以创�
       latestModelCall: (lastRun.modelCalls || []).slice(-1)[0] || null,
     })
   }, {
-    timeout: 90_000,
+    timeout: 120_000,
     intervals: [500, 1000, 2000],
   }).toBe('completed')
 

@@ -1650,3 +1650,21 @@
 - `src/pages/AgentTaskWorkspace.vue`：增加 Checkpoint 一致性判断、持续跟踪和嵌套结果兼容。
 - `progress.md`：追加本轮实现和验证记录。
 - 回滚方式：执行 `git revert <本轮前端提交>`；不涉及业务数据库删除。
+
+## 2026-08-05 - Task: 收口 Windows 真实联调时限
+
+### What was done
+- 根据 GitHub Actions 日志确认任务创建前已消耗约 59 秒，而测试总时限与状态轮询时限同为 90 秒，导致轮询实际只能运行约 31 秒。
+- 将真实联调单项总时限调整为 180 秒、任务完成状态轮询调整为 120 秒，不改变任何业务断言或完成标准。
+
+### Testing
+- `npm.cmd run test:e2e:integration -- --workers=1`：1 项真实 Vue-Django-Worker-FakeProvider-MAF 闭环通过，业务任务约 25 秒完成。
+- `git diff --check`：通过，仅有既有 LF/CRLF 转换提示。
+- GitHub Actions：待推送后确认前端基础检查与 Windows 真实联调均成功。
+
+### Notes
+- `playwright.integration.config.ts`：为 Windows Runner 环境波动预留完整联调时限。
+- `e2e/integration/agent-real-flow.spec.ts`：延长任务完成状态轮询时限。
+- `docs/真实Vue-Django-MAF联调说明.md`：补充真实联调时限和失败判定说明。
+- `progress.md`：追加本轮实现与验证记录。
+- 回滚方式：执行 `git revert <本轮前端提交>`；不涉及业务数据和数据库结构。
