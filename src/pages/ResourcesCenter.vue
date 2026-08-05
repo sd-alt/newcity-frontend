@@ -645,11 +645,12 @@ async function locateOnMap(kind: 'sensor', id: string | number | unknown) {
   else error.value = null
 }
 
-async function openSensorProfile(id: string | number | unknown, section = 'general', mode = 'edit', targetTab = 'crud') {
+async function openSensorProfile(id: string | number | unknown, section = 'general', mode = 'edit', targetTab = 'crud', focus = '') {
   closeShellRight()
+  const query = { ...route.query, tab: targetTab, sensorId: String(id), section, mode, focus: focus || undefined }
   await router.push({
     name: 'resource-sensors',
-    query: { ...route.query, tab: targetTab, sensorId: String(id), section, mode },
+    query,
   })
 }
 
@@ -658,6 +659,7 @@ async function closeSensorProfile() {
   delete query.sensorId
   delete query.section
   delete query.mode
+  delete query.focus
   await router.replace({ name: 'resource-sensors', query: { ...query, tab: 'crud' } })
 }
 
@@ -722,7 +724,7 @@ async function showOnMap() {
             <td>{{ sensor.accuracyPercent ?? '-' }}% / {{ sensor.reliabilityPercent ?? '-' }}%</td>
             <td>{{ Math.round(sensorCompletenessRatio(sensor) * 100) }}%</td>
             <td class="capability-status">{{ sensorStatusLabel(sensor.status || sensorPlatform(sensor).status) }}</td>
-            <td class="ops capability-ops"><button class="btn ghost" type="button" @click="openSensorProfile(sensor.id, 'attributes', 'edit', 'capabilities')">编辑观测能力</button><button class="btn ghost" type="button" @click="openSensorProfile(sensor.id, 'general', 'edit', 'capabilities')">维护完整档案</button><button class="btn ghost" type="button" @click="locateOnMap('sensor', String(sensor.platformId || sensor.id))">地图定位</button></td>
+            <td class="ops capability-ops"><button class="btn ghost" type="button" @click="openSensorProfile(sensor.id, 'attributes', 'edit', 'capabilities')">编辑观测能力</button><button class="btn ghost" type="button" @click="openSensorProfile(sensor.id, 'general', 'edit', 'capabilities', 'incomplete')">维护完整档案</button><button class="btn ghost" type="button" @click="locateOnMap('sensor', String(sensor.platformId || sensor.id))">地图定位</button></td>
           </tr>
         </tbody>
       </table>
@@ -917,7 +919,7 @@ async function showOnMap() {
             <td>{{ s.accuracyPercent ?? '-' }}</td>
             <td class="ops">
               <button class="btn ghost" type="button" @click.stop="openSensorProfile(s.id, 'general', 'edit', 'crud')">编辑基础信息</button>
-              <button class="btn ghost" type="button" @click.stop="openSensorProfile(s.id, 'general', 'edit', 'crud')">维护完整档案</button>
+              <button class="btn ghost" type="button" @click.stop="openSensorProfile(s.id, 'general', 'edit', 'crud', 'incomplete')">维护完整档案</button>
               <button class="btn ghost" type="button" @click.stop="locateOnMap('sensor', String(s.platformId || s.id))">定位</button>
               <button class="btn ghost" type="button" @click.stop="removeSensor(s.id)">删除</button>
             </td>

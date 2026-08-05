@@ -177,11 +177,11 @@ const centers: CenterItem[] = [
     defaultTab: 'tasks',
     children: [
       { key: 'demand-query', label: '需求查询', to: '/business', tab: 'tasks' },
-      { key: 'execution-trace', label: '过程管理与成果追溯', to: '/business/execution' },
       { key: 'resource-selection', label: '资源选择', to: '/business', tab: 'candidates' },
       { key: 'capability-evaluation', label: '能力评估', to: '/business', tab: 'evaluation' },
       { key: 'resource-configuration', label: '资源配置', to: '/business', tab: 'flow' },
       { key: 'plan-management', label: '方案管理', to: '/business', tab: 'plans' },
+      { key: 'execution-trace', label: '过程管理与成果追溯', to: '/business/execution' },
     ],
   },
   {
@@ -484,14 +484,26 @@ async function goCenter(c: CenterItem) {
   const key = lastTabByCenter.value[c.key] || c.defaultTab
   const child = c.children.find((item) => item.key === key) || c.children[0]
   if (!child) return
-  await router.push({ path: child.to, query: child.tab ? { tab: child.tab } : {} })
+  await router.push({ path: child.to, query: navigationContext(child) })
+}
+
+function navigationContext(child: SubItem) {
+  const query: Record<string, string> = {}
+  if (child.tab) query.tab = child.tab
+  if (activeCenter.value?.key === 'business' || child.to.startsWith('/business')) {
+    for (const key of ['taskId', 'planId', 'runId', 'demandId', 'returnTo', 'currentTab']) {
+      const value = route.query[key]
+      if (typeof value === 'string' && value) query[key] = value
+    }
+  }
+  return query
 }
 
 async function goSub(key: string) {
   if (!activeCenter.value) return
   const child = activeCenter.value.children.find((item) => item.key === key)
   if (!child) return
-  await router.push({ path: child.to, query: child.tab ? { tab: child.tab } : {} })
+  await router.push({ path: child.to, query: navigationContext(child) })
 }
 
 function kindLabel(kind: ShellFeatureKind) {
@@ -647,15 +659,43 @@ function sensorDrawerContext() {
   return { ...returnContext, sensorId: String(shellSelected.value?.id || '') }
 }
 
-async function openSelectedSensorArchive(section: 'general' | 'attributes', targetTab: 'crud' | 'capabilities' = 'crud') {
-  const sensor = shellSelected.value
-  if (!sensor || sensor.kind !== 'sensor') return
+const sensorArchiveChooser = ref<{
+  section: 'general' | 'attributes'
+  targetTab: 'crud' | 'capabilities'
+  mode: 'view' | 'edit'
+  focus?: 'incomplete'
+  items: Array<Record<string, any>>
+} | null>(null)
+
+async function navigateSelectedSensorArchive(sensorId: string, section: 'general' | 'attributes', targetTab: 'crud' | 'capabilities', mode: 'view' | 'edit', focus?: 'incomplete') {
+  sensorArchiveChooser.value = null
   closeShellRight()
   leftOpen.value = true
   await router.push({
     path: '/resources/sensors',
-    query: { tab: targetTab, section, mode: 'edit', ...sensorDrawerContext() },
+    query: { tab: targetTab, section, mode, ...sensorDrawerContext(), sensorId, ...(focus ? { focus } : {}) },
   })
+}
+
+async function openSelectedSensorArchive(section: 'general' | 'attributes', targetTab: 'crud' | 'capabilities' = 'crud', mode: 'view' | 'edit' = 'edit', focus?: 'incomplete') {
+  const sensor = shellSelected.value
+  if (!sensor || sensor.kind !== 'sensor') return
+  try {
+    const response = await api.listSensors(`?platformId=${encodeURIComponent(String(sensor.id))}`)
+    const data = response.data as unknown
+    const items = Array.isArray(data) ? data : []
+    if (items.length === 0) {
+      toast.error('该地图平台下没有可维护的传感器档案')
+      return
+    }
+    if (items.length > 1) {
+      sensorArchiveChooser.value = { section, targetTab, mode, focus, items }
+      return
+    }
+    await navigateSelectedSensorArchive(String(items[0].id), section, targetTab, mode, focus)
+  } catch (cause) {
+    toast.error(errMessage(cause, '平台下传感器查询失败'))
+  }
 }
 
 function reflySelected() {
@@ -920,7 +960,7 @@ async function doLogout() {
             :aria-current="activeSubKey === s.key ? 'page' : undefined"
             @click="goSub(s.key)"
           >
-            {{ s.label }}
+            <span class="rail-subitem-label">{{ s.label }}</span>
           </button>
         </div>
       </div>
@@ -1143,9 +1183,18 @@ async function doLogout() {
               </section>
 
               <div v-if="shellSelected.kind === 'sensor'" class="drawer-sensor-actions" aria-label="传感器档案操作">
-                <button type="button" class="btn ghost" @click="openSelectedSensorArchive('general', 'crud')">编辑基础信息</button>
-                <button type="button" class="btn ghost" @click="openSelectedSensorArchive('attributes', 'capabilities')">编辑观测能力</button>
-                <button type="button" class="btn ghost" @click="openSelectedSensorArchive('general', 'crud')">维护完整档案</button>
+                <button type="button" class="btn ghost" @click="openSelectedSensorArchive('general', 'crud', 'view')">查看</button>
+                <button type="button" class="btn ghost" @click="openSelectedSensorArchive('general', 'crud', 'edit')">编辑基础信息</button>
+                <button type="button" class="btn ghost" @click="openSelectedSensorArchive('general', 'crud', 'edit', 'incomplete')">维护完整档案</button>
+                <div v-if="sensorArchiveChooser" class="drawer-sensor-chooser">
+                  <strong>选择平台下的传感器</strong>
+                  <button
+                    v-for="item in sensorArchiveChooser.items"
+                    :key="String(item.id)"
+                    type="button"
+                    @click="navigateSelectedSensorArchive(String(item.id), sensorArchiveChooser.section, sensorArchiveChooser.targetTab, sensorArchiveChooser.mode, sensorArchiveChooser.focus)"
+                  >{{ item.sensorName || item.name || `传感器 #${item.id}` }}</button>
+                </div>
               </div>
               <div class="drawer-actions">
                 <button type="button" class="btn ghost" @click="jumpSelectedCenter">{{ selectedCenterActionLabel }}</button>

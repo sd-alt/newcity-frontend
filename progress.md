@@ -1851,3 +1851,162 @@
 ### Notes
 - `progress.md`：记录固定 SHA 修复后的 Actions 结果。
 - 回滚方式：执行本轮前端提交的 `git revert`；不涉及业务数据。
+
+## 2026-08-05 - Task: 业务中心流程与传感器档案交互收口
+
+### What was done
+- 业务中心二级导航按真实流程调整为 01 需求查询、02 资源选择、03 能力评估、04 资源配置、05 方案管理、06 过程管理与成果追溯，保留原路由、Tab 和深链兼容。
+- 需求查询改为统一任务入口，跨阶段保留任务上下文；过程追溯页显示任务、阶段、方案和运行上下文，并提供返回入口与地图定位。
+- `mode=view` 切换八个传感器档案分区时保持只读，使用显式进入/退出编辑；未保存保护覆盖分区、量测项、接口、履历、重访周期和高级 JSON。
+- 地图平台先查询所属真实传感器再进入档案，单个直接进入、多个显示选择列表；接口凭据编辑只提交合法新引用，后端配置状态不作为真实引用保存。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run test:e2e -- --workers=1`：11 项 Mock Playwright 全部通过。
+- 后端 `uv run python manage.py test --verbosity 1`：273 项全部通过。
+- `npm.cmd run test:e2e:integration -- --workers=1`：第 1 项真实 Vue-Django-Worker-FakeProvider-MAF 链路通过；完整规划链路因审批与 Worker 并发写 SQLite 两次触发 `database is locked` 而失败，退出码 1。该并发路径未获用户批准，本轮未擅自修改。
+- GitHub Actions：当前远端基线前端 `2516a39` 的运行 `31001379574` 成功；本地未提交改动尚无 Actions 结果。
+
+### Notes
+- `src/components/AppLayout.vue`、`src/styles.css`、`src/features/catalog.ts`：调整 01—06 导航、上下文透传和地图平台到传感器选择入口。
+- `src/pages/PlanningCenter.vue`：补齐六阶段线路、统一任务入口和全过程跳转。
+- `src/pages/BusinessExecutionView.vue`：增加第 06 阶段任务上下文与返回操作。
+- `src/pages/SensorMetadataView.vue`：保持只读模式、显式编辑、未保存保护、来源返回和凭据引用交互。
+- `e2e/agent-workflow.spec.ts`：增加业务导航顺序、原路由/Tab 兼容和只读模式用例。
+- `README.md`、`docs/传感器完整档案交互说明.md`：同步业务流程、上下文、权限和凭据规则。
+- `progress.md`：追加本轮实施、验证与联调阻塞记录。
+- 回滚方式：对本轮前端提交执行 `git revert <本轮前端提交>`；不涉及数据库结构或业务数据。
+
+## 2026-08-05 - Task: 修正业务中心二级目录视觉层级
+
+### What was done
+- 取消二级目录的树状深缩进和过小字号，恢复完整可用宽度。
+- 保留 01—06 独立编号列，将标题统一为 12px；当前项使用浅色背景和左侧标记，长标题允许自然换行且不截断。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npx.cmd playwright test e2e/agent-workflow.spec.ts --grep "业务中心导航" --workers=1`：1 项通过。
+- 1280×900 隔离浏览器截图检查：六项对齐、当前项标记和长标题显示正常。
+- `git diff --check`：通过。
+
+### Notes
+- `src/styles.css`：只调整业务中心二级目录的宽度利用、字号、间距、悬停态和当前态。
+- `progress.md`：追加本轮样式纠偏和验证证据。
+- 回滚方式：恢复 `src/styles.css` 中 `.rail-subnav`、`.rail-subitem` 和 `.rail-stage` 本轮修改，或对对应提交执行 `git revert`；不涉及业务数据。
+
+## 2026-08-05 - Task: 修复二级目录阶段网格污染
+
+### What was done
+- 将 01—06 的两列阶段布局限定为业务中心，避免任务、资源和应用中心的单标题二级目录被挤入编号列。
+- 保持普通二级目录为完整宽度单列，业务中心继续使用编号与标题分列布局。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npx.cmd playwright test e2e/agent-workflow.spec.ts --grep "业务中心导航" --workers=1`：1 项通过，同时验证业务中心 6 项使用阶段布局、任务中心 0 项使用阶段布局。
+- 1280×900 隔离浏览器逐页检查任务、资源、业务和应用四个中心：二级目录标题均未被挤压或截断。
+- `git diff --check`：通过。
+
+### Notes
+- `src/components/AppLayout.vue`：只为带真实阶段编号的二级目录增加 `staged` 样式标记。
+- `src/styles.css`：普通二级目录恢复单列，仅 `staged` 项使用编号网格。
+- `e2e/agent-workflow.spec.ts`：补充阶段样式作用域回归断言。
+- `progress.md`：记录本轮根因、修复和验证证据。
+- 回滚方式：撤销上述三个代码/测试文件中本轮 `staged` 作用域改动，或对对应提交执行 `git revert`；不涉及业务数据。
+
+## 2026-08-05 - Task: 补足普通二级目录左侧留白
+
+### What was done
+- 为不带阶段编号的普通二级目录增加适度左侧缩进，使其与一级目录建立清晰从属关系。
+- 业务中心 01—06 的编号和标题对齐保持不变，点击区域仍占满整行。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npx.cmd playwright test e2e/agent-workflow.spec.ts --grep "业务中心导航" --workers=1`：1 项通过。
+- 1280×900 隔离浏览器截图检查：普通二级标题起点为 36.78px，业务阶段标题起点为 51.98px，均保留清晰前置留白。
+- `git diff --check`：通过。
+
+### Notes
+- `src/styles.css`：仅为非 `staged` 二级目录增加左侧内边距。
+- `progress.md`：追加本轮样式修正和验证证据。
+- 回滚方式：删除 `.rail-subitem:not(.staged)` 本轮规则，或对对应提交执行 `git revert`；不涉及业务数据。
+
+## 2026-08-05 - Task: 收紧二级目录样式作用域
+
+### What was done
+- 将通用 `staged` 状态改为导航专属 `rail-subitem--staged`，普通目录使用显式 `rail-subitem--plain`，避免状态类名污染。
+- 为二级标题增加专属 `rail-subitem-label`，删除依赖 DOM 顺序的 `span:last-child` 选择器。
+- 将阶段编号样式归入同一导航样式块，普通目录与业务阶段目录互不覆盖。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npx.cmd playwright test e2e/agent-workflow.spec.ts --grep "业务中心导航" --workers=1`：1 项通过。
+- 任务、资源、业务、应用四中心在 1280、820、620 三档宽度检查：均无横向溢出，标题字号均为 12px；只有业务中心存在 6 个阶段项。
+- 普通、悬停、当前背景色分别为透明、`rgb(236, 238, 241)`、`rgb(240, 247, 255)`，三种状态互不覆盖。
+- `git diff --check`：通过。
+
+### Notes
+- `src/components/AppLayout.vue`：使用导航专属修饰类和标题类。
+- `src/styles.css`：收紧二级目录选择器作用域，移除否定和结构选择器。
+- `e2e/agent-workflow.spec.ts`：同步导航专属选择器断言。
+- `progress.md`：记录本轮样式作用域审查和验证证据。
+- 回滚方式：撤销上述三个代码/测试文件中的 `rail-subitem--staged`、`rail-subitem--plain` 和 `rail-subitem-label` 改动，或对对应提交执行 `git revert`；不涉及业务数据。
+
+## 2026-08-05 - Task: 弱化业务中心阶段序号
+
+### What was done
+- 将业务中心 01—06 从独立等宽粗体列改为与普通二级目录一致的行内轻量序号。
+- 序号与普通目录使用相同左侧缩进和字体体系，固定为 10px、常规字重、灰色，不随当前项变蓝或加粗。
+- 保留固定序号宽度，六个标题继续对齐且流程顺序可辨识。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npx.cmd playwright test e2e/agent-workflow.spec.ts --grep "业务中心导航" --workers=1`：1 项通过。
+- 隔离浏览器计算样式检查：6 个序号均为 10px、字重 500、颜色 `rgb(154, 154, 160)`。
+- 1280×900 截图检查：序号不再呈现为独立徽标，标题未截断。
+- `git diff --check`：通过。
+
+### Notes
+- `src/styles.css`：只调整业务中心阶段项布局和序号字体表现。
+- `progress.md`：追加本轮视觉一致性修正和验证证据。
+- 回滚方式：恢复 `.rail-subitem--staged` 和 `.rail-stage` 本轮样式，或对对应提交执行 `git revert`；不涉及业务数据。
+
+## 2026-08-05 - Task: 稳定完整档案未完成分区初始化
+
+### What was done
+- 在“维护完整档案”自动切换到首个未完成分区时同步初始化对应分区草稿，避免页面先切换、草稿仍停留在基础信息而触发渲染错误。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run test:e2e -- --workers=1`：提交前首次全套运行暴露初始化时序问题，修复后重新执行验证。
+
+### Notes
+- `src/pages/SensorMetadataView.vue`：分区切换与草稿初始化在写入路由前同步完成。
+- `progress.md`：记录提交前全套验证发现的问题与修复。
+- 回滚方式：撤销自动定位首个未完成分区时新增的 `syncDraft()`，或对对应提交执行 `git revert`；不涉及业务数据。
+
+## 2026-08-05 - Task: 统一四中心二级导航并移除编号
+
+### What was done
+- 删除二级导航中的业务阶段编号和编号占位，让任务、资源、业务、应用四个中心使用一致的缩进、行高、激活态和悬停态。
+- 保留业务页面内部的阶段语义和原有路由、Tab、深链上下文，不改变业务流程。
+- 将真实联调后端固定版本更新为已提交的 `64007c95e6370b3b7a4071b23bf80305b877fed3`。
+
+### Testing
+- `.venv\Scripts\python.exe manage.py check`：通过。
+- `.venv\Scripts\python.exe manage.py makemigrations --check --dry-run`：通过，无模型变更。
+- `.venv\Scripts\python.exe manage.py test --verbosity 1`：273 项全部通过。
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run test:e2e -- --workers=1`：13 项全部通过，覆盖业务中心和应用中心二级导航无编号及路由上下文保留。
+- `git diff --check`：通过。
+
+### Notes
+- `src/components/AppLayout.vue`：移除二级项阶段字段和编号节点，统一导航条目结构。
+- `src/styles.css`：移除编号专用样式，统一二级项左侧留白和状态样式。
+- `e2e/agent-workflow.spec.ts`：断言四中心二级项无编号且顺序稳定。
+- `README.md`、`docs/传感器完整档案交互说明.md`：同步无编号导航约定。
+- `.github/backend-agent.sha`：固定到后端安全收口提交 `64007c95e6370b3b7a4071b23bf80305b877fed3`。
+- `progress.md`：记录本轮实施、验证和发布依赖。
+- 回滚方式：对前端本轮提交执行 `git revert <前端提交>`；后端固定版本回退到 `21e10ea1604b7775f203cb6ff787ed38467c0fd0` 后重跑联调，不涉及业务数据。

@@ -962,32 +962,46 @@ html, body, #app {
 }
 .rail-subnav {
   display: grid;
-  gap: 0.1rem;
-  margin: 0.05rem 0 0.45rem 1.35rem;
-  padding-left: 0.55rem;
-  border-left: 1px solid #D4D6DB;
+  gap: 0.15rem;
+  margin: 0.1rem 0 0.5rem;
+  padding: 0.15rem 0;
 }
 .rail-subitem {
+  position: relative;
+  display: flex;
+  align-items: center;
   width: 100%;
-  min-height: 30px;
+  min-height: 36px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: transparent;
   color: #68686E;
-  padding: 0.38rem 0.5rem;
-  font-size: 11px;
-  line-height: 1.3;
+  padding: 0.45rem 0.65rem 0.45rem 1.65rem;
   text-align: left;
   cursor: pointer;
 }
 .rail-subitem:hover {
-  background: rgba(255, 255, 255, 0.72);
+  background: #ECEEF1;
   color: #29292D;
 }
 .rail-subitem.active {
   background: var(--brand-soft);
   color: var(--brand-dark);
   font-weight: 600;
+}
+.rail-subitem.active::before {
+  content: '';
+  position: absolute;
+  inset: 7px auto 7px 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--brand);
+}
+.rail-subitem-label {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 /* 次级工作区：列表和页面内详情共用一个浮动面板。 */
@@ -1140,18 +1154,6 @@ html, body, #app {
   overflow: hidden;
   background: var(--bg);
 }
-.business-route-host {
-  position: fixed;
-  left: 248px;
-  right: calc(var(--route-workspace-w, 360px) + 32px);
-  bottom: 68px;
-  z-index: 20;
-  display: flex;
-  justify-content: center;
-  min-width: 0;
-  pointer-events: none;
-}
-.business-route-host > * { pointer-events: auto; }
 @media (min-width: 1440px) {
   .map-main { min-width: 420px; }
 }
@@ -2831,6 +2833,9 @@ button.card.stat.clickable:hover {
   font-size: 11px;
   white-space: normal;
 }
+.drawer-sensor-chooser { grid-column: 1 / -1; display: grid; gap: 0.3rem; padding: 0.5rem; border: 1px solid #D8DDE3; border-radius: 10px; background: #F7F8FA; }
+.drawer-sensor-chooser strong { color: #515154; font-size: 11px; }
+.drawer-sensor-chooser button { min-height: 30px; border: 1px solid #D8DDE3; border-radius: 8px; background: #fff; color: #29292D; font-size: 11px; text-align: left; cursor: pointer; }
 @media (max-width: 760px) {
   .drawer-sensor-actions { grid-template-columns: 1fr; }
 }

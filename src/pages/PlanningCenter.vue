@@ -84,32 +84,24 @@ const tabs = [
   { key: 'flow', label: '资源配置' },
   { key: 'plans', label: '方案管理' },
 ]
-type BusinessRouteKey = 'tasks' | 'candidates' | 'evaluation' | 'flow' | 'plans'
+type BusinessRouteKey = 'tasks' | 'candidates' | 'evaluation' | 'flow' | 'plans' | 'execution'
 const BUSINESS_ROUTE_STEPS: Array<{ key: BusinessRouteKey; label: string; description: string }> = [
   { key: 'tasks', label: '需求', description: '需求查询 · 确认任务目标' },
   { key: 'candidates', label: '资源', description: '资源选择 · 筛选候选资源' },
   { key: 'evaluation', label: '评估', description: '能力评估 · 比较任务满足度' },
   { key: 'flow', label: '配置', description: '资源配置 · 组合观测方案' },
   { key: 'plans', label: '方案', description: '方案管理 · 确认并输出方案' },
+  { key: 'execution', label: '追溯', description: '过程管理与成果追溯 · 查看运行和成果' },
 ]
-const businessRouteSteps = computed(() => {
-  const currentKey = tabs.some((item) => item.key === tab.value) ? tab.value as BusinessRouteKey : 'tasks'
-  return BUSINESS_ROUTE_STEPS.map((step, index) => {
-    const done = step.key === 'tasks'
-      ? taskId.value != null && (doneSteps.value.has('submit') || doneSteps.value.has('reverse'))
-      : step.key === 'candidates'
-        ? doneSteps.value.has('candidates')
-        : step.key === 'evaluation'
-          ? doneSteps.value.has('evaluate') || Boolean(evalResult.value)
-          : step.key === 'flow'
-            ? doneSteps.value.has('output')
-            : doneSteps.value.has('output')
-    return {
-      ...step,
-      number: index + 1,
-      state: step.key === currentKey ? 'current' : done ? 'done' : 'pending',
-    }
-  })
+const currentBusinessPage = computed(() => {
+  const copy: Record<string, { eyebrow: string; title: string; summary: string }> = {
+    tasks: { eyebrow: '业务中心 · 01', title: '业务需求与任务入口', summary: '查看任务需求，并按真实进度继续处理。' },
+    candidates: { eyebrow: '业务中心 · 02', title: '资源选择', summary: '筛选候选资源，查看匹配与排除原因。' },
+    evaluation: { eyebrow: '业务中心 · 03', title: '能力评估', summary: '比较候选资源的能力、覆盖和任务满足度。' },
+    flow: { eyebrow: '业务中心 · 04', title: '资源配置', summary: '组合已选资源，完成关联、补充与配置检查。' },
+    plans: { eyebrow: '业务中心 · 05', title: '方案管理', summary: '查看方案版本、评价结果和发布状态。' },
+  }
+  return copy[tab.value] || copy.tasks!
 })
 const flowFormPage = ref(1)
 const flowFormPages = ['任务与时间', '指标与尺度', '空间与约束', '评分权重']
@@ -360,7 +352,45 @@ async function setTab(key: string) {
   await router.replace({ path: route.path, query: q })
 }
 async function goBusinessRoute(key: BusinessRouteKey) {
+  if (key === 'execution') {
+    const query: Record<string, string> = {}
+    if (taskId.value != null) query.taskId = String(taskId.value)
+    const taskPlans = plans.value.filter((plan) => Number(plan.taskId) === taskId.value)
+    if (taskPlans[0]?.id != null) query.planId = String(taskPlans[0].id)
+    if (typeof route.query.runId === 'string') query.runId = route.query.runId
+    await router.push({ path: '/business/execution', query })
+    return
+  }
   await setTab(key)
+}
+function taskPlansFor(item: Record<string, unknown>) {
+  return plans.value.filter((plan) => Number(plan.taskId) === Number(item.id))
+}
+function taskBusinessRoute(item: Record<string, unknown>): BusinessRouteKey {
+  const status = String(item.status || '').toLowerCase()
+  if (['running', 'paused', 'completed', 'archived'].includes(status)) return 'execution'
+  const step = inferStepFromPlans(taskPlansFor(item), status)
+  if (step === 'create' || step === 'submit') return 'flow'
+  if (step === 'reverse' || step === 'candidates') return 'candidates'
+  if (step === 'basic') return 'evaluation'
+  if (step === 'optimize' || step === 'supplement') return 'flow'
+  return 'plans'
+}
+function taskBusinessStage(item: Record<string, unknown>) {
+  const key = taskBusinessRoute(item)
+  return BUSINESS_ROUTE_STEPS.find((step) => step.key === key)?.label || '需求'
+}
+async function continueTask(item: Record<string, unknown>) {
+  await selectTask(item.id)
+  await goBusinessRoute(taskBusinessRoute(item))
+}
+async function viewTaskOnMap(item: Record<string, unknown>) {
+  await selectTask(item.id)
+  await locateTaskOnMap(item.id)
+}
+async function viewTaskExecution(item: Record<string, unknown>) {
+  await selectTask(item.id)
+  await goBusinessRoute('execution')
 }
 async function openEvaluationFlow() {
   currentStep.value = 'evaluate'
@@ -1024,14 +1054,10 @@ function inferStepFromPlans(taskPlans: Record<string, unknown>[], status: string
 }
 
 async function selectTask(id: unknown) {
-  void locateTaskOnMap(String(id as string | number), { silent: true, openDetail: false })
-
   const tid = Number(id)
   if (Number.isFinite(tid) === false) return
   taskId.value = tid
   setLastTaskId(tid)
-  // 选择并继续：进入需求与关联工作台
-  await setTab('flow')
   reverseResult.value = null
   evalResult.value = null
   outputResult.value = null
@@ -1118,6 +1144,13 @@ async function selectTask(id: unknown) {
     }
     doneSteps.value = done
     advanceTo(inferred)
+    const query: Record<string, string> = {}
+    for (const [key, value] of Object.entries(route.query)) {
+      if (value == null) continue
+      query[key] = Array.isArray(value) ? String(value[0] || '') : String(value)
+    }
+    query.taskId = String(tid)
+    await router.replace({ path: route.path, query })
     const summary =
       '已选择任务 #' +
       tid +
@@ -1128,45 +1161,6 @@ async function selectTask(id: unknown) {
       ' · 下一步 ' +
       inferred
     message.value = summary
-    // 选中后进入「需求与关联」，并同步左侧二级菜单与 URL
-    await setTab('flow')
-    // 选中任务后自动上图：有方案则画关联线，否则尝试候选资源（最终文案在地图同步后写回）
-    // 地图同步异步进行，避免阻塞任务选择反馈
-    void (async () => {
-      try {
-        let hasMatches = taskPlans.some((p) => Array.isArray(p.resourceMatches) && p.resourceMatches.length)
-        if (!hasMatches && taskPlans[0]?.id != null) {
-          try {
-            const res = await api.getAssociationResult(String(taskPlans[0].id))
-            planResult.value = res.data as Record<string, unknown>
-            const data = res.data as Record<string, unknown>
-            const planObj = (data.plan || data) as Record<string, unknown>
-            const rm = planObj.resourceMatches || data.resourceMatches
-            hasMatches = Array.isArray(rm) && rm.length > 0
-          } catch {
-            /* 可选步骤 */
-          }
-        } else if (taskPlans[0]) {
-          planResult.value = taskPlans[0] as Record<string, unknown>
-        }
-        if (hasMatches) {
-          await showAssociationOnMap('basic')
-          if (taskId.value === tid) message.value = summary + ' · 已同步基础关联上图'
-        } else {
-          await loadCandidates(false, false)
-          if (taskId.value === tid) {
-            if (candidateRows.value.length) {
-              await showCandidatesOnMap()
-              message.value = summary + ' · 候选 ' + candidateRows.value.length + ' 已上图'
-            } else {
-              message.value = summary
-            }
-          }
-        }
-      } catch {
-        if (taskId.value === tid) message.value = summary
-      }
-    })()
   } catch (err) {
     error.value = errMessage(err, '加载任务失败')
   }
@@ -1664,7 +1658,7 @@ async function applyRouteTaskQuery() {
   if (taskId.value === id && taskStatus.value) return
   try {
     await selectTask(id)
-    message.value = '已根据地图跳转载入任务 #' + id
+    message.value = '已根据地址载入任务 #' + id
   } catch {
     /* 可选步骤 */
   }
@@ -2066,9 +2060,9 @@ async function applyPlanningMapAction() {
     <header class="page-head plan-head">
       <div class="plan-head-main">
         <div>
-          <p class="eyebrow">观测规划中心</p>
-          <h1>任务建模到方案输出的规划流程</h1>
-          <p class="muted">按步骤：建模 → 需求 → 候选 → 评分 → 关联 → 方案。上图≠执行。</p>
+          <p class="eyebrow">{{ currentBusinessPage.eyebrow }}</p>
+          <h1>{{ currentBusinessPage.title }}</h1>
+          <p class="muted">{{ currentBusinessPage.summary }}</p>
         </div>
         <div class="plan-head-actions">
           <button class="btn ghost" type="button" @click="resetForm">新建任务</button>
@@ -2107,31 +2101,15 @@ async function applyPlanningMapAction() {
       <p v-if="error" class="error">{{ error }}</p>
       <p v-if="message" class="ok-text">{{ message }}</p>
 
-      <section v-if="tab === 'tasks'" class="business-route-context" aria-label="需求阶段进度">
-        <div class="business-route-context-head">
-          <div>
-            <span class="eyebrow">当前阶段</span>
-            <strong>需求</strong>
-          </div>
-          <span class="business-route-context-count">1 / 5</span>
-        </div>
-        <p>{{ taskId ? `任务 #${taskId} 已选中，确认目标后可进入资源选择。` : '先确认任务目标并创建任务，后续再进入资源选择。' }}</p>
-        <div class="business-route-context-track" aria-hidden="true">
-          <span class="active"></span><span></span><span></span><span></span><span></span>
-        </div>
-        <button class="btn ghost tiny" type="button" :disabled="!hasTask" @click="setTab('candidates')">{{ hasTask ? '进入资源选择' : '创建任务后继续' }}</button>
-      </section>
-
-      <div v-if="user && tab !== 'flow' && hasTask" class="planning-context-bar">
-        <span>当前任务 #{{ taskId }} · 步骤 {{ STEPS.find((x) => x.key === currentStep)?.title || currentStep }}</span>
-        <button class="btn ghost" type="button" @click="setTab('flow')">进入资源配置</button>
-      </div>
-
-      <div v-if="user" class="planning-task-picker" data-testid="planning-task-picker">
+      <div v-if="user && tab !== 'tasks'" class="planning-task-picker" data-testid="planning-task-picker">
         <header>
-          <strong>任务选择</strong>
-          <span v-if="taskId">当前 #{{ taskId }} · {{ taskStatus || '—' }}</span>
-          <span v-else>尚未选择任务</span>
+          <div>
+            <small>当前任务</small>
+            <strong v-if="taskId">{{ taskName || `任务 #${taskId}` }}</strong>
+            <strong v-else>尚未选择任务</strong>
+          </div>
+          <span v-if="taskId">#{{ taskId }} · {{ taskStatus || '状态未登记' }} · {{ currentBusinessPage.title }}</span>
+          <span v-else>选择任务后继续当前阶段</span>
         </header>
         <select
           class="task-pick-select"
@@ -2144,56 +2122,43 @@ async function applyPlanningMapAction() {
           </option>
         </select>
         <div class="planning-task-actions">
-          <button class="btn ghost" type="button" @click="setTab('tasks')">任务列表</button>
-          <button class="btn ghost" type="button" @click="resetForm">新建任务</button>
+          <button class="btn ghost" type="button" @click="setTab('tasks')">返回任务入口</button>
+          <button class="btn ghost" type="button" :disabled="taskId == null" @click="locateTaskOnMap(taskId)">地图定位</button>
+          <button class="btn ghost" type="button" :disabled="taskId == null" @click="goBusinessRoute('execution')">查看全过程</button>
         </div>
         <p v-if="!taskId">选择已有任务后，才可执行候选、关联和覆盖分析。</p>
       </div>
 
-      <Teleport to="#business-route-host">
-        <div v-if="tab === 'candidates' || tab === 'evaluation' || tab === 'flow' || tab === 'plans'" class="business-route" aria-label="业务任务线路">
-          <header class="business-route-head">
-            <div>
-              <p class="eyebrow">任务</p>
-              <strong>{{ tab === 'evaluation' ? '从资源选择到能力评估' : '从需求到方案' }}</strong>
-            </div>
-            <span>{{ taskId ? `任务 #${taskId} · ${taskStatus || '待处理'}` : '请先选择任务' }}</span>
-          </header>
-          <ol class="business-route-track">
-            <li v-for="step in businessRouteSteps" :key="step.key" :class="step.state">
-              <button type="button" :aria-current="step.state === 'current' ? 'step' : undefined" @click="goBusinessRoute(step.key)">
-                <span class="business-route-marker" aria-hidden="true">{{ step.state === 'done' ? '✓' : step.number }}</span>
-                <span class="business-route-copy"><strong>{{ step.label }}</strong><small>{{ step.description }}</small></span>
-              </button>
-            </li>
-          </ol>
-        </div>
-      </Teleport>
-
       <section v-if="tab === 'tasks'" class="panel">
-        <h2>需求查询</h2>
-        <table v-table-pager="{ label: '观测任务分页' }" class="table">
-          <thead><tr><th>ID</th><th>编码</th><th>名称</th><th>状态</th><th>指标</th><th></th></tr></thead>
-          <tbody>
-            <tr v-if="!tasks.length">
-              <td colspan="6" class="muted">
-                暂无观测任务。
-                <button class="btn ghost" type="button" style="margin-left:0.35rem" @click="setTab('flow')">去创建任务</button>
-              </td>
-            </tr>
-            <tr v-for="t in tasks" :key="String(t.id)" class="row-click" :class="{ selected: taskId != null && String(taskId) === String(t.id) }" @click.stop="selectTask(t.id)">
-              <td>{{ t.id }}</td>
-              <td><code>{{ t.code }}</code></td>
-              <td>{{ t.name }}</td>
-              <td><span class="status-badge" :class="taskStatusLabel(t.status).tone">{{ taskStatusLabel(t.status).text }}</span></td>
-              <td>{{ Array.isArray(t.indicatorInstanceIds) ? t.indicatorInstanceIds.join(',') : '-' }}</td>
-              <td class="ops">
-                <button class="btn ghost" type="button" @click.stop="selectTask(t.id)">选择并继续</button>
-                <button class="btn ghost" type="button" :disabled="pending" @click.stop="removeTask(t.id)">删除</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="task-entry-head">
+          <div><h2>任务列表</h2><p class="muted">查看需求不改变当前阶段；只有“继续处理”会按任务状态进入下一步。</p></div>
+        </div>
+        <div v-if="tasks.length" class="task-entry-list">
+          <article v-for="t in tasks" :key="String(t.id)" class="task-entry-card" :class="{ selected: taskId != null && String(taskId) === String(t.id) }">
+            <header>
+              <div><strong>{{ t.name || '未命名任务' }}</strong><code>{{ t.code || `#${t.id}` }}</code></div>
+              <span class="status-badge" :class="taskStatusLabel(t.status).tone">{{ taskStatusLabel(t.status).text }}</span>
+            </header>
+            <p>{{ t.observationTarget || t.description || '暂无需求摘要' }}</p>
+            <dl>
+              <div><dt>当前阶段</dt><dd>{{ taskBusinessStage(t) }}</dd></div>
+              <div><dt>当前方案</dt><dd>{{ taskPlansFor(t)[0]?.name || '尚未形成' }}</dd></div>
+              <div><dt>最后更新</dt><dd>{{ t.updatedAt ? new Date(String(t.updatedAt)).toLocaleString() : '-' }}</dd></div>
+            </dl>
+            <div v-if="taskId != null && String(taskId) === String(t.id)" class="task-entry-detail">
+              <span>优先级：{{ t.priority || '普通' }}</span>
+              <span>时间：{{ t.timeStart ? new Date(String(t.timeStart)).toLocaleString() : '未设置' }} — {{ t.timeEnd ? new Date(String(t.timeEnd)).toLocaleString() : '未设置' }}</span>
+            </div>
+            <footer>
+              <button class="btn ghost" type="button" @click="selectTask(t.id)">查看需求</button>
+              <button class="btn" type="button" @click="continueTask(t)">继续处理</button>
+              <button class="btn ghost" type="button" @click="viewTaskOnMap(t)">查看地图</button>
+              <button class="btn ghost" type="button" @click="viewTaskExecution(t)">查看全过程</button>
+              <button class="task-entry-delete" type="button" :disabled="pending" :aria-label="`删除任务 ${t.name || t.id}`" title="删除任务" @click="removeTask(t.id)">×</button>
+            </footer>
+          </article>
+        </div>
+        <div v-else class="empty-inline">暂无观测任务。可先新建任务。</div>
       </section>
 
       <section v-if="tab === 'flow'">
@@ -2789,6 +2754,8 @@ async function applyPlanningMapAction() {
 .planning-task-picker header strong { color: #1d1d1f; font-size: 12px; }
 .planning-map-toolbar header span,
 .planning-task-picker header span { color: #6e6e73; font-size: 9px; line-height: 1.4; text-align: right; }
+.planning-task-picker header > div { display: grid; gap: .1rem; }
+.planning-task-picker header small { color: #86868b; font-size: 9px; }
 .planning-map-controls {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2813,68 +2780,27 @@ async function applyPlanningMapAction() {
 .planning-map-secondary button:hover { color: #0066cc; }
 .planning-task-actions .btn { min-height: 30px; padding: .3rem .55rem; font-size: 10px; }
 .planning-task-picker p { margin: 0; color: #6e6e73; font-size: 10px; line-height: 1.45; }
-.planning-context-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: .5rem;
-  margin: .45rem 0;
-  padding: .5rem .6rem;
-  border-radius: 10px;
-  background: #f5f5f7;
-}
-.planning-context-bar span { color: #515154; font-size: 10px; line-height: 1.4; }
-.planning-context-bar .btn { min-height: 30px; padding: .3rem .55rem; font-size: 10px; white-space: nowrap; }
-.business-route-context {
-  display: grid;
-  gap: .5rem;
-  margin: .55rem 0 .75rem;
-  padding: .72rem .78rem;
-  border: 1px solid #e2e3e7;
-  border-radius: 14px;
-  background: #fff;
-}
-.business-route-context-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
-.business-route-context-head > div { display: flex; align-items: baseline; gap: .45rem; }
-.business-route-context .eyebrow { margin: 0; color: #8a8a90; font-size: 9px; letter-spacing: .04em; }
-.business-route-context-head strong { color: #1d1d1f; font-size: 14px; }
-.business-route-context-count { color: #6e6e73; font-size: 10px; font-variant-numeric: tabular-nums; }
-.business-route-context p { margin: 0; color: #6e6e73; font-size: 10px; line-height: 1.45; }
-.business-route-context-track { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .25rem; }
-.business-route-context-track span { height: 3px; border-radius: 999px; background: #e5e5e8; }
-.business-route-context-track span.active { background: #0071e3; }
-.business-route-context .btn { justify-self: start; min-height: 28px; padding: .28rem .55rem; font-size: 10px; }
-.business-route {
-  width: clamp(300px, 70%, 520px);
-  max-width: 100%;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: .55rem;
-  padding: .35rem .5rem;
-  border: 1px solid rgba(220, 221, 225, .94);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, .94);
-  box-shadow: 0 6px 18px rgba(29, 29, 31, .12);
-}
-.business-route-head { display: flex; flex: 0 0 auto; align-items: center; min-width: max-content; }
-.business-route-head > div { display: flex; align-items: center; }
-.business-route-head .eyebrow { margin: 0; color: #303033; font-size: 11px; font-weight: 650; }
-.business-route-head strong,
-.business-route-head > span { display: none; }
-.business-route-track { display: grid; flex: 1 1 auto; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .25rem; min-width: 0; margin: 0; padding: 0; list-style: none; }
-.business-route-track li { position: relative; min-width: 0; }
-.business-route-track li:not(:last-child)::after { display: none; }
-.business-route-track button { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; width: 100%; min-width: 0; gap: .24rem; min-height: 26px; padding: .2rem .38rem; border: 1px solid transparent; border-radius: 999px; background: #f3f4f6; color: #62656a; text-align: center; cursor: pointer; }
-.business-route-track button:focus-visible { outline: 2px solid rgba(0, 113, 227, .25); outline-offset: 3px; border-radius: 8px; }
-.business-route-track li.done button { border-color: #d2eedc; background: #edf9f1; color: #26744a; }
-.business-route-track li.current button { border-color: #b7d7f7; background: #edf5ff; color: #006fda; }
-.business-route-marker { display: grid; flex: 0 0 16px; place-items: center; width: 16px; height: 16px; border: 0; border-radius: 50%; background: #d6d9de; color: #fff; font-size: 9px; font-weight: 700; }
-.business-route-track li.done .business-route-marker { background: #3ba569; color: #fff; }
-.business-route-track li.current .business-route-marker { background: #0071e3; color: #fff; box-shadow: none; }
-.business-route-copy { display: block; min-width: 0; }
-.business-route-copy strong { display: block; overflow: hidden; color: inherit; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.business-route-copy small { display: none; }
+.task-entry-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; margin-bottom: .7rem; }
+.task-entry-head h2 { margin-bottom: .15rem; }
+.task-entry-head p { margin: 0; }
+.task-entry-list { display: grid; gap: .55rem; }
+.task-entry-card { display: grid; gap: .5rem; padding: .7rem; border: 1px solid #e3e3e8; border-radius: 12px; background: #fff; }
+.task-entry-card.selected { border-color: #9dc8f2; box-shadow: inset 3px 0 0 #0071e3; }
+.task-entry-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: .55rem; }
+.task-entry-card > header > div { display: grid; min-width: 0; gap: .15rem; }
+.task-entry-card > header strong { color: #1d1d1f; font-size: 13px; overflow-wrap: anywhere; }
+.task-entry-card code { width: fit-content; color: #6e6e73; font-size: 9px; }
+.task-entry-card > p { margin: 0; color: #515154; font-size: 11px; line-height: 1.5; }
+.task-entry-card dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; margin: 0; }
+.task-entry-card dl div { display: grid; gap: .12rem; min-width: 0; }
+.task-entry-card dt { color: #86868b; font-size: 9px; }
+.task-entry-card dd { margin: 0; color: #3a3a3c; font-size: 10px; overflow-wrap: anywhere; }
+.task-entry-detail { display: grid; gap: .18rem; padding: .45rem .5rem; border-radius: 8px; background: #f5f5f7; color: #515154; font-size: 10px; line-height: 1.45; }
+.task-entry-card > footer { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; padding-top: .45rem; border-top: 1px solid #ededf0; }
+.task-entry-card > footer .btn { min-height: 30px; padding: .3rem .55rem; font-size: 10px; }
+.task-entry-delete { margin-left: auto; width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: #a23b36; font-size: 17px; cursor: pointer; }
+.task-entry-delete:hover:not(:disabled) { background: #fff1f0; }
+.task-entry-delete:focus-visible { outline: 2px solid rgba(162, 59, 54, .25); outline-offset: 2px; }
 .capability-evaluation-summary { display: grid; gap: .55rem; }
 .evaluation-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .25rem; }
 .capability-evaluation-empty { display: grid; gap: .45rem; }
@@ -3260,20 +3186,11 @@ async function applyPlanningMapAction() {
   white-space: nowrap;
 }
 .excluded-reasons ul { display: grid; gap: 0.18rem; margin: 0; padding-left: 0.9rem; color: #68686d; font-size: 10px; line-height: 1.45; }
-@media (max-width: 1100px) {
-  .business-route { padding: .36rem .5rem .3rem; }
-  .business-route-marker { display: none; }
-  .business-route-track button { gap: 0; padding-inline: .2rem; }
-  .business-route-copy strong { font-size: 11px; letter-spacing: 0; }
-}
 @media (max-width: 760px) {
   .area-control { align-items: stretch; flex-direction: column; }
   .step-page-card { grid-template-columns: 30px minmax(0, 1fr) 30px; gap: 0.4rem; padding: 0.55rem; }
   .step-page-button { width: 30px; height: 30px; }
   .candidate-card-list { grid-template-columns: minmax(0, 1fr); }
-  .business-route-head { flex-direction: column; gap: .3rem; }
-  .business-route-head > span { white-space: normal; }
-  .business-route-track { gap: .15rem; }
-  .business-route-copy small { display: none; }
+  .task-entry-card dl { grid-template-columns: minmax(0, 1fr); }
 }
 </style>

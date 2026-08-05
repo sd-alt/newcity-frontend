@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | 任务中心 | `/tasks` | task-create / task-manage / modeling / systems / versions | 任务创建、任务管理、指标创建、指标体系管理、指标版本与追溯 |
 | 资源中心 | `/resources/*` | sensors / capabilities / data / algorithms / knowledge | 传感器资源、观测能力、数据建模与接入、观测数据、算法模型与服务、知识管理与应用 |
-| 业务中心 | `/business` | tasks / candidates / evaluation / flow | 需求查询、资源选择、能力评估、资源配置 |
+| 业务中心 | `/business`、`/business/execution` | tasks / candidates / evaluation / flow / plans | 需求查询、资源选择、能力评估、资源配置、方案管理、过程管理与成果追溯 |
 | 应用中心 | `/application*` | workbench / tasks / gis / progress / stats | 场景主题配置、场景任务发起、GIS 展示、任务进程与成果、场景统计分析 |
 
 ## 关键交互约定

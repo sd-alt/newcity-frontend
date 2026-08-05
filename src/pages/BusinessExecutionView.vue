@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
 import CardPager from '../components/CardPager.vue'
 import { errMessage } from '../utils/errors'
 
 type Row = Record<string, any>
+const route = useRoute()
+const router = useRouter()
 const tasks = ref<Row[]>([])
 const executions = ref<Row[]>([])
 const results = ref<Row[]>([])
@@ -20,6 +23,8 @@ const resultPage = ref(1)
 const pageSize = 4
 const viewPages = ['选择观测任务', '查看执行进度', '查看任务成果']
 const selectedTask = computed(() => tasks.value.find((item) => String(item.id) === selectedTaskId.value))
+const selectedPlanId = computed(() => typeof route.query.planId === 'string' ? route.query.planId : '')
+const selectedRunId = computed(() => typeof route.query.runId === 'string' ? route.query.runId : '')
 const filteredTasks = computed(() => {
   const q = keyword.value.trim().toLowerCase()
   return tasks.value.filter((item) => !q || `${item.code} ${item.name} ${item.status}`.toLowerCase().includes(q))
@@ -39,8 +44,9 @@ async function load() {
   try {
     const response = await api.listTasks()
     tasks.value = rows(response.data)
-    const firstTask = tasks.value[0]
-    if (!selectedTaskId.value && firstTask) selectedTaskId.value = String(firstTask.id)
+    const requestedTaskId = typeof route.query.taskId === 'string' ? route.query.taskId : ''
+    const initialTask = tasks.value.find((item) => String(item.id) === requestedTaskId) || tasks.value[0]
+    if (!selectedTaskId.value && initialTask) selectedTaskId.value = String(initialTask.id)
     await loadTaskDetail()
   } catch (cause) { error.value = errMessage(cause, '执行任务加载失败') }
   finally { loading.value = false }
@@ -54,6 +60,7 @@ async function loadTaskDetail() {
 }
 async function selectTask(item: Row) {
   selectedTaskId.value = String(item.id)
+  await router.replace({ query: { ...route.query, taskId: selectedTaskId.value } })
   executionPage.value = 1
   resultPage.value = 1
   await loadTaskDetail()
@@ -90,8 +97,16 @@ onMounted(load)
 
 <template>
   <section class="page execution-page">
-    <header class="page-head"><div><p class="eyebrow">查—选—算—评—配—优—验—执</p><h1>执行与成果</h1></div></header>
+    <header class="page-head"><div><p class="eyebrow">06 · 过程管理与成果追溯</p><h1>执行监控、过程追踪与成果查看</h1></div></header>
     <p v-if="error" class="error">{{ error }}</p><p v-if="message" class="ok-text">{{ message }}</p>
+    <section v-if="selectedTask" class="task-context-card" aria-label="当前业务任务上下文">
+      <div><small>任务名称</small><strong>{{ selectedTask.name }}</strong></div>
+      <div><small>任务状态</small><strong>{{ selectedTask.status || '-' }}</strong></div>
+      <div><small>当前阶段</small><strong>06 过程追溯</strong></div>
+      <div><small>当前方案</small><strong>{{ selectedPlanId ? `#${selectedPlanId}` : '未指定' }}</strong></div>
+      <div><small>运行状态</small><strong>{{ selectedRunId ? `运行 #${selectedRunId}` : '无 Agent 运行上下文' }}</strong></div>
+      <nav><RouterLink class="btn ghost tiny" :to="{ path: '/business', query: { tab: 'tasks', taskId: selectedTaskId } }">返回任务入口</RouterLink><RouterLink class="btn ghost tiny" :to="{ path: '/application', query: { tab: 'gis', taskId: selectedTaskId } }">地图定位</RouterLink></nav>
+    </section>
     <section v-if="viewPage === 1" class="panel execution-list-card">
       <header class="section-card-head"><h2>观测任务</h2><span>共 {{ filteredTasks.length }} 项</span></header>
       <p class="muted">任务下发必须基于已发布方案并再次人工确认；页面区分模拟执行和真实资源回执。</p>
@@ -117,5 +132,11 @@ onMounted(load)
 </template>
 
 <style scoped>
+.task-context-card { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .4rem; margin: .55rem 0; padding: .6rem; border: 1px solid #e1e3e6; border-radius: 12px; background: #fff; }
+.task-context-card > div { display: grid; gap: .12rem; min-width: 0; }
+.task-context-card small { color: #6e6e73; font-size: 9px; }
+.task-context-card strong { overflow-wrap: anywhere; color: #29292d; font-size: 11px; }
+.task-context-card nav { grid-column: 1 / -1; display: flex; gap: .35rem; flex-wrap: wrap; padding-top: .35rem; border-top: 1px solid #ededf0; }
+@media (max-width: 760px) { .task-context-card { grid-template-columns: 1fr 1fr; } }
 .execution-page { padding-bottom: 1rem; }.execution-list-card,.execution-detail-card { margin-top: .6rem; }.section-card-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .4rem; }.section-card-head h2 { margin: 0; }.section-card-head span { color: #6e6e73; font-size: 10px; white-space: nowrap; }.task-list { display: grid; gap: .4rem; margin-top: .5rem; padding: .42rem; border-radius: 12px; background: #f3f4f6; }.task-list button { display: grid; gap: .1rem; padding: .55rem; border: 1px solid #e1e3e6; border-radius: 10px; background: #fff; text-align: left; cursor: pointer; }.task-list button.active { border-color: #b7d7f7; background: var(--brand-soft); }.task-list span,.task-list small { color: #6e6e73; font-size: 10px; }.task-list strong { color: #3a3a3c; font-size: 12px; }.pager { display: flex; justify-content: center; gap: .4rem; margin: .5rem 0 0; font-size: 10px; }.pager button { border: 0; background: transparent; color: var(--brand); }.section-head { display: flex; justify-content: space-between; align-items: end; gap: .5rem; margin: 0 0 .55rem; }.section-head h3,.section-head p { margin: 0; }.section-head > div:last-child { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .3rem; }.timeline { display: grid; gap: .35rem; padding: .5rem; border-radius: 12px; background: #f3f4f6; }.timeline article { display: grid; grid-template-columns: 12px 1fr; gap: .35rem; }.timeline article > span { width: 8px; height: 8px; margin-top: .25rem; border: 2px solid #c7c7cc; border-radius: 50%; background: #fff; }.timeline article.running > span { border-color: var(--brand); background: #68a9ea; }.timeline article.succeeded > span { border-color: #2f8f5b; background: #78c59b; }.timeline article > div { display: grid; gap: .16rem; padding-bottom: .45rem; border-bottom: 1px solid #e1e3e6; }.timeline strong { color: #3a3a3c; font-size: 12px; }.timeline small { color: #6e6e73; }.progress { height: 4px; background: #e5e5ea; overflow: hidden; }.progress i { display: block; height: 100%; background: var(--brand); }.result-title { margin: .75rem 0 .4rem; padding-top: .7rem; border-top: 1px solid #eceef1; color: #3a3a3c; font-size: 13px; }.result-list { display: grid; gap: .4rem; padding: .42rem; border-radius: 12px; background: #f3f4f6; }.result-list article { display: grid; gap: .15rem; padding: .55rem; border: 1px solid #e1e3e6; border-radius: 10px; background: #fff; }.result-list span { width: max-content; color: #515154; font-size: 9px; }.result-list strong { color: #3a3a3c; font-size: 12px; }.result-list p { margin: 0; color: #515154; font-size: 11px; }.result-list small { color: #6e6e73; }.empty-state { padding: .9rem; border: 1px dashed #cfd3d8; color: #6e6e73; text-align: center; font-size: 11px; }.ok-text { color: #247347; font-size: 12px; }
 </style>

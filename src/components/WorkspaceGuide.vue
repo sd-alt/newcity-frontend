@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 type JourneyItem = {
@@ -26,18 +26,12 @@ const journey: JourneyItem[] = [
 
 const current = computed<JourneyItem>(() => journey.find((item) => item.matches.some((prefix) => route.path.startsWith(prefix))) ?? journey[0]!)
 
-onMounted(() => {
-  try { open.value = window.localStorage.getItem('newcity-workspace-guide') !== 'hidden' } catch { open.value = true }
-})
-
 function hide() {
   open.value = false
-  try { window.localStorage.setItem('newcity-workspace-guide', 'hidden') } catch { /* 当前环境可能无法使用本地存储 */ }
 }
 
 function show() {
   open.value = true
-  try { window.localStorage.removeItem('newcity-workspace-guide') } catch { /* 当前环境可能无法使用本地存储 */ }
 }
 
 async function go(item: JourneyItem) {

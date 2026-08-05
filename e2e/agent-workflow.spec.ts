@@ -309,3 +309,132 @@ test('传感器档案按查询参数定位观测能力并提交结构化量测�
   expect(patchBody?.attributes?.measurementItems?.[0]).toMatchObject({ code: 'rainfall', name: '降雨量', unit: 'mm' })
   expect(patchBody?.attributes?.capabilityText).toBeUndefined()
 })
+
+test('四中心二级导航统一无编号并保留既有路由和 Tab', async ({ page }) => {
+  await page.route('**/api/v1/**', async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    if (url.pathname.endsWith('/auth/csrf')) return route.fulfill({ json: { data: { csrfToken: 'test' } } })
+    if (url.pathname.endsWith('/auth/me')) return route.fulfill({ json: { data: { id: 1, username: 'e2e', displayName: 'E2E 用户', isStaff: true } } })
+    if (url.pathname.endsWith('/planning/tasks/42')) return route.fulfill({ json: { data: { id: 42, name: '暴雨观测', code: 'TASK-42', status: 'submitted', observationTarget: '验证深链不会改写阶段' } } })
+    if (url.pathname.endsWith('/planning/tasks')) return route.fulfill({ json: { data: [{ id: 42, name: '暴雨观测', code: 'TASK-42', status: 'submitted', observationTarget: '验证深链不会改写阶段' }] } })
+    return route.fulfill({ json: { data: [] } })
+  })
+
+  await page.goto('/business?tab=tasks&taskId=42')
+  await expect(page).toHaveURL(/\/business\?tab=tasks&taskId=42/)
+  await expect(page.getByRole('heading', { name: '任务列表' })).toBeVisible()
+  await expect(page.locator('.business-route')).toHaveCount(0)
+  const businessNavigation = page.locator('.rail-subnav').filter({ hasText: '需求查询' })
+  await expect(businessNavigation.locator('.rail-subitem')).toHaveCount(6)
+  await expect(businessNavigation.locator('.rail-stage')).toHaveCount(0)
+  await expect(businessNavigation.locator('.rail-subitem--staged')).toHaveCount(0)
+  await expect(businessNavigation.locator('.rail-subitem-label')).toHaveText([
+    '需求查询',
+    '资源选择',
+    '能力评估',
+    '资源配置',
+    '方案管理',
+    '过程管理与成果追溯',
+  ])
+
+  await businessNavigation.getByRole('button', { name: '资源选择', exact: true }).click()
+  await expect(page).toHaveURL(/\/business\?tab=candidates&taskId=42/)
+  await businessNavigation.getByRole('button', { name: '过程管理与成果追溯', exact: true }).click()
+  await expect(page).toHaveURL(/\/business\/execution\?taskId=42/)
+
+  await page.getByRole('button', { name: /任务中心/ }).click()
+  await expect(page.locator('.rail-subnav').filter({ hasText: '任务创建' }).locator('.rail-subitem--staged')).toHaveCount(0)
+  await expect(page.locator('.rail-subnav').filter({ hasText: '任务创建' }).locator('.rail-stage')).toHaveCount(0)
+
+  await page.getByRole('button', { name: /应用中心/ }).click()
+  const applicationNavigation = page.locator('.rail-subnav').filter({ hasText: '场景主题配置' })
+  await expect(applicationNavigation.locator('.rail-subitem-label')).toHaveText([
+    '场景主题配置',
+    '场景任务发起',
+    'GIS综合展示',
+    '任务进程与成果查看',
+    '场景统计分析',
+  ])
+  await expect(applicationNavigation.locator('.rail-stage')).toHaveCount(0)
+})
+
+test('任务入口将查看、继续、地图和全过程分成独立动作', async ({ page }) => {
+  await page.route('**/api/v1/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/auth/csrf')) return route.fulfill({ json: { data: { csrfToken: 'test' } } })
+    if (url.pathname.endsWith('/auth/me')) return route.fulfill({ json: { data: { id: 1, username: 'e2e', displayName: 'E2E 用户', isStaff: true } } })
+    if (url.pathname.endsWith('/planning/tasks')) return route.fulfill({ json: { data: [{ id: 42, name: '暴雨观测', code: 'TASK-42', status: 'submitted', observationTarget: '验证任务入口动作' }] } })
+    if (url.pathname.endsWith('/planning/tasks/42')) return route.fulfill({ json: { data: { id: 42, name: '暴雨观测', code: 'TASK-42', status: 'submitted', observationTarget: '验证任务入口动作' } } })
+    return route.fulfill({ json: { data: [] } })
+  })
+
+  await page.goto('/business?tab=tasks')
+  const card = page.locator('.task-entry-card')
+  await expect(card.getByRole('button', { name: '查看需求' })).toBeVisible()
+  await card.getByRole('button', { name: '查看需求' }).click()
+  await expect(page).toHaveURL(/\/business\?tab=tasks&taskId=42/)
+  await expect(card.getByRole('button', { name: '继续处理' })).toBeVisible()
+  await card.getByRole('button', { name: '继续处理' }).click()
+  await expect(page).toHaveURL(/\/business\?tab=candidates&taskId=42/)
+})
+
+test('传感器只读模式切换分区后保持只读并显式进入编辑', async ({ page }) => {
+  const detail = {
+    id: 1,
+    name: '雨量传感器',
+    type: '气象传感器',
+    platformName: '示范平台',
+    platformStatus: 'active',
+    general: { name: '示范平台', sensorName: '雨量传感器', identifier: 'RAIN-001', status: 'active' },
+    attributes: { capability: { principle: '翻斗计量', parameters: {} }, spatialResolutionM: 10, temporalResolutionSeconds: 60, accuracyPercent: 95, reliabilityPercent: 98 },
+    measurementItems: [],
+    profileCompleteness: { completedCount: 2, totalCount: 8, ratio: 0.25, sections: [] },
+    permissions: { canView: true, canEditGeneral: true, canEditCapabilities: true, canEditInterfacesAndConstraints: true },
+    spatiotemporal: {}, geographic: {}, history: [], contact: {}, constraints: {}, interfaces: [],
+  }
+  await page.route('**/api/v1/**', async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    if (url.pathname.endsWith('/auth/csrf')) return route.fulfill({ json: { data: { csrfToken: 'test' } } })
+    if (url.pathname.endsWith('/auth/me')) return route.fulfill({ json: { data: { id: 1, username: 'e2e', displayName: 'E2E 用户', isStaff: true } } })
+    if (url.pathname.endsWith('/observations/sensors')) return route.fulfill({ json: { data: [{ id: 1, sensorName: '雨量传感器', platformName: '示范平台' }] } })
+    if (url.pathname.endsWith('/resource/sensors/1/octuple')) return route.fulfill({ json: { data: detail } })
+    return route.fulfill({ json: { data: [] } })
+  })
+
+  await page.goto('/resources/sensors?tab=crud&sensorId=1&section=general&mode=view')
+  await expect(page.locator('.archive-fields')).toHaveAttribute('disabled', '')
+  await page.getByRole('button', { name: /传感器观测能力/ }).click()
+  await expect(page).toHaveURL(/section=attributes.*mode=view/)
+  await expect(page.locator('.archive-fields')).toHaveAttribute('disabled', '')
+  await page.getByRole('button', { name: '进入编辑' }).click()
+  await expect(page).toHaveURL(/section=attributes.*mode=edit/)
+  await expect(page.locator('.archive-fields')).not.toHaveAttribute('disabled', '')
+})
+
+test('维护完整档案从后端完整度定位第一个未完成分区', async ({ page }) => {
+  const detail = {
+    id: 1, name: '雨量传感器', type: '气象传感器', platformName: '示范平台', platformStatus: 'active',
+    general: { name: '示范平台', sensorName: '雨量传感器', identifier: 'RAIN-001', status: 'active' },
+    attributes: { capability: { principle: '翻斗计量', parameters: {} } }, measurementItems: [],
+    profileCompleteness: {
+      completedCount: 1, totalCount: 8, ratio: 0.125,
+      sections: [{ key: 'general', status: 'complete' }, { key: 'attributes', status: 'incomplete' }],
+    },
+    permissions: { canView: true, canEditGeneral: true, canEditCapabilities: true, canEditInterfacesAndConstraints: true },
+    spatiotemporal: {}, geographic: {}, history: [], contact: {}, constraints: {}, interfaces: [],
+  }
+  await page.route('**/api/v1/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/auth/csrf')) return route.fulfill({ json: { data: { csrfToken: 'test' } } })
+    if (url.pathname.endsWith('/auth/me')) return route.fulfill({ json: { data: { id: 1, username: 'e2e', displayName: 'E2E 用户', isStaff: true } } })
+    if (url.pathname.endsWith('/observations/sensors')) return route.fulfill({ json: { data: [{ id: 1, sensorName: '雨量传感器', platformName: '示范平台' }] } })
+    if (url.pathname.endsWith('/resource/sensors/1/octuple')) return route.fulfill({ json: { data: detail } })
+    return route.fulfill({ json: { data: [] } })
+  })
+
+  await page.goto('/resources/sensors?tab=crud&sensorId=1&section=general&mode=edit&focus=incomplete')
+  await expect(page).toHaveURL(/section=attributes.*focus=incomplete/)
+  await expect(page.getByRole('heading', { name: '传感器观测能力' })).toBeVisible()
+})

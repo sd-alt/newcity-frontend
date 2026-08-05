@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { RouterLink, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
 import ContextGuide from '../components/ContextGuide.vue'
 import { errMessage } from '../utils/errors'
@@ -70,26 +70,27 @@ const filteredSensors = computed(() => {
 })
 const currentTabBrief = computed(() => tabBriefs[tab.value] || '')
 const profileCompleteness = computed(() => detail.value?.profileCompleteness || null)
-const archiveMode = computed(() => String(route.query.mode || 'edit') === 'view')
-const completedSectionCount = computed(() => Number(profileCompleteness.value?.completedCount ?? tabs.filter(([key]) => isSectionComplete(key)).length))
-const profileRatio = computed(() => Number(profileCompleteness.value?.ratio ?? (completedSectionCount.value / tabs.length)))
+const requestedMode = computed(() => String(route.query.mode || 'view') === 'edit' ? 'edit' : 'view')
+const currentSectionPermission = computed(() => {
+  const permissions = detail.value?.permissions || {}
+  if (tab.value === 'attributes') return permissions.canEditCapabilities !== false
+  if (tab.value === 'constraints' || tab.value === 'interfaces') return permissions.canEditInterfacesAndConstraints !== false
+  return permissions.canEditGeneral !== false
+})
+const archiveMode = computed(() => requestedMode.value === 'view' || !currentSectionPermission.value)
+const completedSectionCount = computed(() => Number(profileCompleteness.value?.completedCount ?? 0))
+const profileRatio = computed(() => Number(profileCompleteness.value?.ratio ?? 0))
 const currentSectionDirty = computed(() => draftSnapshot() !== draftBaseline.value)
 const sectionStatus = computed(() => {
   const item = profileCompleteness.value?.sections?.find((section: Row) => section.key === tab.value)
-  return item?.status || (isSectionComplete(tab.value) ? 'complete' : 'incomplete')
+  return item?.status || 'incomplete'
 })
 
 function rows(value: unknown): Row[] { return Array.isArray(value) ? value as Row[] : [] }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value ?? {})) }
-function hasContent(value: unknown): boolean {
-  if (Array.isArray(value)) return value.length > 0
-  if (value && typeof value === 'object') return Object.values(value as Row).some(hasContent)
-  return value !== null && value !== undefined && value !== ''
-}
 function isSectionComplete(key: string) {
-  if (!detail.value) return false
-  if (key === 'attributes') return hasContent(detail.value.attributes) && hasContent(detail.value.measurementItems)
-  return hasContent(detail.value[key])
+  const section = profileCompleteness.value?.sections?.find((item: Row) => item.key === key)
+  return section?.status === 'complete' || section?.complete === true
 }
 function sectionFromQuery(value: unknown) {
   const raw = String(value || '')
@@ -105,7 +106,15 @@ function toDateTimeLocal(value: unknown) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 function draftSnapshot() {
-  return JSON.stringify({ draft: draft.value, capabilityAdvancedJson: capabilityAdvancedJson.value, constraintJson: constraintJson.value })
+  return JSON.stringify({
+    draft: draft.value,
+    capabilityAdvancedJson: capabilityAdvancedJson.value,
+    constraintJson: constraintJson.value,
+    measurementDraft: measurementEditorOpen.value ? measurementDraft.value : null,
+    interfaceDraft: interfaceEditorOpen.value ? interfaceDraft.value : null,
+    historyDraft: tab.value === 'history' ? historyDraft.value : null,
+    revisitCycle: tab.value === 'spatiotemporal' ? [revisitCycleValue.value, revisitCycleUnit.value] : null,
+  })
 }
 function markDraftSaved() { draftBaseline.value = draftSnapshot() }
 function normalizeCapability(value: unknown) {
@@ -146,6 +155,14 @@ async function loadSensors() {
     if (!selectedId.value && initialSensor) selectedId.value = String(initialSensor.id)
     tab.value = sectionFromQuery(route.query.section)
     await loadDetail()
+    if (route.query.focus === 'incomplete' && detail.value) {
+      const firstIncomplete = tabs.find(([key]) => !isSectionComplete(key))?.[0]
+      if (firstIncomplete && firstIncomplete !== tab.value) {
+        tab.value = firstIncomplete
+        syncDraft()
+        await router.replace({ query: { ...route.query, section: firstIncomplete } })
+      }
+    }
   } catch (cause) {
     error.value = errMessage(cause, '传感器列表加载失败')
   } finally { loading.value = false }
@@ -166,7 +183,16 @@ async function selectTab(key: string) {
   if (currentSectionDirty.value && !window.confirm('当前分区有未保存修改，确定切换并放弃这些修改吗？')) return
   tab.value = key
   syncDraft()
-  await router.replace({ query: { ...route.query, section: key, mode: 'edit' } })
+  await router.replace({ query: { ...route.query, section: key, mode: requestedMode.value } })
+}
+async function enterEditMode() {
+  if (!currentSectionPermission.value) return
+  await router.replace({ query: { ...route.query, section: tab.value, mode: 'edit' } })
+}
+async function exitEditMode() {
+  if (currentSectionDirty.value && !window.confirm('当前分区有未保存修改，确定退出编辑并放弃这些修改吗？')) return
+  syncDraft()
+  await router.replace({ query: { ...route.query, section: tab.value, mode: 'view' } })
 }
 function parseObject(value: string, label: string) {
   try {
@@ -219,6 +245,10 @@ function cancelInterface() { interfaceEditorOpen.value = false; editingInterface
 function saveInterface() {
   const form = interfaceDraft.value
   if (!form.name.trim()) { error.value = '接口名称不能为空'; return }
+  if (form.credentialReference.trim() && !/^(env|secret|vault):\S+$/.test(form.credentialReference.trim())) {
+    error.value = '凭据只允许填写 env:、secret: 或 vault: 开头的外部引用'
+    return
+  }
   let metadata: Row
   try { metadata = parseObject(form.metadataText, '接口元数据') } catch (cause) { error.value = errMessage(cause, '接口元数据格式不正确'); return }
   const next = { id: form.id || undefined, interfaceType: form.interfaceType, name: form.name.trim(), endpoint: form.endpoint.trim(), protocol: form.protocol.trim(), dataFormat: form.dataFormat.trim(), authMethod: form.authMethod, credentialReference: form.credentialReference.trim(), serviceStatus: form.serviceStatus, metadata }
@@ -269,7 +299,24 @@ async function saveCurrent() {
     error.value = errMessage(cause, '档案保存失败')
   } finally { saving.value = false }
 }
-onMounted(loadSensors)
+function confirmUnsaved() {
+  return !currentSectionDirty.value || window.confirm('当前档案有未保存修改，确定离开并放弃这些修改吗？')
+}
+function beforeUnload(event: BeforeUnloadEvent) {
+  if (!currentSectionDirty.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+onMounted(() => {
+  window.addEventListener('beforeunload', beforeUnload)
+  void loadSensors()
+})
+onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
+onBeforeRouteLeave(() => confirmUnsaved())
+onBeforeRouteUpdate((to, from) => {
+  const contextChanged = to.query.sensorId !== from.query.sensorId || to.query.section !== from.query.section
+  return !contextChanged || confirmUnsaved()
+})
 watch(() => props.sensorId, async (id) => {
   if (!id || id === selectedId.value) return
   selectedId.value = id
@@ -285,7 +332,7 @@ watch(() => String(route.query.section || ''), (value) => {
   <section class="page metadata-page" :class="{ embedded: props.embedded }">
     <header v-if="!props.embedded" class="page-head resource-head">
       <div><p class="eyebrow">传感器完整档案</p><h1>传感器信息维护</h1></div>
-      <RouterLink :to="{ name: 'resource-sensors', query: { tab: 'crud' } }" class="back-link">返回资源列表</RouterLink>
+      <RouterLink :to="{ path: String(route.query.returnTo || '/resources/sensors'), query: route.query.returnTo ? { runId: route.query.runId, tab: route.query.currentTab, scrollY: route.query.scrollY } : { tab: route.query.currentTab || route.query.tab || 'crud' } }" class="back-link">返回来源页面</RouterLink>
     </header>
     <ContextGuide v-if="!props.embedded" storage-key="newcity-sensor-profile-guide" kicker="传感器完整档案怎么用" title="按分区维护真实档案" summary="基础信息、观测能力、空间位置和接入条件共同描述一个可复用的传感器资源。" :steps="metadataGuideSteps" reopen-label="查看档案说明" />
     <p v-if="error" class="error" role="alert">{{ error }}</p><p v-if="message" class="ok-text" role="status">{{ message }}</p>
@@ -307,10 +354,12 @@ watch(() => String(route.query.section || ''), (value) => {
       <div class="octuple-tabs" role="tablist" aria-label="传感器完整档案分区">
         <button v-for="item in tabs" :key="item[0]" type="button" :class="{ active: tab === item[0] }" @click="selectTab(item[0])"><i :class="{ complete: isSectionComplete(item[0]) }" aria-hidden="true"></i><span><strong>{{ item[1] }}</strong><small>{{ tabBriefs[item[0]] }}</small></span></button>
       </div>
-      <fieldset class="panel editor archive-fieldset" :disabled="archiveMode">
-        <div class="editor-head"><div><p class="eyebrow">当前分区</p><h3>{{ tabs.find((item) => item[0] === tab)?.[1] }}</h3></div><small>{{ currentTabBrief }}<template v-if="currentSectionDirty"> · 有未保存修改</template></small></div>
+      <section class="panel editor archive-fieldset">
+        <div class="editor-head"><div><p class="eyebrow">当前分区</p><h3>{{ tabs.find((item) => item[0] === tab)?.[1] }}</h3></div><div class="editor-mode-actions"><small>{{ currentTabBrief }}<template v-if="currentSectionDirty"> · 有未保存修改</template></small><button v-if="archiveMode && currentSectionPermission" class="btn ghost tiny" type="button" @click="enterEditMode">进入编辑</button><button v-else-if="!archiveMode" class="btn ghost tiny" type="button" @click="exitEditMode">退出编辑</button><small v-else>当前用户无该分区编辑权限</small></div></div>
+        <fieldset class="archive-fields" :disabled="archiveMode">
         <template v-if="tab === 'general'">
-          <div class="form-grid"><label>传感器名称<input v-model.trim="draft.sensorName" /></label><label>平台名称<input v-model.trim="draft.name" /></label><label>资源编码<input v-model.trim="draft.identifier" /></label><label>型号<input v-model.trim="draft.model" /></label><label>厂商<input v-model.trim="draft.manufacturer" /></label><label>所属单位<input v-model.trim="draft.owner" /></label><label>状态<select v-model="draft.status"><option value="active">启用</option><option value="offline">离线</option><option value="maintenance">维护</option><option value="inactive">停用</option></select></label><label class="wide">说明<textarea v-model.trim="draft.description" rows="3"></textarea></label></div>
+          <div class="subsection"><strong>传感器信息</strong><div class="form-grid"><label>传感器名称<input v-model.trim="draft.sensorName" /></label><label>传感器类型<input :value="detail.type || '未登记'" disabled /></label></div></div>
+          <div class="subsection"><strong>所属平台信息</strong><p class="field-note">修改平台信息将影响该平台下的全部传感器。</p><div class="form-grid"><label>平台名称<input v-model.trim="draft.name" /></label><label>平台标识<input v-model.trim="draft.identifier" /></label><label>型号<input v-model.trim="draft.model" /></label><label>厂商<input v-model.trim="draft.manufacturer" /></label><label>所属单位<input v-model.trim="draft.owner" /></label><label>状态<select v-model="draft.status"><option value="active">启用</option><option value="offline">离线</option><option value="maintenance">维护</option><option value="inactive">停用</option></select></label><label class="wide">说明<textarea v-model.trim="draft.description" rows="3"></textarea></label></div></div>
         </template>
         <template v-else-if="tab === 'attributes'">
           <div class="form-grid"><label class="wide">感知原理与能力说明<textarea v-model="draft.capability.principle" rows="3" placeholder="例如：通过翻斗计量降雨量"></textarea></label><label>空间分辨率（m）<input v-model.number="draft.spatialResolutionM" type="number" min="0" step="any" /></label><label>时间分辨率（秒）<input v-model.number="draft.temporalResolutionSeconds" type="number" min="0" step="any" /></label><label>准确度（%）<input v-model.number="draft.accuracyPercent" type="number" min="0" max="100" step="any" /></label><label>可靠度（%）<input v-model.number="draft.reliabilityPercent" type="number" min="0" max="100" step="any" /></label><label>分类<select v-model="draft.classification"><option value="">未分类</option><option value="environment">环境监测</option><option value="hydrology">水文监测</option><option value="meteorology">气象监测</option><option value="geology">地学监测</option></select></label><label>关键词<input v-model="draft.keywords" placeholder="用逗号分隔" /></label><label class="wide">能力高级参数（JSON）<textarea v-model="capabilityAdvancedJson" class="mono" rows="4"></textarea></label></div>
@@ -323,9 +372,10 @@ watch(() => String(route.query.section || ''), (value) => {
         <template v-else-if="tab === 'history'"><div class="metadata-list"><div v-for="item in detail.history || []" :key="item.id"><strong>{{ historyItemValue(item, 'eventType', 'event_type') }}</strong> · {{ historyItemValue(item, 'occurredAt', 'occurred_at') }} · {{ historyItemValue(item, 'description', 'description') || '无说明' }}<em v-if="item.capabilityChange?.voided || item.capability_change?.voided">（已作废）</em></div><div v-if="!detail.history?.length" class="empty-inline">暂无运行履历</div></div><div class="form-grid"><label>事件类型<select v-model="historyDraft.eventType"><option value="deployment">部署</option><option value="calibration">校准</option><option value="maintenance">维护</option><option value="fault">故障</option><option value="capability_change">能力变化</option></select></label><label>发生时间<input v-model="historyDraft.occurredAt" type="datetime-local" /></label><label class="wide">说明<textarea v-model.trim="historyDraft.description" rows="2"></textarea></label></div><p class="field-note">正式履历不提供物理删除；如需更正，请新增一条更正履历并说明原因。</p></template>
         <template v-else-if="tab === 'contact'"><div class="form-grid"><label>责任单位<input v-model.trim="draft.responsibleOrganization" /></label><label>责任部门<input v-model.trim="draft.responsibleDepartment" /></label><label>负责人<input v-model.trim="draft.responsiblePerson" /></label><label>运维联系人<input v-model.trim="draft.maintenanceContact" /></label><label>联系电话<input v-model.trim="draft.contactDetails.phone" /></label><label>联系邮箱<input v-model.trim="draft.contactDetails.email" type="email" /></label><label class="wide">联系备注<textarea v-model.trim="draft.contactDetails.notes" rows="3"></textarea></label></div></template>
         <template v-else-if="tab === 'constraints'"><div class="form-grid constraint-grid"><label v-for="key in ['environmental', 'permission', 'sharing', 'security', 'cost', 'scheduling']" :key="key">{{ ({ environmental: '环境约束', permission: '权限约束', sharing: '共享约束', security: '安全约束', cost: '成本约束', scheduling: '调度约束' } as Row)[key] }}<textarea v-model="constraintJson[key]" class="mono" rows="5"></textarea></label></div><p class="field-note">高级约束以 JSON 保存；请不要填写 API 密钥、密码或令牌原文。</p></template>
-        <template v-else><div class="subsection"><div class="subsection-head"><strong>接入接口</strong><button class="btn ghost tiny" type="button" @click="beginInterface()">新增接口</button></div><table class="table interface-table"><thead><tr><th>类型 / 名称</th><th>协议 / 格式</th><th>认证</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-if="!draft.length"><td colspan="5" class="muted">暂无接入接口</td></tr><tr v-for="item in draft" :key="item.id || item.name"><td>{{ item.interfaceType || item.interface_type }} · {{ item.name }}</td><td>{{ item.protocol || '-' }} / {{ item.dataFormat || item.data_format || '-' }}</td><td>{{ item.authMethod || item.auth_method || 'none' }}<small v-if="item.credentialReference"> · 凭据引用已配置</small></td><td>{{ item.serviceStatus || item.service_status || 'unknown' }}</td><td class="ops"><button class="btn ghost tiny" type="button" @click="beginInterface(item)">编辑</button><button class="btn ghost tiny danger" type="button" @click="removeInterface(item)">删除</button></td></tr></tbody></table><div v-if="interfaceEditorOpen" class="inline-editor"><div class="form-grid"><label>接口类型<input v-model.trim="interfaceDraft.interfaceType" /></label><label>接口名称<input v-model.trim="interfaceDraft.name" /></label><label>协议<input v-model.trim="interfaceDraft.protocol" /></label><label>数据格式<input v-model.trim="interfaceDraft.dataFormat" /></label><label>认证方式<select v-model="interfaceDraft.authMethod"><option value="none">无</option><option value="token">令牌引用</option><option value="credential-reference">凭据引用</option></select></label><label>服务状态<select v-model="interfaceDraft.serviceStatus"><option value="unknown">未知</option><option value="online">在线</option><option value="offline">离线</option><option value="maintenance">维护</option></select></label><label class="wide">服务地址<input v-model.trim="interfaceDraft.endpoint" /></label><label class="wide">凭据引用（只填环境变量引用）<input v-model.trim="interfaceDraft.credentialReference" placeholder="env:DEVICE_TOKEN" /></label><label class="wide">接口元数据 JSON<textarea v-model="interfaceDraft.metadataText" class="mono" rows="3"></textarea></label></div><button class="btn ghost tiny" type="button" @click="cancelInterface">取消</button><button class="btn tiny" type="button" @click="saveInterface">保存接口</button></div></div></template>
+        <template v-else><div class="subsection"><div class="subsection-head"><strong>接入接口</strong><button class="btn ghost tiny" type="button" @click="beginInterface()">新增接口</button></div><table class="table interface-table"><thead><tr><th>类型 / 名称</th><th>协议 / 格式</th><th>认证</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-if="!draft.length"><td colspan="5" class="muted">暂无接入接口</td></tr><tr v-for="item in draft" :key="item.id || item.name"><td>{{ item.interfaceType || item.interface_type }} · {{ item.name }}</td><td>{{ item.protocol || '-' }} / {{ item.dataFormat || item.data_format || '-' }}</td><td>{{ item.authMethod || item.auth_method || 'none' }}<small v-if="item.credentialConfigured || item.credentialReference"> · 凭据引用已配置</small></td><td>{{ item.serviceStatus || item.service_status || 'unknown' }}</td><td class="ops"><button class="btn ghost tiny" type="button" @click="beginInterface(item)">编辑</button><button class="btn ghost tiny danger" type="button" @click="removeInterface(item)">删除</button></td></tr></tbody></table><div v-if="interfaceEditorOpen" class="inline-editor"><div class="form-grid"><label>接口类型<input v-model.trim="interfaceDraft.interfaceType" /></label><label>接口名称<input v-model.trim="interfaceDraft.name" /></label><label>协议<input v-model.trim="interfaceDraft.protocol" /></label><label>数据格式<input v-model.trim="interfaceDraft.dataFormat" /></label><label>认证方式<select v-model="interfaceDraft.authMethod"><option value="none">无</option><option value="token">令牌引用</option><option value="credential-reference">凭据引用</option></select></label><label>服务状态<select v-model="interfaceDraft.serviceStatus"><option value="unknown">未知</option><option value="online">在线</option><option value="offline">离线</option><option value="maintenance">维护</option></select></label><label class="wide">服务地址<input v-model.trim="interfaceDraft.endpoint" /></label><label class="wide">新凭据引用（留空则保持原值）<input v-model.trim="interfaceDraft.credentialReference" placeholder="env:DEVICE_TOKEN / secret:... / vault:..." /></label><label class="wide">接口元数据 JSON<textarea v-model="interfaceDraft.metadataText" class="mono" rows="3"></textarea></label></div><button class="btn ghost tiny" type="button" @click="cancelInterface">取消</button><button class="btn tiny" type="button" @click="saveInterface">保存接口</button></div></div></template>
         <button v-if="!archiveMode" class="btn primary" :disabled="saving" @click="saveCurrent">{{ saving ? '保存中…' : `保存${tabs.find((item) => item[0] === tab)?.[1]}` }}</button>
-      </fieldset>
+        </fieldset>
+      </section>
     </template>
   </section>
 </template>
@@ -362,10 +412,13 @@ watch(() => String(route.query.section || ''), (value) => {
 .editor-head p, .editor-head h3 { margin: 0; }
 .editor-head h3 { color: #1d1d1f; font-size: 14px; }
 .editor-head > small { max-width: 55%; color: #6e6e73; font-size: 11px; text-align: right; }
+.editor-mode-actions { display: flex; align-items: center; justify-content: flex-end; gap: .35rem; flex-wrap: wrap; }
+.editor-mode-actions small { color: #6e6e73; font-size: 11px; text-align: right; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; }
 .editor label { display: grid; gap: .2rem; color: #515154; font-size: 11px; }
 .editor label.wide { grid-column: 1 / -1; }
 .editor input, .editor select, .editor textarea { min-width: 0; width: 100%; box-sizing: border-box; }
+.archive-fields { display: grid; gap: .6rem; min-width: 0; margin: 0; padding: 0; border: 0; }
 .subsection { display: grid; gap: .45rem; }
 .subsection-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
 .subsection-head strong { font-size: 12px; }
