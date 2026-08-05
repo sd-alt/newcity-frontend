@@ -1806,3 +1806,22 @@
 - `.github/backend-agent.sha`：锁定工具超时修复后的后端提交。
 - `progress.md`：记录本轮跨仓库版本更新。
 - 回滚方式：将 `.github/backend-agent.sha` 恢复为 `2dac9e12f7e0b67d9d6c90b1ccc6dc6c9c2be4c8` 后提交并重新运行联调；不涉及业务数据。
+## 2026-08-05 - Task: 传感器完整档案交互与地图入口
+
+### What was done
+- 资源列表统一提供查看、编辑基础信息、维护完整档案、地图定位和更多操作；观测能力页展示感知要素、量测项、分辨率、精度、可靠度、完整度和状态。
+- 地图抽屉为传感器增加编辑基础信息、编辑观测能力、维护完整档案和地图定位入口，并透传任务返回上下文。
+- 完整档案页面改为八个业务分区，支持查询参数定位、只读模式、未保存修改提醒、结构化能力与量测项编辑、接口表格和档案完整度回显。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run test:e2e`：9 项 Mock Playwright 全部通过，新增传感器档案结构化量测项闭环用例。
+
+### Notes
+- `src/pages/SensorMetadataView.vue`：重做传感器完整档案分区编辑和结构化能力交互。
+- `src/pages/ResourcesCenter.vue`：补齐列表、观测能力页和查询参数入口。
+- `src/components/AppLayout.vue`、`src/styles.css`：补充地图抽屉传感器专用操作区。
+- `e2e/agent-workflow.spec.ts`：增加传感器档案查询参数定位、量测项编辑和结构化提交用例。
+- `docs/传感器完整档案交互说明.md`：记录入口、返回上下文和编辑行为。
+- 回滚方式：执行本轮前端提交的 `git revert`，不涉及后端数据。

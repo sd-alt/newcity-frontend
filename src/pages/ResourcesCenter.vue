@@ -78,6 +78,19 @@ function sensorStatusLabel(value: unknown) {
   return labels[status] || String(value || '未设置')
 }
 
+function sensorSensingCodes(sensor: Record<string, unknown>) {
+  return Array.isArray(sensor.sensingElementCodes) ? sensor.sensingElementCodes.map(String) : []
+}
+
+function sensorMeasurementCount(sensor: Record<string, unknown>) {
+  return Array.isArray(sensor.measurementItems) ? sensor.measurementItems.length : 0
+}
+
+function sensorCompletenessRatio(sensor: Record<string, unknown>) {
+  const completeness = sensor.profileCompleteness
+  return completeness && typeof completeness === 'object' ? Number((completeness as Record<string, unknown>).ratio || 0) : 0
+}
+
 const platformForm = ref({
   platformTypeId: '',
   name: '',
@@ -434,19 +447,6 @@ async function createSensor() {
   }
 }
 
-function editSensor(item: Record<string, unknown>) {
-  editingSensorId.value = String(item.id)
-  sensorForm.value = {
-    platformId: String(item.platformId || ''),
-    sensorName: String(item.sensorName || item.name || ''),
-    sensorTypeId: String(item.sensorTypeId || ''),
-    accuracyPercent: Number(item.accuracyPercent ?? 90),
-    coverageGeoJson: (item.coverageGeoJson as SimpleGeometry | null) || null,
-  }
-  crudPage.value = 3
-  message.value = `正在编辑传感器“${sensorForm.value.sensorName}”`
-}
-
 function cancelSensorEdit() {
   editingSensorId.value = ''
   sensorForm.value.sensorName = ''
@@ -645,17 +645,19 @@ async function locateOnMap(kind: 'sensor', id: string | number | unknown) {
   else error.value = null
 }
 
-async function openSensorProfile(id: string | number | unknown) {
+async function openSensorProfile(id: string | number | unknown, section = 'general', mode = 'edit', targetTab = 'crud') {
   closeShellRight()
   await router.push({
     name: 'resource-sensors',
-    query: { ...route.query, tab: 'crud', sensorId: String(id) },
+    query: { ...route.query, tab: targetTab, sensorId: String(id), section, mode },
   })
 }
 
 async function closeSensorProfile() {
   const query = { ...route.query }
   delete query.sensorId
+  delete query.section
+  delete query.mode
   await router.replace({ name: 'resource-sensors', query: { ...query, tab: 'crud' } })
 }
 
@@ -703,22 +705,24 @@ async function showOnMap() {
 
     <section v-if="tab === 'capabilities'" class="panel">
       <h2>观测能力管理</h2>
-      <p class="muted">维护传感器的精度、覆盖范围和状态；点击档案可继续编辑八类资源信息。</p>
+      <p class="muted">维护传感器观测能力；点击名称可查看传感器完整档案，进入编辑可直接定位到对应分区。</p>
       <table v-table-pager="{ label: '观测能力分页' }" class="table capability-table">
-        <thead><tr><th>资源 / 平台</th><th>精度</th><th>覆盖范围</th><th class="capability-status">状态</th><th class="capability-ops">操作</th></tr></thead>
+        <thead><tr><th>资源 / 平台</th><th>感知要素 / 量测项</th><th>分辨率</th><th>精度 / 可靠度</th><th>档案完整度</th><th class="capability-status">状态</th><th class="capability-ops">操作</th></tr></thead>
         <tbody>
-          <tr v-if="!sensors.length"><td colspan="5" class="muted">暂无传感器资源，请先在资源管理中登记。</td></tr>
+          <tr v-if="!sensors.length"><td colspan="7" class="muted">暂无传感器资源，请先在资源管理中登记。</td></tr>
           <tr v-for="sensor in sensors" :key="String(sensor.id)">
             <td>
               <div class="capability-resource">
-                <strong>{{ sensor.sensorName || sensor.name || '-' }}</strong>
+                <button class="link-button" type="button" @click="openSensorProfile(sensor.id, 'attributes', 'view', 'capabilities')">{{ sensor.sensorName || sensor.name || '-' }}</button>
                 <small>{{ sensorPlatform(sensor).name || sensor.platformId || '-' }}</small>
               </div>
             </td>
-            <td>{{ sensor.accuracyPercent ?? '-' }}%</td>
-            <td>{{ sensor.coverageGeoJson || sensor.coverageWkt ? '已配置' : '未配置' }}</td>
+            <td><span v-if="sensorSensingCodes(sensor).length">{{ sensorSensingCodes(sensor).join('、') }}</span><span v-else>未维护</span><small>{{ sensorMeasurementCount(sensor) }} 个量测项</small></td>
+            <td>{{ sensor.spatialResolutionM ?? '-' }}m / {{ sensor.temporalResolutionSeconds ?? '-' }}s</td>
+            <td>{{ sensor.accuracyPercent ?? '-' }}% / {{ sensor.reliabilityPercent ?? '-' }}%</td>
+            <td>{{ Math.round(sensorCompletenessRatio(sensor) * 100) }}%</td>
             <td class="capability-status">{{ sensorStatusLabel(sensor.status || sensorPlatform(sensor).status) }}</td>
-            <td class="ops capability-ops"><button class="btn ghost" type="button" @click="openSensorProfile(sensor.id)">编辑档案</button></td>
+            <td class="ops capability-ops"><button class="btn ghost" type="button" @click="openSensorProfile(sensor.id, 'attributes', 'edit', 'capabilities')">编辑观测能力</button><button class="btn ghost" type="button" @click="openSensorProfile(sensor.id, 'general', 'edit', 'capabilities')">维护完整档案</button><button class="btn ghost" type="button" @click="locateOnMap('sensor', String(sensor.platformId || sensor.id))">地图定位</button></td>
           </tr>
         </tbody>
       </table>
@@ -907,13 +911,13 @@ async function showOnMap() {
           <tr v-if="!sensors.length"><td colspan="6" class="muted">暂无传感器记录</td></tr>
           <tr v-for="s in sensors" :key="'s'+s.id" class="row-click" @click="locateOnMap('sensor', String(s.platformId || s.id))">
             <td>{{ s.id }}</td>
-            <td>{{ s.sensorName || s.name || s.id }}</td>
+            <td><button class="link-button" type="button" @click.stop="openSensorProfile(s.id, 'general', 'view', 'crud')">{{ s.sensorName || s.name || s.id }}</button></td>
             <td>{{ s.platformId }}</td>
             <td>{{ s.sensorTypeId }}</td>
             <td>{{ s.accuracyPercent ?? '-' }}</td>
             <td class="ops">
-              <button class="btn ghost" type="button" @click.stop="openSensorProfile(s.id)">详情档案</button>
-              <button class="btn ghost" type="button" @click.stop="editSensor(s)">编辑</button>
+              <button class="btn ghost" type="button" @click.stop="openSensorProfile(s.id, 'general', 'edit', 'crud')">编辑基础信息</button>
+              <button class="btn ghost" type="button" @click.stop="openSensorProfile(s.id, 'general', 'edit', 'crud')">维护完整档案</button>
               <button class="btn ghost" type="button" @click.stop="locateOnMap('sensor', String(s.platformId || s.id))">定位</button>
               <button class="btn ghost" type="button" @click.stop="removeSensor(s.id)">删除</button>
             </td>
@@ -1027,16 +1031,19 @@ async function showOnMap() {
 .page .table.resource-summary-table { min-width: 920px; }
 .table-scroll .capability-table { width: 100%; min-width: 0; margin: 0; table-layout: fixed; }
 .capability-table th, .capability-table td { white-space: normal; overflow-wrap: anywhere; }
-.capability-table th:nth-child(1), .capability-table td:nth-child(1) { width: 35%; }
-.capability-table th:nth-child(2), .capability-table td:nth-child(2) { width: 12%; }
-.capability-table th:nth-child(3), .capability-table td:nth-child(3) { width: 17%; }
-.capability-table th:nth-child(4), .capability-table td:nth-child(4) { width: 17%; }
-.capability-table th:nth-child(5), .capability-table td:nth-child(5) { width: 19%; }
+.capability-table th:nth-child(1), .capability-table td:nth-child(1) { width: 20%; }
+.capability-table th:nth-child(2), .capability-table td:nth-child(2) { width: 17%; }
+.capability-table th:nth-child(3), .capability-table td:nth-child(3) { width: 13%; }
+.capability-table th:nth-child(4), .capability-table td:nth-child(4) { width: 13%; }
+.capability-table th:nth-child(5), .capability-table td:nth-child(5) { width: 10%; }
+.capability-table th:nth-child(6), .capability-table td:nth-child(6) { width: 10%; }
+.capability-table th:nth-child(7), .capability-table td:nth-child(7) { width: 17%; }
 .capability-resource { display: grid; gap: .12rem; min-width: 0; }
-.capability-resource strong { color: #3a3a3c; font-size: 10px; line-height: 1.25; }
-.capability-resource small { color: #6e6e73; font-size: 9px; line-height: 1.25; }
+.capability-resource strong { color: #3a3a3c; font-size: 11px; line-height: 1.25; }
+.capability-resource small, .capability-table td small { display: block; color: #6e6e73; font-size: 11px; line-height: 1.25; }
 .capability-table td.capability-ops { display: table-cell; min-width: 0; white-space: normal; }
-.capability-table .capability-ops .btn { width: 100%; max-width: 100%; padding: .3rem .2rem; white-space: nowrap; line-height: 1.2; }
+.capability-table .capability-ops .btn { width: 100%; max-width: 100%; margin-bottom: .2rem; padding: .3rem .2rem; white-space: nowrap; line-height: 1.2; }
+.link-button { padding: 0; border: 0; background: none; color: #0071e3; font: inherit; text-align: left; cursor: pointer; }
 .profile-page-head { margin-bottom: .55rem; }
 .advanced-entry { margin: .45rem 0; overflow: hidden; border: 1px solid transparent; border-radius: 10px; background: #f6f7f8; }
 .advanced-entry summary { display: flex; align-items: center; justify-content: space-between; gap: .45rem; padding: .55rem .65rem; cursor: pointer; list-style: none; }

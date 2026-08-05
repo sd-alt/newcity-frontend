@@ -640,6 +640,24 @@ async function jumpSelectedCenter() {
   else await router.push({ path: '/resources/algorithms', query: { tab: 'tasks', ...returnContext } })
 }
 
+function sensorDrawerContext() {
+  const returnContext = route.path === '/application/tasks' && route.query.runId
+    ? { runId: String(route.query.runId), returnTo: '/application/tasks', currentTab: String(route.query.tab || 'overview') }
+    : {}
+  return { ...returnContext, sensorId: String(shellSelected.value?.id || '') }
+}
+
+async function openSelectedSensorArchive(section: 'general' | 'attributes', targetTab: 'crud' | 'capabilities' = 'crud') {
+  const sensor = shellSelected.value
+  if (!sensor || sensor.kind !== 'sensor') return
+  closeShellRight()
+  leftOpen.value = true
+  await router.push({
+    path: '/resources/sensors',
+    query: { tab: targetTab, section, mode: 'edit', ...sensorDrawerContext() },
+  })
+}
+
 function reflySelected() {
   const s = shellSelected.value
   if (!s) return
@@ -1124,6 +1142,11 @@ async function doLogout() {
                 <p v-else class="drawer-empty-state">当前对象暂无关联记录。</p>
               </section>
 
+              <div v-if="shellSelected.kind === 'sensor'" class="drawer-sensor-actions" aria-label="传感器档案操作">
+                <button type="button" class="btn ghost" @click="openSelectedSensorArchive('general', 'crud')">编辑基础信息</button>
+                <button type="button" class="btn ghost" @click="openSelectedSensorArchive('attributes', 'capabilities')">编辑观测能力</button>
+                <button type="button" class="btn ghost" @click="openSelectedSensorArchive('general', 'crud')">维护完整档案</button>
+              </div>
               <div class="drawer-actions">
                 <button type="button" class="btn ghost" @click="jumpSelectedCenter">{{ selectedCenterActionLabel }}</button>
                 <button type="button" class="btn" :disabled="!drawerSpatialReady" @click="reflySelected">地图定位</button>

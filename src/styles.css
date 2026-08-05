@@ -2818,4 +2818,19 @@ button.card.stat.clickable:hover {
 .table-pager-server .btn:first-child::after { content: '‹'; }
 .table-pager-server .btn:last-child::after { content: '›'; }
   .assistant-service-mode-group { grid-template-columns: 1fr; }
-  .assistant-service-mode-group legend { grid-column: auto; }
+.assistant-service-mode-group legend { grid-column: auto; }
+
+.drawer-sensor-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .35rem;
+  margin-top: .6rem;
+}
+.drawer-sensor-actions .btn {
+  min-width: 0;
+  font-size: 11px;
+  white-space: normal;
+}
+@media (max-width: 760px) {
+  .drawer-sensor-actions { grid-template-columns: 1fr; }
+}

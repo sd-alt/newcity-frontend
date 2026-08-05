@@ -266,3 +266,46 @@ test('从不同工作台页进入人工动作时恢复概览并聚焦对应表�
     await expect(item.focus).toBeFocused()
   }
 })
+
+test('传感器档案按查询参数定位观测能力并提交结构化量测项', async ({ page }) => {
+  let patchBody: Record<string, any> | null = null
+  const detail = {
+    id: 1,
+    name: '雨量传感器',
+    type: '气象传感器',
+    platformName: '示范平台',
+    platformStatus: 'active',
+    general: { name: '示范平台', sensorName: '雨量传感器', identifier: 'RAIN-001', status: 'active' },
+    attributes: { capability: { principle: '翻斗计量', parameters: {} }, spatialResolutionM: 10, temporalResolutionSeconds: 60, accuracyPercent: 95, reliabilityPercent: 98, classification: 'meteorology', keywords: '' },
+    measurementItems: [],
+    profileCompleteness: { completedCount: 2, totalCount: 8, ratio: 0.25, sections: [] },
+    spatiotemporal: {}, geographic: {}, history: [], contact: {}, constraints: {}, interfaces: [],
+  }
+  await page.route('**/api/v1/**', async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    if (url.pathname.endsWith('/auth/csrf')) return route.fulfill({ json: { data: { csrfToken: 'test' } } })
+    if (url.pathname.endsWith('/auth/me')) return route.fulfill({ json: { data: { id: 1, username: 'e2e', displayName: 'E2E 用户', isStaff: true } } })
+    if (url.pathname.endsWith('/observations/sensors') && request.method() === 'GET') return route.fulfill({ json: { data: [{ id: 1, name: '雨量传感器', sensorName: '雨量传感器', platformId: 11, platformName: '示范平台', platformStatus: 'active' }] } })
+    if (url.pathname.endsWith('/resource/sensors/1/octuple') && request.method() === 'GET') return route.fulfill({ json: { data: detail } })
+    if (url.pathname.endsWith('/resource/sensors/1/octuple') && request.method() === 'PATCH') {
+      patchBody = JSON.parse(request.postData() || '{}')
+      return route.fulfill({ json: { data: { ...detail, attributes: patchBody.attributes || detail.attributes, measurementItems: patchBody.attributes?.measurementItems || detail.measurementItems } } })
+    }
+    return route.fulfill({ json: { data: [] } })
+  })
+
+  await page.goto('/resources/sensors?tab=capabilities&sensorId=1&section=attributes&mode=edit')
+  await expect(page.getByRole('heading', { name: '传感器观测能力' })).toBeVisible()
+  await page.getByRole('button', { name: '新增量测项' }).click()
+  const editor = page.locator('.inline-editor')
+  await editor.getByLabel('编码').fill('rainfall')
+  await editor.getByLabel('名称').fill('降雨量')
+  await editor.getByLabel('单位').fill('mm')
+  await editor.getByRole('button', { name: '保存量测项' }).click()
+  await page.getByRole('button', { name: '保存传感器观测能力' }).click()
+  await expect(page.getByText('传感器观测能力已保存')).toBeVisible()
+  expect(patchBody?.attributes?.capability?.principle).toBe('翻斗计量')
+  expect(patchBody?.attributes?.measurementItems?.[0]).toMatchObject({ code: 'rainfall', name: '降雨量', unit: 'mm' })
+  expect(patchBody?.attributes?.capabilityText).toBeUndefined()
+})
