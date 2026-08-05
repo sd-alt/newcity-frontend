@@ -1603,6 +1603,7 @@
 - `src/pages/AgentTaskWorkspace.vue`：增加提交防重、冲突提示、双 Workflow 明细和最终结果卡。
 - 回滚方式：执行 `git revert <本轮前端提交>`；不涉及业务数据库删除。
 
+
 ## 2026-08-05 - Task: Agent动作聚焦、方案评价卡与地图工作区收口
 
 ### What was done
@@ -1761,3 +1762,17 @@
 - `e2e/agent-workflow.spec.ts`、`e2e/integration/agent-real-flow.spec.ts`：覆盖页签、唯一主动作、动态规划和完整运行闭环。
 - `docs/Agent任务工作台交互说明.md`：记录信息架构、动作映射和响应式规则。
 - 回滚方式：执行 `git revert <本轮前端提交>`；不涉及业务数据库删除。
+
+## 2026-08-05 - Task: 固定跨仓库真实联调后端版本
+
+### What was done
+- 将真实联调默认后端兼容 SHA 更新为本轮已推送的后端 `37065e069e3fb8924a44566c00713c010c04f0aa`，前端旧提交重跑时仍保持固定版本组合。
+
+### Testing
+- `git ls-remote origin refs/heads/agent`：确认后端远端 `agent` 已指向 `37065e069e3fb8924a44566c00713c010c04f0aa`。
+- 本轮前端 `npm.cmd run typecheck`、`npm.cmd run build` 和 `npm.cmd run test:e2e` 已通过；跨仓库真实联调将在 GitHub Actions 推送后按新 SHA 执行。
+
+### Notes
+- `.github/backend-agent.sha`：更新真实联调默认后端兼容版本。
+- `progress.md`：记录固定版本更新和验证边界。
+- 回滚方式：将 `.github/backend-agent.sha` 恢复为上一条已验证 SHA 后提交并重新运行联调；不涉及业务数据。
