@@ -1685,3 +1685,32 @@
 - `e2e/agent-workflow.spec.ts`：消除异步点击与请求计数之间的 Linux Runner 时序竞争。
 - `progress.md`：追加本轮问题定位和验证记录。
 - 回滚方式：执行 `git revert <本轮前端提交>`；不涉及业务代码和业务数据。
+
+## 2026-08-05 - Task: Checkpoint故障恢复与固定版本完整规划联调
+
+### What was done
+- Checkpoint绑定失败在任务工作区显示独立故障提示，并提供重新绑定和从最后有效Checkpoint重试操作，保留人工接管和取消入口。
+- Mock E2E覆盖两项故障恢复按钮，真实联调新增完整规划链路，实际经过指标、方案和下发三次人工确认后完成执行与成果汇集。
+- 前端Actions默认读取仓库内已验证的后端完整提交SHA，不再随后端`agent`分支漂移；手动运行仍可通过`backend_ref`覆盖。
+- Actions摘要记录前端SHA、后端引用、图Schema、Prompt版本和数据库迁移版本，便于复现实验组合。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run test:e2e -- --workers=1`：7项Mock浏览器用例全部通过。
+- `npm.cmd run test:e2e:integration -- --workers=1`：2项真实Vue-Django-Worker-FakeProvider-MAF联调通过，包含完整规划三次确认闭环。
+- `git diff --check`：通过，仅有既有LF/CRLF转换提示。
+- GitHub Actions：待本轮推送后确认前端检查和Windows真实联调均成功。
+
+### Notes
+- `.github/backend-agent.sha`：固定默认联调后端为`bfd94853380fba446ad33cbd32a466288e3b1f37`。
+- `.github/workflows/frontend-ci.yml`：读取固定后端版本并在工作流摘要记录完整兼容组合。
+- `README.md`：补充Checkpoint恢复和固定版本完整联调说明。
+- `docs/Agent执行异常与方案版本操作说明.md`：说明Checkpoint故障可用操作及默认后端版本策略。
+- `docs/真实Vue-Django-MAF联调说明.md`：记录两条真实链路、兼容版本和测试时限。
+- `e2e/agent-workflow.spec.ts`：验证Checkpoint故障恢复按钮及接口调用。
+- `e2e/integration/agent-real-flow.spec.ts`：新增完整规划三次人工确认到任务完成的真实浏览器用例。
+- `src/api/endpoints.ts`：补充Checkpoint重新绑定和重试控制动作类型。
+- `src/pages/AgentTaskWorkspace.vue`：展示故障说明与两个可执行恢复入口。
+- `progress.md`：追加本轮实现和验证记录。
+- 回滚方式：执行 `git revert <本轮前端提交>`；本轮不修改后端数据和数据库结构，如需更换兼容后端仅更新`.github/backend-agent.sha`并重新验证。

@@ -8,7 +8,7 @@ on:
       backend_ref:
         description: 后端兼容版本（分支、标签或提交SHA）
         required: false
-        default: agent
+        default: ''
         type: string
 
 jobs:
@@ -49,11 +49,33 @@ jobs:
       - name: 检出前端代码
         uses: actions/checkout@v4
 
-      - name: 检出后端agent分支
+      - name: 读取后端兼容版本
+        id: backend-version
+        shell: pwsh
+        env:
+          MANUAL_BACKEND_REF: ${{ inputs.backend_ref }}
+        run: |
+          $backendRef = $env:MANUAL_BACKEND_REF
+          if ([string]::IsNullOrWhiteSpace($backendRef)) {
+            $backendRef = (Get-Content -LiteralPath '.github/backend-agent.sha' -Raw).Trim()
+          }
+          if ([string]::IsNullOrWhiteSpace($backendRef)) {
+            throw '后端兼容版本不能为空'
+          }
+          "ref=$backendRef" >> $env:GITHUB_OUTPUT
+          "## 真实联调兼容版本" >> $env:GITHUB_STEP_SUMMARY
+          "- 前端提交：$env:GITHUB_SHA" >> $env:GITHUB_STEP_SUMMARY
+          "- 后端引用：$backendRef" >> $env:GITHUB_STEP_SUMMARY
+          "- 图Schema：task-graph-schema-v2" >> $env:GITHUB_STEP_SUMMARY
+          "- Planning Prompt：newcity-planning-v0.2" >> $env:GITHUB_STEP_SUMMARY
+          "- Execution Prompt：newcity-execution-v0.2" >> $env:GITHUB_STEP_SUMMARY
+          "- 数据库迁移：operations.0046" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: 检出固定后端兼容版本
         uses: actions/checkout@v4
         with:
           repository: sd-alt/newcity
-          ref: ${{ inputs.backend_ref || 'agent' }}
+          ref: ${{ steps.backend-version.outputs.ref }}
           path: newcity
           token: ${{ secrets.NEWCITY_REPO_READ_TOKEN }}
 

@@ -521,7 +521,7 @@ export const decideAgentApproval = (
 })
 export const completeManualExecution = (runId: string, executionItemId: number | string, note = '') =>
   apiEnvelope<AgentRunData>(`/api/agent/runs/${runId}/manual-complete/`, { method: 'POST', body: JSON.stringify({ executionItemId, note }) })
-export const controlAgentRun = (runId: string, action: 'pause' | 'resume' | 'retry' | 'cancel' | 'takeover') =>
+export const controlAgentRun = (runId: string, action: 'pause' | 'resume' | 'retry' | 'cancel' | 'takeover' | 'rebind-checkpoint' | 'retry-checkpoint') =>
   apiEnvelope<AgentRunData>(`/api/agent/runs/${runId}/${action}/`, { method: 'POST' })
 export const agentRunEventsUrl = (runId: string) => `/api/agent/runs/${runId}/events/`
 export type AgentPendingAction = {

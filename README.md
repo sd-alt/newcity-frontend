@@ -49,7 +49,7 @@ Agent 任务工作区会把同一运行拆成两张图：Planning Workflow 展�
 
 Playwright E2E 需要 Chromium。CI 会通过 `npx playwright install --with-deps chromium` 安装；本地 Windows 若已安装 Chrome，配置会直接复用 Chrome。执行脚本会用接口桩验证两张工作流图和四个规划节点的展示。
 
-人工请求尚未绑定活动 Checkpoint 时，页面会显示保存提示并禁用操作，绑定完成后自动刷新解锁。需求补充只显示消息输入，不显示通用确认或拒绝按钮。人工完成提交期间会禁用按钮，阻止重复请求；若状态已变化，页面提示刷新。运行完成后页面兼容顶层和嵌套结果摘要。手动触发前端 Actions 时可用 `backend_ref` 固定后端提交 SHA；真实联调会启动独立 Django、Worker、Fake Provider 和 MAF 环境。
+人工请求尚未绑定活动 Checkpoint 时，页面会显示保存提示并禁用操作，绑定完成后自动刷新解锁；绑定失败时提供重新绑定、从最后有效 Checkpoint 重试和人工接管。需求补充只显示消息输入，不显示通用确认或拒绝按钮。人工完成提交期间会禁用按钮，阻止重复请求；若状态已变化，页面提示刷新。运行完成后页面兼容顶层和嵌套结果摘要。前端 Actions 默认读取 `.github/backend-agent.sha` 固定后端兼容提交，手动触发时可用 `backend_ref` 覆盖；真实联调会启动独立 Django、Worker、Fake Provider 和 MAF 环境，并覆盖资源查询及完整规划三次确认链路。
 
 浏览器：登录后从首页 22 项功能矩阵进入各中心，按 Tab 验收。
 

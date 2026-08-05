@@ -73,6 +73,7 @@ const ordinaryApprovals = computed(() => approvals.value.filter((item) => ![
   'requirement_clarification',
 ].includes(String(item.type))))
 const executionControl = computed(() => (run.value?.executionControl || {}) as api.AgentExecutionControl)
+const checkpointError = computed(() => String(executionControl.value.action || '') === 'checkpoint_error')
 const manualExecutionItems = computed(() => rows(executionControl.value.executionItems).filter((item) => item.status === 'manual_intervention'))
 const manualCompleteSubmitting = ref<Record<number, boolean>>({})
 const interventionNotes = ref<Record<string, string>>({})
@@ -283,14 +284,14 @@ async function loadRunFromRoute() {
   }
   await focusHumanAction()
 }
-async function control(action: 'pause' | 'resume' | 'retry' | 'cancel' | 'takeover') {
+async function control(action: 'pause' | 'resume' | 'retry' | 'cancel' | 'takeover' | 'rebind-checkpoint' | 'retry-checkpoint') {
   if (!runId.value) return
   if ((action === 'cancel' || action === 'takeover') && !window.confirm(action === 'cancel' ? '确认取消本次 Agent 运行？' : '确认接管并转为完全手动处理？')) return
   try {
     const response = await api.controlAgentRun(runId.value, action)
     run.value = response.data
-    message.value = ({ pause: 'Agent 已暂停', resume: 'Agent 已恢复并重新入队', retry: '失败阶段已重新入队', cancel: 'Agent 运行已取消', takeover: '已转为人工接管' })[action]
-    if (action === 'resume' || action === 'retry') startTracking(runId.value)
+    message.value = ({ pause: 'Agent 已暂停', resume: 'Agent 已恢复并重新入队', retry: '失败阶段已重新入队', cancel: 'Agent 运行已取消', takeover: '已转为人工接管', 'rebind-checkpoint': 'Checkpoint 已重新绑定，请继续当前人工请求', 'retry-checkpoint': '已从最后有效 Checkpoint 重新入队' })[action]
+    if (['resume', 'retry', 'retry-checkpoint'].includes(action)) startTracking(runId.value)
   } catch (cause) { error.value = errMessage(cause, '运行控制失败') }
 }
 async function decide(approval: Row, decision: 'approved' | 'rejected') {
@@ -496,8 +497,11 @@ onUnmounted(() => {
       </section>
       <div class="run-summary"><div><span>当前节点</span><strong>{{ currentStageName }}</strong></div><div><span>运行状态</span><strong>{{ statusLabel(run.status) }}</strong></div><div><span>必需节点</span><strong>{{ completedMandatoryNodes }}/{{ mandatoryNodeCount }}</strong></div></div>
       <div class="run-progress"><i :style="{ width: `${Number(run.progress || 0)}%` }"></i></div>
+      <p v-if="checkpointError" class="poll-notice">{{ executionControl.message || '工作流检查点绑定失败，请选择恢复方式。' }}</p>
       <p v-if="pollDescription" class="poll-notice">{{ pollDescription }}</p>
       <div class="run-actions">
+        <button v-if="checkpointError" class="btn tiny" @click="control('rebind-checkpoint')">重新绑定 Checkpoint</button>
+        <button v-if="checkpointError" class="btn tiny" @click="control('retry-checkpoint')">从最后有效 Checkpoint 重试</button>
         <button v-if="['planning_queued', 'planning', 'running', 'queued'].includes(run.status)" class="btn tiny" @click="control('pause')">暂停</button>
         <button v-if="(run.status === 'paused' || run.status === 'manual_required') && !['manual', 'cancel'].includes(String(executionControl.action || ''))" class="btn tiny" @click="control('resume')">恢复</button>
         <button v-if="(run.status === 'failed' || run.status === 'manual_required') && !['manual', 'cancel'].includes(String(executionControl.action || ''))" class="btn tiny" @click="control('retry')">重试</button>

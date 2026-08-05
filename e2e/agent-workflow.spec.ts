@@ -164,3 +164,34 @@ test('需求补充只展示消息输入而不展示普通审批按钮', async ({
   await expect(page.getByRole('button', { name: '确认并继续' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '拒绝' })).toHaveCount(0)
 })
+
+test('Checkpoint故障提供重新绑定和最后有效检查点重试入口', async ({ page }) => {
+  const runId = '00000000-0000-0000-0000-000000000007'
+  const run = {
+    id: runId, status: 'manual_required', currentStage: 'plan_confirmation', progress: 55,
+    workflow: { name: 'execution', mode: 'dynamic-maf', source: 'llm', graphType: 'full_observation_planning', checkpointId: 'checkpoint-valid', status: 'manual_required', nodes: [], edges: [] },
+    pendingApprovals: [], toolCalls: [], artifacts: [], modelCalls: [],
+    executionControl: { action: 'checkpoint_error', manualReasonCode: 'checkpoint_error', message: '工作流检查点绑定失败，请选择恢复方式。' },
+    demand: { id: 1, sceneName: '测试场景', originalRequirement: '测试检查点恢复', structuredRequirement: {} },
+  }
+  const actions: string[] = []
+  await page.route('**/api/v1/auth/csrf', async (route) => route.fulfill({ json: { data: { csrfToken: 'test' } } }))
+  await page.route('**/api/v1/auth/me', async (route) => route.fulfill({ json: { data: { id: 1, username: 'e2e', displayName: 'E2E 用户', isStaff: true } } }))
+  await page.route('**/api/v1/association/scenes', async (route) => route.fulfill({ json: { data: [{ id: 1, name: '测试场景' }] } }))
+  await page.route(`**/api/agent/runs/${runId}/**`, async (route) => {
+    if (route.request().method() === 'POST') {
+      actions.push(route.request().url().includes('/rebind-checkpoint/') ? 'rebind' : 'retry')
+    }
+    await route.fulfill({ json: { data: run } })
+  })
+
+  await page.goto(`/application/tasks?runId=${runId}`)
+  const rebind = page.getByRole('button', { name: '重新绑定 Checkpoint' })
+  const retry = page.getByRole('button', { name: '从最后有效 Checkpoint 重试' })
+  await expect(rebind).toBeVisible()
+  await expect(retry).toBeVisible()
+  await rebind.click()
+  await expect.poll(() => actions).toContain('rebind')
+  await retry.click()
+  await expect.poll(() => actions).toContain('retry')
+})
