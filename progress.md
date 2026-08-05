@@ -1776,3 +1776,18 @@
 - `.github/backend-agent.sha`：更新真实联调默认后端兼容版本。
 - `progress.md`：记录固定版本更新和验证边界。
 - 回滚方式：将 `.github/backend-agent.sha` 恢复为上一条已验证 SHA 后提交并重新运行联调；不涉及业务数据。
+
+## 2026-08-05 - Task: 锁定 SQLite 并发修复后的真实联调后端版本
+
+### What was done
+- 将真实联调默认后端 SHA 更新为 `2dac9e12f7e0b67d9d6c90b1ccc6dc6c9c2be4c8`，纳入 SQLite WAL 并发写锁修复。
+- 保持前端真实联调使用固定后端提交，避免旧前端提交与未验证后端分支漂移组合。
+
+### Testing
+- 本地 `npm.cmd run test:e2e:integration -- --workers=1`：2 项全部通过，包含完整规划三次审批和成果汇集。
+- 后端对应 `agent` 分支已推送并确认远端 SHA 一致。
+
+### Notes
+- `.github/backend-agent.sha`：锁定已通过真实联调的后端提交。
+- `progress.md`：记录跨仓库版本和联调验证结果。
+- 回滚方式：将 `.github/backend-agent.sha` 恢复为 `37065e069e3fb8924a44566c00713c010c04f0aa` 后提交并重新运行联调；不涉及业务数据。
