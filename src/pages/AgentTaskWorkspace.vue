@@ -67,7 +67,11 @@ const waitingForCheckpoint = computed(() => approvals.value.some((item) => !appr
 const requirementApproval = computed(() => approvals.value.find((item) => item.type === 'requirement_clarification'))
 const executionInterventions = computed(() => approvals.value.filter((item) => item.type === 'execution_intervention'))
 const planSelectionApprovals = computed(() => approvals.value.filter((item) => item.type === 'plan_resource_selection'))
-const ordinaryApprovals = computed(() => approvals.value.filter((item) => !['execution_intervention', 'plan_resource_selection'].includes(String(item.type))))
+const ordinaryApprovals = computed(() => approvals.value.filter((item) => ![
+  'execution_intervention',
+  'plan_resource_selection',
+  'requirement_clarification',
+].includes(String(item.type))))
 const executionControl = computed(() => (run.value?.executionControl || {}) as api.AgentExecutionControl)
 const manualExecutionItems = computed(() => rows(executionControl.value.executionItems).filter((item) => item.status === 'manual_intervention'))
 const manualCompleteSubmitting = ref<Record<number, boolean>>({})

@@ -144,3 +144,23 @@ test('Checkpoint绑定前禁用审批并在绑定后自动解锁', async ({ page
   await expect(approveButton).toBeEnabled({ timeout: 10_000 })
   await expect.poll(() => detailCount).toBeGreaterThanOrEqual(2)
 })
+
+test('需求补充只展示消息输入而不展示普通审批按钮', async ({ page }) => {
+  const runId = '00000000-0000-0000-0000-000000000006'
+  const run = {
+    id: runId, status: 'waiting_input', currentStage: 'completeness_check', progress: 10,
+    workflow: { name: 'execution', mode: 'dynamic-maf', source: 'llm', graphType: 'full_observation_planning', goal: '执行图', graphVersion: 1, checkpointId: 'checkpoint-6', status: 'waiting_input', fallback: false, fallbackReason: '', nodeCount: 1, edgeCount: 0, nodes: [{ nodeId: 'completeness_check', nodeType: 'completeness_check', code: 'completeness_check', name: '完整性检查', status: 'waiting_input', mandatory: true, riskLevel: 'medium', planningReason: '等待补充需求', topologicalLevel: 0, dependsOn: [], toolNames: [], allowedToolNames: [], inputSummary: {}, outputSummary: {}, errorMessage: '' }], edges: [] },
+    pendingApprovals: [{ id: 11, type: 'requirement_clarification', title: '补充监测需求', description: '请补充监测时间。', status: 'pending', checkpointId: 'checkpoint-6', payload: { missingFields: ['监测时间'] } }],
+    toolCalls: [], artifacts: [], modelCalls: [], executionControl: {}, demand: { id: 1, sceneName: '测试场景', originalRequirement: '测试需求补充入口', structuredRequirement: {} },
+  }
+  await page.route('**/api/v1/auth/csrf', async (route) => route.fulfill({ json: { data: { csrfToken: 'test' } } }))
+  await page.route('**/api/v1/auth/me', async (route) => route.fulfill({ json: { data: { id: 1, username: 'e2e', displayName: 'E2E 用户', isStaff: true } } }))
+  await page.route('**/api/v1/association/scenes', async (route) => route.fulfill({ json: { data: [{ id: 1, name: '测试场景' }] } }))
+  await page.route(`**/api/agent/runs/${runId}/**`, async (route) => route.fulfill({ json: { data: run } }))
+
+  await page.goto(`/application/tasks?runId=${runId}`)
+  await expect(page.getByText('补充需求信息')).toBeVisible()
+  await expect(page.getByRole('button', { name: '提交并重新分析' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: '确认并继续' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '拒绝' })).toHaveCount(0)
+})

@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      backend_ref:
+        description: 后端兼容版本（分支、标签或提交SHA）
+        required: false
+        default: agent
+        type: string
 
 jobs:
   frontend:
@@ -47,7 +53,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: sd-alt/newcity
-          ref: agent
+          ref: ${{ inputs.backend_ref || 'agent' }}
           path: newcity
           token: ${{ secrets.NEWCITY_REPO_READ_TOKEN }}
 

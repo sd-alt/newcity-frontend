@@ -1603,6 +1603,31 @@
 - `src/pages/AgentTaskWorkspace.vue`：增加提交防重、冲突提示、双 Workflow 明细和最终结果卡。
 - 回滚方式：执行 `git revert <本轮前端提交>`；不涉及业务数据库删除。
 
+## 2026-08-05 - Task: 需求补充入口分离与真实联调版本固定
+
+### What was done
+- `requirement_clarification` 不再进入普通审批卡，只显示需求消息补充输入和重新分析按钮。
+- Mock E2E 增加需求补充页面验证，确保不会同时出现确认和拒绝入口。
+- 前端 Actions 手动触发增加 `backend_ref`，支持按后端分支、标签或提交 SHA 运行真实联调。
+- README 和联调文档补充固定前后端兼容版本的使用方式。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run test:e2e -- --workers=1`：6 项 Mock 浏览器用例通过。
+- `npm.cmd run test:e2e:integration -- --workers=1`：1 项真实 Vue-Django-Worker-FakeProvider-MAF 闭环通过。
+- `git diff --check`：通过，仅有既有 LF/CRLF 转换提示。
+
+### Notes
+- `.github/workflows/frontend-ci.yml`：手动运行支持显式后端版本引用。
+- `README.md`：补充需求单一入口和后端 SHA 固定方式。
+- `docs/Agent执行异常与方案版本操作说明.md`：说明需求补充不使用通用审批按钮。
+- `docs/真实Vue-Django-MAF联调说明.md`：说明 `backend_ref` 的复现用途。
+- `e2e/agent-workflow.spec.ts`：验证需求补充页面只保留消息入口。
+- `src/pages/AgentTaskWorkspace.vue`：从普通审批列表排除需求补充请求。
+- `progress.md`：追加本轮实现和验证记录。
+- 回滚方式：执行 `git revert <本轮前端提交>`；不涉及业务数据库删除。
+
 ## 2026-08-05 - Task: Checkpoint准备态交互与完整任务结果展示
 
 ### What was done
