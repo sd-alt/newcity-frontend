@@ -1602,3 +1602,26 @@
 - `src/api/endpoints.ts`：补充最终结果摘要和错误字段类型。
 - `src/pages/AgentTaskWorkspace.vue`：增加提交防重、冲突提示、双 Workflow 明细和最终结果卡。
 - 回滚方式：执行 `git revert <本轮前端提交>`；不涉及业务数据库删除。
+
+## 2026-08-05 - Task: Checkpoint准备态交互与完整任务结果展示
+
+### What was done
+- 人工请求未绑定当前活动 Checkpoint 时禁用审批、需求补充、执行处置和方案替换，并显示检查点保存提示。
+- 页面在检查点准备期间继续实时刷新和轮询，审批与运行检查点一致后自动解锁操作。
+- 最终结果卡兼容顶层摘要及完整任务的 `result.summary`、`result.reply` 嵌套摘要。
+- Mock E2E 增加检查点准备期禁用与自动解锁、完整任务嵌套结果展示验证。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `npm.cmd run test:e2e -- --workers=1`：5 项 Mock 浏览器用例通过。
+- `npm.cmd run test:e2e:integration -- --workers=1`：1 项真实 Vue-Django-Worker-FakeProvider-MAF 闭环通过。
+- `git diff --check`：通过，仅有既有 LF/CRLF 转换提示。
+
+### Notes
+- `README.md`：补充 Checkpoint 准备态和嵌套结果摘要展示说明。
+- `docs/Agent执行异常与方案版本操作说明.md`：记录按钮禁用、自动刷新和多轮需求补充交互。
+- `e2e/agent-workflow.spec.ts`：验证准备期门禁自动解锁及完整任务最终结果卡。
+- `src/pages/AgentTaskWorkspace.vue`：增加 Checkpoint 一致性判断、持续跟踪和嵌套结果兼容。
+- `progress.md`：追加本轮实现和验证记录。
+- 回滚方式：执行 `git revert <本轮前端提交>`；不涉及业务数据库删除。
