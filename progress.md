@@ -1839,3 +1839,15 @@
 - `.github/backend-agent.sha`：锁定当前后端 `agent` 提交，保证跨仓库真实联调可复现。
 - `progress.md`：记录失败原因和版本修复。
 - 回滚方式：将 `.github/backend-agent.sha` 恢复为 `a62290394aef35b34503e10517d1eaba733481f6` 后提交并重跑；不涉及业务数据。
+## 2026-08-05 - Task: 验证固定后端版本后的真实联调
+
+### What was done
+- 新固定后端 SHA 组合已完成真实 Vue-Django-Worker-MAF 联调，完整规划三次人工确认、任务执行和成果汇集链路恢复通过。
+
+### Testing
+- GitHub Actions `31000838113`：前端检查和 Vue-Django-MAF 真实联调全部成功。
+- 失败的旧组合 `30999407000` 已确认原因为 SQLite `database is locked`，不是本轮前端档案代码断言失败。
+
+### Notes
+- `progress.md`：记录固定 SHA 修复后的 Actions 结果。
+- 回滚方式：执行本轮前端提交的 `git revert`；不涉及业务数据。
