@@ -65,6 +65,7 @@ type PlanningMapAction =
 
 const panel = ref<MapFloatPanel>('none')
 const toolsExpanded = ref(false)
+const satelliteClockPanelOpen = ref(false)
 const planningToolsVisible = computed(() => route.path === '/business' || route.path === '/planning')
 
 const basemapOptions: Array<{ key: BasemapKey; label: string }> = [
@@ -202,6 +203,7 @@ function goFullscreen() {
   else void (el as HTMLElement).requestFullscreen?.()
 }
 function togglePanel(name: Exclude<MapFloatPanel, 'none'>) {
+  satelliteClockPanelOpen.value = false
   panel.value = panel.value === name ? 'none' : name
 }
 
@@ -209,6 +211,7 @@ function runPlanningMapAction(action: PlanningMapAction) {
   window.dispatchEvent(new CustomEvent<PlanningMapAction>('newcity:planning-map-action', { detail: action }))
 }
 function activateTool(mode: MapToolMode) {
+  satelliteClockPanelOpen.value = false
   panel.value = 'none'
   const v = shellViewer.value
   if (!v) return
@@ -243,6 +246,15 @@ function formatSatelliteClockTime(value: number | null) {
 
 function toggleSatelliteClock() {
   setSatelliteClockPlaying(!satelliteClock.playing)
+}
+
+function toggleSatelliteClockPanel() {
+  panel.value = 'none'
+  satelliteClockPanelOpen.value = !satelliteClockPanelOpen.value
+}
+
+function closeSatelliteClockPanel() {
+  satelliteClockPanelOpen.value = false
 }
 
 
@@ -431,6 +443,14 @@ watch(
     // 路由图层刷新由 AppLayout 统一触发，这里只关闭气泡避免残留
     closeShellBubble()
     panel.value = 'none'
+    satelliteClockPanelOpen.value = false
+  },
+)
+
+watch(
+  () => satelliteClock.available,
+  (available) => {
+    if (!available) satelliteClockPanelOpen.value = false
   },
 )
 
@@ -500,6 +520,20 @@ function setHost(el: unknown) {
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="12" cy="18" r="2"/><path d="M8 8.5 10.5 16M16 8.5 13.5 16M8 7h8"/></svg>
           </button>
         </div>
+        <div class="map-tool-group" aria-label="轨道模拟">
+          <button
+            type="button"
+            class="map-tool map-tool-orbit"
+            :class="{ active: satelliteClockPanelOpen, playing: satelliteClock.playing && satelliteClock.available }"
+            :title="satelliteClock.available ? '轨道模拟设置' : '轨道模拟（暂无可用轨道）'"
+            aria-label="轨道模拟设置"
+            :aria-expanded="satelliteClockPanelOpen"
+            @click="toggleSatelliteClockPanel"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="8.5" ry="3.8" transform="rotate(-28 12 12)"/><ellipse cx="12" cy="12" rx="8.5" ry="3.8" transform="rotate(28 12 12)"/><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/></svg>
+            <span v-if="satelliteClock.playing && satelliteClock.available" class="map-tool-status-dot" aria-hidden="true"></span>
+          </button>
+        </div>
         <div class="map-tool-group" aria-label="辅助工具">
           <button type="button" class="map-tool" :class="{ active: panel === 'legend' }" title="查看图例" aria-label="查看图例" @click="togglePanel('legend')">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="6" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="5" cy="18" r="1.5"/><path d="M9 6h11M9 12h11M9 18h11"/></svg>
@@ -553,30 +587,50 @@ function setHost(el: unknown) {
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM14 4v16"/><path d="M17 9h.01M17 12h.01M17 15h.01"/></svg>
     </button>
 
-    <div v-if="satelliteClock.available" class="map-clock-controls" aria-label="卫星轨道模拟控制">
+    <div v-if="satelliteClockPanelOpen" class="map-clock-controls map-clock-popover" aria-label="卫星轨道模拟控制" @click.stop>
       <div class="map-clock-heading">
-        <span>轨道模拟</span>
-        <time>{{ formatSatelliteClockTime(satelliteClock.currentTimeMs) }}</time>
-      </div>
-      <div class="map-clock-actions">
-        <button type="button" class="map-clock-button" :title="satelliteClock.playing ? '暂停' : '播放'" :aria-label="satelliteClock.playing ? '暂停' : '播放'" @click="toggleSatelliteClock">
-          <svg v-if="satelliteClock.playing" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>
-          <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg>
-        </button>
-        <button type="button" class="map-clock-button" title="回到当前" aria-label="回到当前" @click="resetSatelliteClock">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.34-5.66"/><path d="M4 5v6h6"/></svg>
-        </button>
-        <div class="map-clock-speeds" role="group" aria-label="播放速度">
-          <button
-            v-for="speed in satelliteClockMultipliers"
-            :key="speed"
-            type="button"
-            :class="{ active: satelliteClock.multiplier === speed }"
-            :aria-pressed="satelliteClock.multiplier === speed"
-            @click="setSatelliteClockMultiplier(speed)"
-          >{{ speed }}x</button>
+        <div>
+          <strong>轨道模拟</strong>
+          <span class="map-clock-subtitle">{{ satelliteClock.available ? '实时轨道时间' : '等待轨道数据' }}</span>
         </div>
+        <button type="button" class="map-clock-close" title="关闭设置" aria-label="关闭轨道模拟设置" @click="closeSatelliteClockPanel">×</button>
       </div>
+      <template v-if="satelliteClock.available">
+        <div class="map-clock-current">
+          <span>模拟时间</span>
+          <time>{{ formatSatelliteClockTime(satelliteClock.currentTimeMs) }}</time>
+        </div>
+        <div class="map-clock-setting">
+          <span>自动播放轨道</span>
+          <button
+            type="button"
+            class="map-clock-switch"
+            role="switch"
+            :aria-checked="satelliteClock.playing"
+            :aria-label="satelliteClock.playing ? '暂停自动播放轨道' : '开始自动播放轨道'"
+            @click="toggleSatelliteClock"
+          >
+            <span aria-hidden="true"></span>
+          </button>
+        </div>
+        <div class="map-clock-actions">
+          <button type="button" class="map-clock-button map-clock-reset" title="回到当前" aria-label="回到当前" @click="resetSatelliteClock">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.34-5.66"/><path d="M4 5v6h6"/></svg>
+            <span>回到当前</span>
+          </button>
+          <div class="map-clock-speeds" role="group" aria-label="播放速度">
+            <button
+              v-for="speed in satelliteClockMultipliers"
+              :key="speed"
+              type="button"
+              :class="{ active: satelliteClock.multiplier === speed }"
+              :aria-pressed="satelliteClock.multiplier === speed"
+              @click="setSatelliteClockMultiplier(speed)"
+            >{{ speed }}x</button>
+          </div>
+        </div>
+      </template>
+      <p v-else class="map-clock-empty">当前没有可用的卫星动态轨道数据。加载带有 TLE/SGP4 预测信息的卫星资源后，这里会自动开放播放控制。</p>
     </div>
 
     <div v-if="panel === 'basemap'" class="map-float-panel">

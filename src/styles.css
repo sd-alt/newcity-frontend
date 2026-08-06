@@ -453,27 +453,74 @@ tr.active td {
 .map-clock-controls {
   position: absolute;
   right: 12px;
-  bottom: 50px;
+  top: 12px;
+  bottom: auto;
   z-index: 22;
-  width: min(270px, calc(100% - 24px));
-  padding: 0.45rem 0.55rem;
+  width: min(292px, calc(100% - 120px));
+  padding: 0.65rem 0.7rem;
   border: 1px solid #D6D8DD;
-  border-radius: 10px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.96);
   color: #38464E;
   box-shadow: 0 4px 14px rgba(29, 29, 31, 0.12);
   transition: right 0.2s ease;
 }
+.map-clock-popover { right: 108px; }
 .map-clock-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.45rem;
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.65rem;
   color: #52636C;
   font-size: 11px;
 }
-.map-clock-heading time {
+.map-clock-heading > div {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+.map-clock-heading strong {
+  color: #1F3D50;
+  font-size: 12px;
+  font-weight: 700;
+}
+.map-clock-subtitle {
+  color: #7A858B;
+  font-size: 10px;
+}
+.map-clock-close {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #7A858B;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.map-clock-close:hover {
+  background: var(--brand-soft);
+  color: var(--brand-dark);
+}
+.map-clock-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  margin-bottom: 0.55rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: 7px;
+  background: #F4F8F7;
+  color: #647177;
+  font-size: 10px;
+}
+.map-clock-current time {
   min-width: 0;
   overflow: hidden;
   color: #1F3D50;
@@ -481,17 +528,57 @@ tr.active td {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.map-clock-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  min-height: 30px;
+  color: #52636C;
+  font-size: 11px;
+}
+.map-clock-switch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #C7D0D2;
+  cursor: pointer;
+  transition: background-color 0.16s ease;
+}
+.map-clock-switch span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(29, 29, 31, 0.2);
+  transition: transform 0.16s ease;
+}
+.map-clock-switch[aria-checked="true"] {
+  background: var(--brand);
+}
+.map-clock-switch[aria-checked="true"] span {
+  transform: translateX(14px);
+}
 .map-clock-actions {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  justify-content: space-between;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
 }
 .map-clock-button {
   display: inline-flex;
-  width: 28px;
+  width: auto;
   height: 26px;
   align-items: center;
   justify-content: center;
+  gap: 0.25rem;
   padding: 0;
   border: 1px solid #D6D8DD;
   border-radius: 7px;
@@ -512,6 +599,10 @@ tr.active td {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.8;
+}
+.map-clock-reset {
+  padding: 0 0.45rem;
+  font-size: 10px;
 }
 .map-clock-speeds {
   display: inline-flex;
@@ -537,6 +628,12 @@ tr.active td {
   background: var(--brand-soft);
   color: var(--brand-dark);
   font-weight: 600;
+}
+.map-clock-empty {
+  margin: 0;
+  color: #69777D;
+  font-size: 11px;
+  line-height: 1.55;
 }
 /* 兼容仍可能存在的旧版包装类。 */
 .map-toolbar-detail { display: none !important; }
@@ -564,6 +661,18 @@ tr.active td {
 .map-tool:hover { border-color: #A8CBC6; background: var(--brand-soft); color: var(--brand-dark); }
 .map-tool.active { background: var(--brand); border-color: var(--brand); color: #fff; }
 .map-tool:disabled { opacity: 0.5; cursor: not-allowed; }
+.map-tool-orbit { position: relative; }
+.map-tool-orbit.playing:not(.active) { border-color: #A8CBC6; color: var(--brand-dark); }
+.map-tool-status-dot {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  width: 5px;
+  height: 5px;
+  border: 1px solid #fff;
+  border-radius: 50%;
+  background: #1BAA73;
+}
 .map-tool svg {
   width: 17px;
   height: 17px;
@@ -1569,9 +1678,9 @@ textarea:focus {
 .app-shell.right-open .map-tool-detail {
   right: calc(var(--drawer-w) + 32px);
 }
-.app-shell.workspace-open .map-clock-controls,
-.app-shell.right-open .map-clock-controls {
-  right: calc(var(--drawer-w) + 32px);
+.app-shell.workspace-open .map-clock-popover,
+.app-shell.right-open .map-clock-popover {
+  right: calc(var(--drawer-w) + 120px);
 }
 .app-shell.workspace-open .map-toolbar,
 .app-shell.right-open .map-toolbar {

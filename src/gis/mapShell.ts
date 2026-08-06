@@ -85,6 +85,7 @@ export function toggleShellRight() {
 }
 
 export const satelliteClockMultipliers = [1, 10, 60] as const
+const SATELLITE_TRAJECTORY_REFRESH_MS = 5 * 60 * 1000
 export const satelliteClock = reactive({
   available: false,
   playing: false,
@@ -96,8 +97,24 @@ export const satelliteClock = reactive({
 let satelliteClockViewer: Viewer | null = null
 let satelliteClockTickRemove: (() => void) | null = null
 let satelliteClockRangeKey = ''
+let satelliteTrajectoryRefreshTimer: ReturnType<typeof setInterval> | null = null
+let satelliteTrajectoryRefreshInFlight = false
 
-function clearSatelliteClockState(viewer?: Viewer) {
+function clearSatelliteTrajectoryRefreshTimer() {
+  if (satelliteTrajectoryRefreshTimer !== null) {
+    clearInterval(satelliteTrajectoryRefreshTimer)
+    satelliteTrajectoryRefreshTimer = null
+  }
+}
+
+function clearSatelliteClockState(viewer?: Viewer, preservePlayback = false) {
+  const preservedPlayback = preservePlayback
+    ? {
+        playing: satelliteClock.playing,
+        multiplier: satelliteClock.multiplier,
+        currentTimeMs: satelliteClock.currentTimeMs,
+      }
+    : null
   if (satelliteClockTickRemove) satelliteClockTickRemove()
   satelliteClockTickRemove = null
   satelliteClockViewer = null
@@ -108,6 +125,11 @@ function clearSatelliteClockState(viewer?: Viewer) {
   satelliteClock.currentTimeMs = null
   satelliteClock.startTimeMs = null
   satelliteClock.stopTimeMs = null
+  if (preservedPlayback) {
+    satelliteClock.playing = preservedPlayback.playing
+    satelliteClock.multiplier = preservedPlayback.multiplier
+    satelliteClock.currentTimeMs = preservedPlayback.currentTimeMs
+  }
   const target = viewer && !viewer.isDestroyed() ? viewer : null
   if (target) {
     target.clock.shouldAnimate = false
@@ -162,13 +184,15 @@ function syncSatelliteClockState(viewer: Viewer) {
   bindSatelliteClockTick(viewer)
   const rangeKey = `${extent.min}:${extent.max}`
   if (satelliteClockRangeKey !== rangeKey) {
-    const now = Math.max(extent.min, Math.min(extent.max, Date.now()))
+    const previousTime = satelliteClock.currentTimeMs ?? Date.now()
+    const now = Math.max(extent.min, Math.min(extent.max, previousTime))
+    const shouldAnimate = satelliteClock.currentTimeMs !== null ? satelliteClock.playing : true
     viewer.clock.startTime = Cesium.JulianDate.fromDate(new Date(extent.min))
     viewer.clock.stopTime = Cesium.JulianDate.fromDate(new Date(extent.max))
     viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP
     viewer.clock.multiplier = satelliteClock.multiplier
     viewer.clock.currentTime = Cesium.JulianDate.fromDate(new Date(now))
-    viewer.clock.shouldAnimate = false
+    viewer.clock.shouldAnimate = shouldAnimate
     satelliteClockRangeKey = rangeKey
   }
   satelliteClock.available = true
@@ -207,6 +231,48 @@ export function resetSatelliteClock() {
   satelliteClock.currentTimeMs = now
   satelliteClock.playing = false
   viewer.scene.requestRender()
+}
+
+function hasDynamicSatelliteTrajectory() {
+  return cacheSensors.some((item) => {
+    if (String(item.typeCode || '') !== 'satellite') return false
+    const trajectory = (item.trajectory || {}) as { available?: boolean; points?: unknown[] }
+    return trajectory.available === true && Array.isArray(trajectory.points) && trajectory.points.length >= 2
+  })
+}
+
+async function refreshSatelliteTrajectories() {
+  const viewer = shellViewer.value
+  if (
+    satelliteTrajectoryRefreshInFlight ||
+    !viewer ||
+    viewer.isDestroyed() ||
+    !hasDynamicSatelliteTrajectory()
+  ) {
+    return
+  }
+  satelliteTrajectoryRefreshInFlight = true
+  const requestGeneration = reloadGeneration
+  try {
+    const response = await api.getSensorGis()
+    const refreshed = asList((response.data as { features?: unknown })?.features ?? response.data)
+    if (requestGeneration === reloadGeneration && refreshed.length) {
+      cacheSensors = refreshed
+      await rerenderShellLayers(false)
+    }
+  } catch {
+    // 轨迹刷新失败时保留上一份轨迹，避免地图瞬间退化成空图层。
+  } finally {
+    satelliteTrajectoryRefreshInFlight = false
+  }
+}
+
+function scheduleSatelliteTrajectoryRefresh() {
+  clearSatelliteTrajectoryRefreshTimer()
+  if (typeof window === 'undefined' || !hasDynamicSatelliteTrajectory()) return
+  satelliteTrajectoryRefreshTimer = window.setInterval(() => {
+    void refreshSatelliteTrajectories()
+  }, SATELLITE_TRAJECTORY_REFRESH_MS)
 }
 
 export const shellSelected = ref<ShellSelected | null>(null)
@@ -318,6 +384,8 @@ export function destroyShellViewer() {
   pickHandler?.destroy()
   pickHandler = null
   const viewer = shellViewer.value
+  clearSatelliteTrajectoryRefreshTimer()
+  satelliteTrajectoryRefreshInFlight = false
   clearSatelliteClockState(viewer && !viewer.isDestroyed() ? viewer : undefined)
   if (viewer && !viewer.isDestroyed()) viewer.destroy()
   shellViewer.value = null
@@ -1196,6 +1264,7 @@ export async function reloadShellLayers(
   }
   activeShellCenter = center
   const gen = ++reloadGeneration
+  clearSatelliteTrajectoryRefreshTimer()
   shellLoading.value = true
   shellError.value = null
   shellStatus.value = '正在加载业务图层…'
@@ -1361,6 +1430,7 @@ export async function reloadShellLayers(
     recomputeAlerts()
     applyVisibility()
     syncSatelliteClockState(viewer)
+    scheduleSatelliteTrajectoryRefresh()
     updateSatelliteViewVisibility(viewer)
     if (!hasFittedView) {
       await flyToDataSources(viewer)
@@ -1395,7 +1465,14 @@ export async function reloadShellLayers(
 export async function rerenderShellLayers(fitView = true) {
   const viewer = shellViewer.value
   if (!viewer || viewer.isDestroyed()) return
-  await clearSources(viewer)
+  clearSatelliteClockState(viewer, true)
+  for (const ds of dataSources.splice(0)) {
+    try {
+      viewer.dataSources.remove(ds, true)
+    } catch {
+      /* 忽略异常 */
+    }
+  }
   if (cacheSensors.length) {
     const feats = filteredSensors()
     dataSources.push(await loadSensorLayer(viewer, feats))
@@ -1428,6 +1505,7 @@ export async function rerenderShellLayers(fitView = true) {
   }
   applyVisibility()
   syncSatelliteClockState(viewer)
+  scheduleSatelliteTrajectoryRefresh()
   updateSatelliteViewVisibility(viewer)
   if (fitView) await flyToDataSources(viewer)
 }
