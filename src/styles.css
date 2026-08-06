@@ -16,6 +16,11 @@
   --sidebar-text: #515154;
   --shadow: 0 1px 2px rgba(29, 29, 31, 0.05);
   --shadow-float: 0 12px 32px rgba(29, 29, 31, 0.11);
+  --card-border: #e1e3e6;
+  --card-surface-muted: #f6f7f8;
+  --card-radius-inner: 12px;
+  --card-shadow: 0 1px 2px rgba(29, 29, 31, 0.025), 0 8px 24px rgba(29, 29, 31, 0.035);
+  --card-shadow-inner: 0 1px 2px rgba(29, 29, 31, 0.02);
   --radius-control: 11px;
   --radius-panel: 16px;
   --radius-float: 24px;
@@ -2584,13 +2589,13 @@ button.card.stat.clickable:hover {
   .layer-tree,
   .empty-panel
 ) {
-  border: 1px solid #e1e3e6;
+  border: 1px solid var(--card-border);
   border-radius: 16px;
   background: #fff;
-  box-shadow: 0 1px 2px rgba(29, 29, 31, 0.025), 0 8px 24px rgba(29, 29, 31, 0.035);
+  box-shadow: var(--card-shadow);
 }
 .app-shell .left-body .page > :is(section, div).panel:not(.soft) {
-  box-shadow: 0 1px 2px rgba(29, 29, 31, 0.025), 0 8px 24px rgba(29, 29, 31, 0.035);
+  box-shadow: var(--card-shadow);
 }
 .left-body :where(.panel, .card) {
   padding: 0.62rem 0.66rem;
@@ -2632,10 +2637,10 @@ button.card.stat.clickable:hover {
 .left-body .panel > :where(.panel, .card, .live-status-card, .timeline-panel, .compare-card, .layer-tree, .empty-panel),
 .left-body .cards > .card {
   padding: 0.64rem;
-  border-color: transparent;
-  border-radius: 10px;
-  background: #f6f7f8;
-  box-shadow: none;
+  border-color: var(--card-border);
+  border-radius: var(--card-radius-inner);
+  background: var(--card-surface-muted);
+  box-shadow: var(--card-shadow-inner);
 }
 .left-body .card:hover,
 .left-body button.card.stat.clickable:hover {
@@ -2699,7 +2704,7 @@ button.card.stat.clickable:hover {
   line-height: 1.5;
 }
 .app-shell .left-body :is(.draft-card, .approval-stack article) {
-  border-radius: 12px;
+  border-radius: var(--card-radius-inner);
 }
 .left-body .map-link-bar {
   padding: 0.45rem 0.55rem;
@@ -2728,6 +2733,73 @@ button.card.stat.clickable:hover {
   font-size: 11px;
   padding: 0.55rem 0.5rem;
 }
+
+/* 业务卡片统一规范：外层容器、内容卡片和语义告警卡使用同一套节奏。 */
+.left-body :where(
+  .task-context-card,
+  .task-entry-card,
+  .plan-detail-panel,
+  .step-page-card,
+  .candidate-card,
+  .excluded-card,
+  .record-card,
+  .draft-card,
+  .mode-card,
+  .execution-intervention-card,
+  .plan-selection-card
+) {
+  border-radius: var(--card-radius-inner);
+  box-shadow: var(--card-shadow-inner);
+}
+.left-body :where(
+  .task-context-card,
+  .task-entry-card,
+  .plan-detail-panel,
+  .candidate-card,
+  .excluded-card,
+  .record-card,
+  .draft-card,
+  .mode-card
+) {
+  border-color: var(--card-border);
+}
+.left-body :where(.task-context-card, .task-entry-card, .plan-detail-panel, .draft-card, .mode-card) {
+  padding: 0.64rem;
+}
+.left-body :where(.candidate-card, .excluded-card) {
+  padding: 0.7rem;
+}
+.left-body :where(.record-card, .step-page-card) {
+  padding: 0.6rem;
+}
+.left-body :where(.task-context-card, .task-entry-card, .plan-detail-panel, .candidate-card, .excluded-card, .record-card, .draft-card, .mode-card):hover {
+  box-shadow: var(--card-shadow-inner);
+}
+.left-body :where(.record-card:not(.static), .candidate-card, .mode-card) {
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+.left-body :where(.record-card:not(.static), .candidate-card, .mode-card):hover {
+  border-color: #b7d7f7;
+  box-shadow: 0 5px 16px rgba(29, 29, 31, 0.07);
+  transform: translateY(-1px);
+}
+.left-body :where(.record-card.selected, .mode-card.selected) {
+  border-color: #9dc8f2;
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.08);
+}
+.left-body :where(.section-card-head) {
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--line);
+}
+.assistant-pending-card,
+.assistant-service-card {
+  border-radius: var(--card-radius-inner);
+  box-shadow: var(--card-shadow-inner);
+}
+.assistant-pending-card { padding: 0.7rem; }
+.assistant-service-card { padding: 0.7rem; border-color: var(--card-border); }
 .left-body .table td.ops {
   display: table-cell;
   padding-top: 0.35rem;
@@ -2944,4 +3016,75 @@ button.card.stat.clickable:hover {
 .drawer-sensor-chooser button { min-height: 30px; border: 1px solid #D8DDE3; border-radius: 8px; background: #fff; color: #29292D; font-size: 11px; text-align: left; cursor: pointer; }
 @media (max-width: 760px) {
   .drawer-sensor-actions { grid-template-columns: 1fr; }
+}
+
+/* 最终覆盖各页面局部样式，确保同一层级的业务卡片不会出现不同圆角和阴影。 */
+.app-shell .left-body :is(
+  .task-context-card,
+  .task-entry-card,
+  .plan-detail-panel,
+  .step-page-card,
+  .candidate-card,
+  .excluded-card,
+  .record-card,
+  .draft-card,
+  .mode-card,
+  .execution-intervention-card,
+  .plan-selection-card,
+  .plan-master-item,
+  .node-row,
+  .task-list button,
+  .result-list article,
+  .knowledge-list article,
+  .audit-list article,
+  .artifact-list article
+) {
+  border-radius: var(--card-radius-inner);
+  box-shadow: var(--card-shadow-inner);
+}
+.app-shell .left-body .section-card-head {
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--line);
+}
+.app-shell .left-body :is(
+  .task-context-card,
+  .task-entry-card,
+  .plan-detail-panel,
+  .candidate-card,
+  .excluded-card,
+  .record-card,
+  .draft-card,
+  .mode-card,
+  .plan-master-item,
+  .node-row,
+  .task-list button,
+  .result-list article,
+  .knowledge-list article,
+  .audit-list article,
+  .artifact-list article
+) {
+  border-color: var(--card-border);
+}
+.app-shell .left-body :is(.record-card.selected, .mode-card.selected, .task-list button.active, .task-entry-card.selected, .plan-master-item.selected) {
+  border-color: #9dc8f2;
+  background: var(--brand-soft);
+}
+.app-shell .left-body :is(.task-entry-card.selected, .plan-master-item.selected) {
+  box-shadow: inset 3px 0 0 var(--brand), var(--card-shadow-inner);
+}
+.app-shell .left-body :is(.record-card:not(.static), .candidate-card, .mode-card, .task-list button, .plan-master-select):hover:not(.selected):not(.active) {
+  border-color: #b7d7f7;
+  box-shadow: 0 5px 16px rgba(29, 29, 31, 0.07);
+}
+.app-shell .left-body :is(.execution-intervention-card, .plan-selection-card, .approval-stack article) {
+  border-radius: var(--card-radius-inner);
+  box-shadow: var(--card-shadow-inner);
+}
+.assistant-pending-card,
+.assistant-service-card,
+.assistant-api-config,
+.assistant-detail-toggle {
+  border-radius: var(--card-radius-inner);
+  box-shadow: var(--card-shadow-inner);
 }
