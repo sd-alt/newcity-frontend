@@ -324,6 +324,15 @@ test('四中心二级导航统一无编号并保留既有路由和 Tab', async (
   await page.goto('/business?tab=tasks&taskId=42')
   await expect(page).toHaveURL(/\/business\?tab=tasks&taskId=42/)
   await expect(page.getByRole('heading', { name: '任务列表' })).toBeVisible()
+  await expect(page.locator('.business-stage-progress .business-stage-label')).toHaveText([
+    '需求查询',
+    '资源选择',
+    '能力评估',
+    '资源配置',
+    '方案管理',
+    '过程管理与成果追溯',
+  ])
+  await expect(page.locator('.stage-step-progress .stage-step-label')).toHaveText(['创建任务', '提交任务'])
   await expect(page.locator('.business-route')).toHaveCount(0)
   const businessNavigation = page.locator('.rail-subnav').filter({ hasText: '需求查询' })
   await expect(businessNavigation.locator('.rail-subitem')).toHaveCount(6)
@@ -345,8 +354,23 @@ test('四中心二级导航统一无编号并保留既有路由和 Tab', async (
 
   await businessNavigation.getByRole('button', { name: '资源选择', exact: true }).click()
   await expect(page).toHaveURL(/\/business\?tab=candidates&taskId=42/)
+  await expect(page.locator('.stage-step-progress .stage-step-label')).toHaveText(['需求反算', '候选与评分'])
+  await page.goto('/business?tab=flow&taskId=42&demandId=7&returnTo=%2Fbusiness%3Ftab%3Dtasks')
+  await expect(page).toHaveURL(/\/business\?tab=flow&taskId=42&demandId=7&returnTo=/)
+  await expect(page.locator('.stage-step-progress .stage-step-label')).toHaveText(['基础关联', '优化关联', '增补关联'])
+  await page.goto('/business?tab=plans&taskId=42')
+  await expect(page.locator('.stage-step-progress .stage-step-label')).toHaveText(['满足度评估', '规划输出', '方案审核', '方案发布'])
   await businessNavigation.getByRole('button', { name: '过程管理与成果追溯', exact: true }).click()
   await expect(page).toHaveURL(/\/business\/execution\?taskId=42/)
+  await expect(page.locator('.business-stage-progress .business-stage-label')).toHaveText([
+    '需求查询',
+    '资源选择',
+    '能力评估',
+    '资源配置',
+    '方案管理',
+    '过程管理与成果追溯',
+  ])
+  await expect(page.locator('.stage-step-progress .stage-step-label')).toHaveText(['执行启动', '执行监控', '异常处理', '成果查看'])
 
   await page.getByRole('button', { name: /任务中心/ }).click()
   await expect(page.locator('.rail-subnav').filter({ hasText: '任务创建' }).locator('.rail-subitem--staged')).toHaveCount(0)

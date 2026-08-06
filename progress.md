@@ -2029,3 +2029,28 @@
 - `docs/四中心与智能任务规划前端说明.md`：补充二级目录视觉约定。
 - `progress.md`：记录本轮样式恢复和验证结果。
 - 回滚方式：对本轮前端提交执行 `git revert <前端提交>`，即可恢复本轮修改前的导航样式；不涉及业务数据。
+
+## 2026-08-06 - Task: 收口业务中心六阶段与局部步骤交互
+
+### What was done
+- 将六个业务阶段与任务执行步骤拆开，所有业务中心页面统一显示六阶段进度，当前页面只显示所属阶段的局部步骤。
+- 集中维护阶段、步骤、旧动作键和路由映射；创建、反算、候选、关联、评估和输出动作按所属页面导航，不再将无关动作强制切换到资源配置。
+- 执行追溯页接入同一套六阶段和执行步骤进度，并保留任务、方案、运行和返回上下文；同步去除页面标题中的阶段编号和旧九步进度文案。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过。
+- `npx.cmd playwright test e2e/agent-workflow.spec.ts --grep "四中心二级导航" --workers=1`：通过，覆盖六阶段标签、各页局部步骤、执行步骤和任务上下文。
+- `npm.cmd run test:e2e -- --workers=1`：13 项全部通过。
+- `git diff --check`：通过。
+
+### Notes
+- `src/features/businessWorkflow.ts`：新增六阶段、局部步骤、旧动作和上下文路由的唯一映射。
+- `src/components/BusinessStageProgress.vue`：新增全局六阶段进度组件。
+- `src/components/StageStepProgress.vue`：新增当前阶段局部步骤组件。
+- `src/pages/PlanningCenter.vue`：接入阶段/步骤进度、修正动作路由和完成状态推断，移除九步资源配置流水线。
+- `src/pages/BusinessExecutionView.vue`：接入过程追溯阶段和执行局部步骤。
+- `e2e/agent-workflow.spec.ts`：补充六阶段与局部步骤回归断言。
+- `docs/四中心与智能任务规划前端说明.md`：记录两级流程模型、集中映射和当前前端状态推断边界。
+- `progress.md`：记录本轮实现与验证结果。
+- 回滚方式：执行本轮前端提交的 `git revert <前端提交>`；不涉及后端接口、数据库结构或业务数据。

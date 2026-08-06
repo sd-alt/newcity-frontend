@@ -3,6 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
 import CardPager from '../components/CardPager.vue'
+import BusinessStageProgress from '../components/BusinessStageProgress.vue'
+import StageStepProgress from '../components/StageStepProgress.vue'
+import type { BusinessStageKey, WorkflowStepKey } from '../features/businessWorkflow'
 import { errMessage } from '../utils/errors'
 
 type Row = Record<string, any>
@@ -25,6 +28,24 @@ const viewPages = ['选择观测任务', '查看执行进度', '查看任务成�
 const selectedTask = computed(() => tasks.value.find((item) => String(item.id) === selectedTaskId.value))
 const selectedPlanId = computed(() => typeof route.query.planId === 'string' ? route.query.planId : '')
 const selectedRunId = computed(() => typeof route.query.runId === 'string' ? route.query.runId : '')
+const completedStages = computed<BusinessStageKey[]>(() => {
+  const status = String(selectedTask.value?.status || '').toLowerCase()
+  if (!selectedPlanId.value && !['running', 'paused', 'completed', 'archived'].includes(status)) return []
+  return ['demand', 'resource_selection', 'capability_evaluation', 'resource_configuration', 'plan_management']
+})
+const currentExecutionStep = computed<WorkflowStepKey>(() => {
+  if (viewPage.value === 3) return 'result_view'
+  if (viewPage.value === 2) return 'execution_monitor'
+  return 'execution_start'
+})
+const completedExecutionSteps = computed<WorkflowStepKey[]>(() => {
+  const completed: WorkflowStepKey[] = []
+  if (viewPage.value > 1 || executions.value.length) completed.push('execution_start')
+  if (viewPage.value > 2 || executions.value.length) completed.push('execution_monitor')
+  if (executions.value.some((item) => ['failed', 'error', 'blocked'].includes(String(item.status || '').toLowerCase()))) completed.push('exception_handling')
+  if (results.value.length) completed.push('result_view')
+  return completed
+})
 const filteredTasks = computed(() => {
   const q = keyword.value.trim().toLowerCase()
   return tasks.value.filter((item) => !q || `${item.code} ${item.name} ${item.status}`.toLowerCase().includes(q))
@@ -97,12 +118,22 @@ onMounted(load)
 
 <template>
   <section class="page execution-page">
-    <header class="page-head"><div><p class="eyebrow">06 · 过程管理与成果追溯</p><h1>执行监控、过程追踪与成果查看</h1></div></header>
+    <header class="page-head"><div><p class="eyebrow">业务中心</p><h1>执行监控、过程追踪与成果查看</h1></div></header>
+    <BusinessStageProgress
+      current-stage="execution_trace"
+      :completed-stages="completedStages"
+      :task-id="selectedTaskId || null"
+    />
+    <StageStepProgress
+      stage="execution_trace"
+      :current-step="currentExecutionStep"
+      :completed-steps="completedExecutionSteps"
+    />
     <p v-if="error" class="error">{{ error }}</p><p v-if="message" class="ok-text">{{ message }}</p>
     <section v-if="selectedTask" class="task-context-card" aria-label="当前业务任务上下文">
       <div><small>任务名称</small><strong>{{ selectedTask.name }}</strong></div>
       <div><small>任务状态</small><strong>{{ selectedTask.status || '-' }}</strong></div>
-      <div><small>当前阶段</small><strong>06 过程追溯</strong></div>
+      <div><small>当前阶段</small><strong>过程追溯</strong></div>
       <div><small>当前方案</small><strong>{{ selectedPlanId ? `#${selectedPlanId}` : '未指定' }}</strong></div>
       <div><small>运行状态</small><strong>{{ selectedRunId ? `运行 #${selectedRunId}` : '无 Agent 运行上下文' }}</strong></div>
       <nav><RouterLink class="btn ghost tiny" :to="{ path: '/business', query: { tab: 'tasks', taskId: selectedTaskId } }">返回任务入口</RouterLink><RouterLink class="btn ghost tiny" :to="{ path: '/application', query: { tab: 'gis', taskId: selectedTaskId } }">地图定位</RouterLink></nav>

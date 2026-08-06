@@ -21,18 +21,20 @@ import { mapDrawGeometry } from '../gis/mapTools'
 import { wktToGeoJson, type SimpleGeometry } from '../gis/wkt'
 import CardPager from '../components/CardPager.vue'
 import ContextGuide from '../components/ContextGuide.vue'
+import BusinessStageProgress from '../components/BusinessStageProgress.vue'
+import StageStepProgress from '../components/StageStepProgress.vue'
+import {
+  BUSINESS_STAGES,
+  preserveWorkflowQuery,
+  routeForLegacyStep,
+  stageForBusinessTab,
+  workflowStepForLegacy,
+  type BusinessStageKey,
+  type WorkflowStepKey,
+} from '../features/businessWorkflow'
 import { tablePager as vTablePager } from '../utils/tablePager'
 
-type StepKey =
-  | 'create'
-  | 'submit'
-  | 'reverse'
-  | 'candidates'
-  | 'basic'
-  | 'optimize'
-  | 'supplement'
-  | 'evaluate'
-  | 'output'
+type StepKey = import('../features/businessWorkflow').LegacyStepKey
 
 type ResourceRelationRow = {
   left?: { platformName?: string; platformId?: string | number }
@@ -57,15 +59,15 @@ const STEP_ORDER: StepKey[] = [
   'output',
 ]
 const STEPS: { key: StepKey; title: string; shortTitle: string; desc: string }[] = [
-  { key: 'create', title: '1. 创建任务', shortTitle: '创建', desc: '任务建模 + 指标选择' },
-  { key: 'submit', title: '2. 提交任务', shortTitle: '提交', desc: '进入可关联状态' },
-  { key: 'reverse', title: '3. 需求反算', shortTitle: '反算', desc: '反算所需传感器类型/数量' },
-  { key: 'candidates', title: '4. 候选与评分', shortTitle: '候选', desc: '筛选候选并展示评分依据' },
-  { key: 'basic', title: '5. 基础关联', shortTitle: '基础', desc: '建立初步关联' },
-  { key: 'optimize', title: '6. 优化关联', shortTitle: '优化', desc: '优化资源组合' },
-  { key: 'supplement', title: '7. 增补关联', shortTitle: '增补', desc: '补足覆盖不足' },
-  { key: 'evaluate', title: '8. 满足度评估', shortTitle: '评估', desc: '关联后覆盖/精度核查' },
-  { key: 'output', title: '9. 规划输出', shortTitle: '输出', desc: '生成输出方案' },
+  { key: 'create', title: '创建任务', shortTitle: '创建', desc: '任务建模 + 指标选择' },
+  { key: 'submit', title: '提交任务', shortTitle: '提交', desc: '进入可关联状态' },
+  { key: 'reverse', title: '需求反算', shortTitle: '反算', desc: '反算所需传感器类型/数量' },
+  { key: 'candidates', title: '候选与评分', shortTitle: '候选', desc: '筛选候选并展示评分依据' },
+  { key: 'basic', title: '基础关联', shortTitle: '基础', desc: '建立初步关联' },
+  { key: 'optimize', title: '优化关联', shortTitle: '优化', desc: '优化资源组合' },
+  { key: 'supplement', title: '增补关联', shortTitle: '增补', desc: '补足覆盖不足' },
+  { key: 'evaluate', title: '满足度评估', shortTitle: '评估', desc: '关联后覆盖/精度核查' },
+  { key: 'output', title: '规划输出', shortTitle: '输出', desc: '生成输出方案' },
 ]
 const evaluationGuideSteps = [
   { title: '先看是否满足', detail: '“指标满足”回答当前方案能不能完成任务。未满足时先不要输出方案。' },
@@ -85,21 +87,13 @@ const tabs = [
   { key: 'plans', label: '方案管理' },
 ]
 type BusinessRouteKey = 'tasks' | 'candidates' | 'evaluation' | 'flow' | 'plans' | 'execution'
-const BUSINESS_ROUTE_STEPS: Array<{ key: BusinessRouteKey; label: string; description: string }> = [
-  { key: 'tasks', label: '需求', description: '需求查询 · 确认任务目标' },
-  { key: 'candidates', label: '资源', description: '资源选择 · 筛选候选资源' },
-  { key: 'evaluation', label: '评估', description: '能力评估 · 比较任务满足度' },
-  { key: 'flow', label: '配置', description: '资源配置 · 组合观测方案' },
-  { key: 'plans', label: '方案', description: '方案管理 · 确认并输出方案' },
-  { key: 'execution', label: '追溯', description: '过程管理与成果追溯 · 查看运行和成果' },
-]
 const currentBusinessPage = computed(() => {
   const copy: Record<string, { eyebrow: string; title: string; summary: string }> = {
-    tasks: { eyebrow: '业务中心 · 01', title: '业务需求与任务入口', summary: '查看任务需求，并按真实进度继续处理。' },
-    candidates: { eyebrow: '业务中心 · 02', title: '资源选择', summary: '筛选候选资源，查看匹配与排除原因。' },
-    evaluation: { eyebrow: '业务中心 · 03', title: '能力评估', summary: '比较候选资源的能力、覆盖和任务满足度。' },
-    flow: { eyebrow: '业务中心 · 04', title: '资源配置', summary: '组合已选资源，完成关联、补充与配置检查。' },
-    plans: { eyebrow: '业务中心 · 05', title: '方案管理', summary: '查看方案版本、评价结果和发布状态。' },
+    tasks: { eyebrow: '业务中心', title: '业务需求与任务入口', summary: '查看任务需求，并按真实进度继续处理。' },
+    candidates: { eyebrow: '业务中心', title: '资源选择', summary: '筛选候选资源，查看匹配与排除原因。' },
+    evaluation: { eyebrow: '业务中心', title: '能力评估', summary: '比较候选资源的能力、覆盖和任务满足度。' },
+    flow: { eyebrow: '业务中心', title: '资源配置', summary: '组合已选资源，完成关联、补充与配置检查。' },
+    plans: { eyebrow: '业务中心', title: '方案管理', summary: '查看方案版本、评价结果和发布状态。' },
   }
   return copy[tab.value] || copy.tasks!
 })
@@ -234,21 +228,46 @@ const unlockedStepIndex = computed(() => {
   }
   return Math.min(STEP_ORDER.length - 1, Math.max(stepIndex.value, maxDoneIndex + 1))
 })
-const currentStepInfo = computed(() => STEPS[stepIndex.value] || STEPS[0])
 const previousStep = computed(() => stepIndex.value > 0 ? STEPS[stepIndex.value - 1] : null)
 const nextStep = computed(() => stepIndex.value < STEPS.length - 1 ? STEPS[stepIndex.value + 1] : null)
-const pipelineSteps = computed(() => STEPS.map((step) => {
-  const complete = doneSteps.value.has(step.key)
-  const activeStep = STEP_ORDER[unlockedStepIndex.value]
-  const current = !complete && step.key === activeStep
-  return {
-    key: step.key,
-    title: step.title,
-    label: step.shortTitle,
-    state: complete ? 'done' : current ? 'current' : 'pending',
-    status: complete ? '已完成' : current ? '进行中' : '待开始',
+const currentBusinessStage = computed<BusinessStageKey>(() => stageForBusinessTab(tab.value))
+const currentWorkflowStep = computed<WorkflowStepKey>(() => workflowStepForLegacy(currentStep.value).key)
+const stepCardVisible = computed(() => {
+  if (tab.value === 'tasks') return currentStep.value === 'create' || currentStep.value === 'submit'
+  if (tab.value === 'candidates') return currentStep.value === 'reverse' || currentStep.value === 'candidates'
+  if (tab.value === 'flow') return currentStep.value === 'basic' || currentStep.value === 'optimize' || currentStep.value === 'supplement'
+  if (tab.value === 'plans') return currentStep.value === 'evaluate' || currentStep.value === 'output'
+  return false
+})
+const completedWorkflowSteps = computed<WorkflowStepKey[]>(() => {
+  const completed = new Set<WorkflowStepKey>()
+  for (const step of doneSteps.value) completed.add(workflowStepForLegacy(step).key)
+  if (doneSteps.value.has('candidates')) completed.add('capability_compare')
+  if (doneSteps.value.has('basic')) {
+    completed.add('coverage_precheck')
+    completed.add('basic_plan_validation')
   }
-}))
+  const planRows = plans.value.filter((plan) => Number(plan.taskId) === taskId.value)
+  const planStatuses = planRows.map((plan) => String(plan.status || '').toLowerCase())
+  if (planStatuses.some((status) => status.includes('approv'))) completed.add('plan_approval')
+  if (planStatuses.some((status) => status.includes('publish'))) completed.add('plan_publish')
+  return [...completed]
+})
+const blockedBusinessStages = computed<BusinessStageKey[]>(() => {
+  if (taskId.value != null) return []
+  return BUSINESS_STAGES.slice(1).map((stage) => stage.key)
+})
+const completedBusinessStages = computed<BusinessStageKey[]>(() => {
+  if (taskId.value == null) return []
+  const completed = new Set<BusinessStageKey>()
+  const status = String(taskStatus.value || '').toLowerCase()
+  if (doneSteps.value.has('submit') || (status && !['draft', 'created'].includes(status))) completed.add('demand')
+  if (doneSteps.value.has('candidates')) completed.add('resource_selection')
+  if (doneSteps.value.has('basic')) completed.add('capability_evaluation')
+  if (doneSteps.value.has('supplement')) completed.add('resource_configuration')
+  if (doneSteps.value.has('output') || completedWorkflowSteps.value.includes('plan_approval') || completedWorkflowSteps.value.includes('plan_publish')) completed.add('plan_management')
+  return [...completed]
+})
 const reverseSummary = computed(() => {
   const raw = reverseResult.value as Record<string, unknown> | null
   if (!raw || typeof raw !== 'object') return null
@@ -351,13 +370,24 @@ async function setTab(key: string) {
   if (taskId.value != null) q.taskId = String(taskId.value)
   await router.replace({ path: route.path, query: q })
 }
+async function navigateToStep(step: StepKey) {
+  const destination = routeForLegacyStep(step)
+  if (destination.path === route.path && destination.tab === tab.value) return
+  if (destination.path === '/business' && destination.tab) {
+    await setTab(destination.tab)
+    return
+  }
+  const query = preserveWorkflowQuery(route.query as Record<string, unknown>)
+  if (taskId.value != null) query.taskId = String(taskId.value)
+  await router.replace({ path: destination.path, query })
+}
 async function goBusinessRoute(key: BusinessRouteKey) {
   if (key === 'execution') {
-    const query: Record<string, string> = {}
+    const query = preserveWorkflowQuery(route.query as Record<string, unknown>)
+    delete query.currentTab
     if (taskId.value != null) query.taskId = String(taskId.value)
     const taskPlans = plans.value.filter((plan) => Number(plan.taskId) === taskId.value)
     if (taskPlans[0]?.id != null) query.planId = String(taskPlans[0].id)
-    if (typeof route.query.runId === 'string') query.runId = route.query.runId
     await router.push({ path: '/business/execution', query })
     return
   }
@@ -370,15 +400,15 @@ function taskBusinessRoute(item: Record<string, unknown>): BusinessRouteKey {
   const status = String(item.status || '').toLowerCase()
   if (['running', 'paused', 'completed', 'archived'].includes(status)) return 'execution'
   const step = inferStepFromPlans(taskPlansFor(item), status)
-  if (step === 'create' || step === 'submit') return 'flow'
+  if (step === 'create' || step === 'submit') return 'tasks'
   if (step === 'reverse' || step === 'candidates') return 'candidates'
-  if (step === 'basic') return 'evaluation'
+  if (step === 'basic') return 'flow'
   if (step === 'optimize' || step === 'supplement') return 'flow'
   return 'plans'
 }
 function taskBusinessStage(item: Record<string, unknown>) {
   const key = taskBusinessRoute(item)
-  return BUSINESS_ROUTE_STEPS.find((step) => step.key === key)?.label || '需求'
+  return BUSINESS_STAGES.find((stage) => stage.route.tab === (key === 'execution' ? undefined : key))?.label || BUSINESS_STAGES[0]!.label
 }
 async function continueTask(item: Record<string, unknown>) {
   await selectTask(item.id)
@@ -394,7 +424,7 @@ async function viewTaskExecution(item: Record<string, unknown>) {
 }
 async function openEvaluationFlow() {
   currentStep.value = 'evaluate'
-  await setTab('flow')
+  await setTab('plans')
 }
 function syncTab() {
   const t = route.query.tab
@@ -486,10 +516,7 @@ const currentAction = computed(() => {
 })
 
 async function runStepAction(a: StepKey) {
-  // 主操作在「需求与关联」表单区；若人在列表页，先切过去避免盲点
-  if (tab.value !== 'flow' && a !== 'candidates') {
-    await setTab('flow')
-  }
+  await navigateToStep(a)
   if (a === 'create') return createTask()
   if (a === 'submit') return submitTask()
   if (a === 'reverse') return requirementReverse()
@@ -644,7 +671,7 @@ async function createTask() {
     markDone('create')
     advanceTo('submit')
     message.value = '任务草稿已保存，请绘制任务区域并完成观测配置'
-    await setTab('flow')
+    await setTab('tasks')
     try { await showPlanningWorkspace('/planning') } catch { /* 地图刷新失败不影响主流程 */ }
     try {
       await selectShellFeature('task', String(data.id), { openBubble: false, fly: true })
@@ -898,7 +925,7 @@ async function supplementAssociation() {
     }
     markDone('supplement')
     advanceTo('evaluate')
-    await setTab('flow')
+    await setTab('plans')
     message.value =
       '增补关联完成：资源 ' +
       lastSupLinks.value.length +
@@ -952,7 +979,7 @@ async function requirementEvaluation() {
     } catch { /* 地图操作为可选步骤 */ }
     markDone('evaluate')
     advanceTo('output')
-    await setTab('flow')
+    await setTab('plans')
     const commonPercent = Number(oc.coveragePercent || 0)
     message.value = Number((res.data as Record<string, unknown>)?.indicatorCount || 0) > 1
       ? `协同评估完成：多指标共同覆盖率 ${commonPercent}%`
@@ -1232,8 +1259,8 @@ async function resetForm() {
     if (v == null || k === 'taskId') continue
     q[k] = Array.isArray(v) ? String(v[0] ?? '') : String(v)
   }
-  q.tab = 'flow'
-  tab.value = 'flow'
+  q.tab = 'tasks'
+  tab.value = 'tasks'
   await router.replace({ path: route.path, query: q })
 }
 
@@ -2098,6 +2125,17 @@ async function applyPlanningMapAction() {
       <div class="tabs">
         <button v-for="t in tabs" :key="t.key" type="button" class="tab" :class="{ active: tab === t.key }" @click="setTab(t.key)">{{ t.label }}</button>
       </div>
+      <BusinessStageProgress
+        :current-stage="currentBusinessStage"
+        :completed-stages="completedBusinessStages"
+        :blocked-stages="blockedBusinessStages"
+        :task-id="taskId"
+      />
+      <StageStepProgress
+        :stage="currentBusinessStage"
+        :current-step="currentWorkflowStep"
+        :completed-steps="completedWorkflowSteps"
+      />
       <p v-if="error" class="error">{{ error }}</p>
       <p v-if="message" class="ok-text">{{ message }}</p>
 
@@ -2161,34 +2199,15 @@ async function applyPlanningMapAction() {
         <div v-else class="empty-inline">暂无观测任务。可先新建任务。</div>
       </section>
 
-      <section v-if="tab === 'flow'">
+      <section v-if="stepCardVisible">
         <section class="planning-workflow panel" data-testid="planning-workflow">
           <header class="planning-workflow-head">
             <div>
-              <p class="eyebrow">任务流水线</p>
-          <h2>资源配置</h2>
+              <p class="eyebrow">阶段操作</p>
+              <h2>{{ currentBusinessPage.title }}</h2>
             </div>
-            <span class="planning-progress-count">当前第 {{ stepIndex + 1 }} 步 / 共 {{ STEPS.length }} 步 · 已完成 {{ doneSteps.size }} 步</span>
+            <span class="planning-progress-count">{{ workflowStepForLegacy(currentStep).label }} · {{ doneSteps.has(currentStep) ? '已完成' : '待执行' }}</span>
           </header>
-
-          <div class="pipeline-scroll" aria-label="资源配置 9 步进度">
-            <ol class="planning-pipeline">
-              <li
-                v-for="(step, index) in pipelineSteps"
-                :key="step.key"
-                class="pipeline-step"
-                :class="step.state"
-                :title="step.title"
-                :aria-current="step.state === 'current' ? 'step' : undefined"
-              >
-                <span class="pipeline-marker" aria-hidden="true">{{ step.state === 'done' ? '✓' : index + 1 }}</span>
-                <span class="pipeline-copy">
-                  <strong>{{ step.label }}</strong>
-                  <small>{{ step.status }}</small>
-                </span>
-              </li>
-            </ol>
-          </div>
 
           <article class="step-page-card" :class="{ completed: doneSteps.has(currentStep) }">
             <button
@@ -2202,11 +2221,11 @@ async function applyPlanningMapAction() {
 
             <div class="step-page-content">
               <div class="step-page-meta">
-                <span>步骤 {{ stepIndex + 1 }} / {{ STEPS.length }}</span>
+                <span>{{ workflowStepForLegacy(currentStep).label }}</span>
                 <span class="step-state">{{ doneSteps.has(currentStep) ? '已完成，可重新执行' : '当前步骤' }}</span>
               </div>
-              <h3>{{ currentStepInfo?.title }}</h3>
-              <p>{{ currentStepInfo?.desc }}</p>
+              <h3>{{ workflowStepForLegacy(currentStep).label }}</h3>
+              <p>{{ workflowStepForLegacy(currentStep).description }}</p>
               <p v-if="stepBlockedReason(currentStep)" class="step-page-message error" role="alert">
                 {{ stepBlockedReason(currentStep) }}
               </p>
@@ -2238,7 +2257,7 @@ async function applyPlanningMapAction() {
           </article>
         </section>
 
-        <div class="flow-step-content">
+        <div v-if="tab === 'flow' || tab === 'candidates' || (tab === 'tasks' && ['create', 'submit'].includes(currentStep))" class="flow-step-content">
           <section v-if="currentStep === 'create' || currentStep === 'submit'" class="panel">
             <h2>观测任务草稿与空间配置</h2>
             <div class="form">
@@ -2856,59 +2875,6 @@ async function applyPlanningMapAction() {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
-.pipeline-scroll {
-  max-width: 100%;
-  padding: 0 2px 0.25rem;
-}
-.planning-pipeline {
-  display: grid;
-  grid-template-columns: repeat(9, minmax(0, 1fr));
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.pipeline-step {
-  position: relative;
-  display: grid;
-  justify-items: center;
-  gap: 0.28rem;
-  min-width: 0;
-  color: #8e8e93;
-  text-align: center;
-}
-.pipeline-step::before {
-  content: '';
-  position: absolute;
-  top: 13px;
-  right: 50%;
-  width: 100%;
-  height: 2px;
-  background: #dedee3;
-}
-.pipeline-step:first-child::before { display: none; }
-.pipeline-step.done::before,
-.pipeline-step.current::before { background: #71b88b; }
-.pipeline-marker {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border: 2px solid #d7d7dc;
-  border-radius: 50%;
-  background: #fff;
-  color: #8e8e93;
-  font-size: 11px;
-  font-weight: 700;
-}
-.pipeline-step.done .pipeline-marker { border-color: #2f8f5b; background: #2f8f5b; color: #fff; }
-.pipeline-step.current .pipeline-marker { border-color: #c98619; background: #fff7e8; color: #9a6211; }
-.pipeline-copy { display: grid; gap: 0.02rem; }
-.pipeline-copy strong { color: #68686d; font-size: 10px; font-weight: 600; }
-.pipeline-copy small { font-size: 9px; line-height: 1.25; }
-.pipeline-step.done .pipeline-copy strong { color: #246f48; }
-.pipeline-step.current .pipeline-copy strong { color: #8b5a12; }
 .step-page-card {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) 32px;
