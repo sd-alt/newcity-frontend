@@ -408,6 +408,14 @@ type SatelliteTrajectoryPoint = {
   altitudeM?: number
 }
 
+type DynamicTrajectory = {
+  current: SatelliteTrajectoryPoint
+  position: Cesium.SampledPositionProperty
+  startMs: number
+  stopMs: number
+  dataKind: string
+}
+
 function addDynamicTrajectory(
   dataSource: Cesium.CustomDataSource,
   id: string,
@@ -416,35 +424,62 @@ function addDynamicTrajectory(
   color: Cesium.Color,
   description: string,
   markerKind: MapSymbolKind,
-): SatelliteTrajectoryPoint | null {
+): DynamicTrajectory | null {
   const trajectory = (item.trajectory || {}) as {
     available?: boolean
     source?: string
     tleVersion?: number
     generatedAt?: string
+    dataKind?: string
     points?: SatelliteTrajectoryPoint[]
   }
-  const points = (trajectory.points || []).filter((point) =>
-    Number.isFinite(Number(point.longitude)) &&
-    Number.isFinite(Number(point.latitude)) &&
-    Number.isFinite(Date.parse(String(point.time))),
-  )
+  const points = (trajectory.points || [])
+    .filter((point) =>
+      Number.isFinite(Number(point.longitude)) &&
+      Number.isFinite(Number(point.latitude)) &&
+      Number.isFinite(Date.parse(String(point.time))),
+    )
+    .sort((a, b) => Date.parse(a.time) - Date.parse(b.time))
   if (!trajectory.available || points.length < 1) return null
   const isSatellite = markerKind === 'satellite'
+  const dataKind = String(trajectory.dataKind || (isSatellite ? 'tle-sgp4' : 'position-telemetry'))
   const trajectoryColor = isSatellite
     ? Cesium.Color.fromCssColorString('#38BDF8')
     : markerKind === 'uav'
       ? Cesium.Color.fromCssColorString('#14B8A6')
       : color
   const trajectoryLabel = isSatellite
-    ? '实时轨道'
-    : markerKind === 'uav'
-      ? '飞行轨迹'
-      : '移动轨迹'
+    ? 'TLE/SGP4 准实时轨道预测'
+    : dataKind === 'demo-telemetry'
+      ? '演示数据'
+      : dataKind === 'position-telemetry'
+        ? '实际位置遥测'
+        : markerKind === 'uav'
+          ? '飞行轨迹'
+          : '移动轨迹'
   const altitudeMeters = (point: SatelliteTrajectoryPoint) =>
     Number.isFinite(Number(point.altitudeKm))
       ? Number(point.altitudeKm) * 1000
       : Number(point.altitudeM || 0)
+
+  const startMs = Date.parse(points[0]!.time)
+  const stopMs = Date.parse(points[points.length - 1]!.time)
+  const position = new Cesium.SampledPositionProperty()
+  position.setInterpolationOptions({
+    // Cesium's runtime LinearApproximation is linear; its bundled declaration is narrower than the runtime object.
+    interpolationAlgorithm: Cesium.LinearApproximation as unknown as Cesium.InterpolationAlgorithm,
+    interpolationDegree: 1,
+  })
+  for (const point of points) {
+    position.addSample(
+      Cesium.JulianDate.fromDate(new Date(point.time)),
+      Cesium.Cartesian3.fromDegrees(
+        Number(point.longitude),
+        Number(point.latitude),
+        altitudeMeters(point),
+      ),
+    )
+  }
 
   const segments: SatelliteTrajectoryPoint[][] = [[]]
   for (const point of points) {
@@ -455,34 +490,60 @@ function addDynamicTrajectory(
     }
     segments[segments.length - 1]!.push(point)
   }
-  for (const [index, segment] of segments.entries()) {
+  const nowMs = Date.now()
+  for (const [segmentIndex, segment] of segments.entries()) {
     if (segment.length < 2) continue
-    dataSource.entities.add({
-      id: `sensor-track-${id}-${index}`,
-      name: `${name} ${trajectoryLabel}`,
-      description,
-      properties: {
-        fitGroup: isSatellite ? 'space' : 'ground',
-        mapKind: markerKind,
-        sensorId: id,
-      },
-      polyline: {
-        positions: segment.map((point) =>
-          Cesium.Cartesian3.fromDegrees(
-            Number(point.longitude),
-            Number(point.latitude),
-            altitudeMeters(point),
+    const phases: Array<{ points: SatelliteTrajectoryPoint[]; future: boolean }> = [
+      { points: [], future: false },
+    ]
+    for (const point of segment) {
+      const future = Date.parse(point.time) > nowMs
+      const currentPhase = phases[phases.length - 1]!
+      if (currentPhase.points.length && currentPhase.future !== future) {
+        phases.push({ points: [], future })
+      }
+      const target = phases[phases.length - 1]!
+      target.future = future
+      target.points.push(point)
+    }
+    for (const [phaseIndex, phase] of phases.entries()) {
+      if (phase.points.length < 2) continue
+      dataSource.entities.add({
+        id: `sensor-track-${id}-${segmentIndex}-${phaseIndex}`,
+        name: `${name} ${trajectoryLabel}`,
+        description: `${description}<br/>轨迹含义: ${trajectoryLabel}${phase.future ? ' · 未来预测' : ' · 历史轨迹'}`,
+        properties: {
+          fitGroup: isSatellite ? 'space' : 'ground',
+          mapKind: markerKind,
+          sensorId: id,
+          dataKind,
+          clockTrack: isSatellite && stopMs > startMs,
+          trajectoryStartMs: startMs,
+          trajectoryStopMs: stopMs,
+        },
+        polyline: {
+          positions: phase.points.map((point) =>
+            Cesium.Cartesian3.fromDegrees(
+              Number(point.longitude),
+              Number(point.latitude),
+              altitudeMeters(point),
+            ),
           ),
-        ),
-        width: isSatellite ? 3 : 4,
-        material: new Cesium.PolylineGlowMaterialProperty({
-          color: trajectoryColor.withAlpha(0.92),
-          glowPower: isSatellite ? 0.18 : 0.12,
-        }),
-        clampToGround: false,
-        arcType: Cesium.ArcType.NONE,
-      },
-    })
+          width: isSatellite ? 3 : 4,
+          material: phase.future
+            ? new Cesium.PolylineDashMaterialProperty({
+                color: trajectoryColor.withAlpha(isSatellite ? 0.45 : 0.55),
+                dashLength: 14,
+              })
+            : new Cesium.PolylineGlowMaterialProperty({
+                color: trajectoryColor.withAlpha(0.92),
+                glowPower: isSatellite ? 0.18 : 0.12,
+              }),
+          clampToGround: false,
+          arcType: Cesium.ArcType.NONE,
+        },
+      })
+    }
   }
 
   const now = Date.now()
@@ -509,24 +570,26 @@ function addDynamicTrajectory(
     id: `sensor-${id}`,
     name,
     description: currentDescription,
+    availability: new Cesium.TimeIntervalCollection([
+      new Cesium.TimeInterval({
+        start: Cesium.JulianDate.fromDate(new Date(startMs)),
+        stop: Cesium.JulianDate.fromDate(new Date(stopMs)),
+      }),
+    ]),
     properties: {
       fitGroup: isSatellite ? 'space' : 'ground',
       mapKind: markerKind,
       sensorId: id,
+      dataKind,
+      clockTrack: isSatellite && stopMs > startMs,
+      trajectoryStartMs: startMs,
+      trajectoryStopMs: stopMs,
     },
-    position: Cesium.Cartesian3.fromDegrees(
-      Number(current.longitude),
-      Number(current.latitude),
-      altitudeMeters(current),
-    ),
+    position,
     billboard: markerBillboard(markerKind, color, Cesium.HeightReference.NONE),
     label: {
       show: true,
-      text: Number.isFinite(Number(current.altitudeKm))
-        ? `${name} · ${Number(current.altitudeKm).toFixed(0)} km`
-        : Number.isFinite(Number(current.altitudeM))
-          ? `${name} · ${Number(current.altitudeM).toFixed(0)} m`
-          : name,
+      text: `${name} · ${trajectoryLabel}`,
       font: '12px "Microsoft YaHei", "PingFang SC", sans-serif',
       fillColor: Cesium.Color.WHITE,
       outlineColor: Cesium.Color.BLACK,
@@ -544,14 +607,14 @@ function addDynamicTrajectory(
       ),
     },
   })
-  return current
+  return { current, position, startMs, stopMs, dataKind }
 }
 
 function addSatelliteFootprintEntity(
   dataSource: Cesium.CustomDataSource,
   id: string,
   name: string,
-  current: SatelliteTrajectoryPoint,
+  track: DynamicTrajectory,
   item: Record<string, unknown>,
   color: Cesium.Color,
   description: string,
@@ -559,24 +622,27 @@ function addSatelliteFootprintEntity(
   const typeSummary = (item.typeSummary || {}) as Record<string, unknown>
   const swathKm = Number(typeSummary.swathKm)
   if (!Number.isFinite(swathKm) || swathKm <= 0) return false
-  const longitude = Number(current.longitude)
-  const latitude = Number(current.latitude)
-  if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return false
   const radiusMeters = (swathKm * 1000) / 2
+  const groundPosition = new Cesium.CallbackPositionProperty((time) => {
+    const position = track.position.getValue(time)
+    if (!position) return undefined
+    const cartographic = Cesium.Cartographic.fromCartesian(position)
+    return Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, 0)
+  }, false)
   dataSource.entities.add({
     id: `sensor-footprint-${id}`,
-    name: `${name}-当前扫描范围`,
+    name: `${name}-预测幅宽覆盖（近似）`,
     description: [
       description,
-      `当前扫描范围: 轨迹地面投影 · 幅宽 ${swathKm.toFixed(1)} km`,
-      `位置时刻: ${new Date(current.time).toLocaleString('zh-CN')}`,
+      `预测幅宽覆盖（近似）: 轨迹地面投影 · 幅宽 ${swathKm.toFixed(1)} km`,
+      '不代表当前真实观测范围',
     ].join('<br/>'),
     properties: {
       fitGroup: 'ground',
       mapKind: 'satelliteCoverage',
       sensorId: id,
     },
-    position: Cesium.Cartesian3.fromDegrees(longitude, latitude),
+    position: groundPosition,
     ellipse: {
       semiMajorAxis: radiusMeters,
       semiMinorAxis: radiusMeters,

@@ -445,6 +445,94 @@ tr.active td {
   visibility: hidden;
   pointer-events: none;
 }
+.map-clock-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 50px;
+  z-index: 22;
+  width: min(270px, calc(100% - 24px));
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #D6D8DD;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #38464E;
+  box-shadow: 0 4px 14px rgba(29, 29, 31, 0.12);
+  transition: right 0.2s ease;
+}
+.map-clock-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  margin-bottom: 0.35rem;
+  color: #52636C;
+  font-size: 11px;
+}
+.map-clock-heading time {
+  min-width: 0;
+  overflow: hidden;
+  color: #1F3D50;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.map-clock-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.map-clock-button {
+  display: inline-flex;
+  width: 28px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid #D6D8DD;
+  border-radius: 7px;
+  background: #fff;
+  color: #3A4650;
+  cursor: pointer;
+}
+.map-clock-button:hover {
+  border-color: #A8CBC6;
+  background: var(--brand-soft);
+  color: var(--brand-dark);
+}
+.map-clock-button svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+.map-clock-speeds {
+  display: inline-flex;
+  min-width: 0;
+  margin-left: auto;
+  border: 1px solid #D6D8DD;
+  border-radius: 7px;
+  overflow: hidden;
+}
+.map-clock-speeds button {
+  height: 24px;
+  padding: 0 0.45rem;
+  border: 0;
+  border-right: 1px solid #D6D8DD;
+  background: #fff;
+  color: #52636C;
+  font-size: 10px;
+  cursor: pointer;
+}
+.map-clock-speeds button:last-child { border-right: 0; }
+.map-clock-speeds button:hover,
+.map-clock-speeds button.active {
+  background: var(--brand-soft);
+  color: var(--brand-dark);
+  font-weight: 600;
+}
 /* 兼容仍可能存在的旧版包装类。 */
 .map-toolbar-detail { display: none !important; }
 
@@ -537,6 +625,22 @@ tr.active td {
   height: 10px;
   border-radius: 50%;
   margin-right: 0.35rem;
+}
+.map-planning-panel {
+  width: 196px;
+}
+.map-planning-panel .map-float-item {
+  min-height: 30px;
+  padding: .38rem .5rem;
+  border: 1px solid transparent;
+}
+.map-planning-panel .map-float-item:hover {
+  border-color: #b7d7f7;
+}
+.map-planning-separator {
+  height: 1px;
+  margin: .3rem .35rem;
+  background: #e5e7eb;
 }
 /* 点颜色统一使用下方的标准 .dot 定义。 */
 .map-legend-panel {
@@ -1460,6 +1564,10 @@ textarea:focus {
 .app-shell.right-open .map-tool-detail {
   right: calc(var(--drawer-w) + 32px);
 }
+.app-shell.workspace-open .map-clock-controls,
+.app-shell.right-open .map-clock-controls {
+  right: calc(var(--drawer-w) + 32px);
+}
 .app-shell.workspace-open .map-toolbar,
 .app-shell.right-open .map-toolbar {
   max-height: min(420px, calc(100vh - 160px));
@@ -2026,6 +2134,13 @@ button.card.stat.clickable:hover {
 .map-basemap .map-tool-rail { bottom: auto; }
 .map-basemap .map-toolbar { bottom: auto !important; position: relative !important; }
 .map-basemap > .map-tool-detail { position: absolute; }
+
+@media (max-width: 760px) {
+  .map-planning-panel {
+    right: 96px;
+    width: min(196px, calc(100% - 112px));
+  }
+}
 
 /* ── Toast 提示 ── */
 .toast-rack {

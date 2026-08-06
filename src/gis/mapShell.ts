@@ -84,6 +84,131 @@ export function toggleShellRight() {
   shellRightOpen.value = !shellRightOpen.value
 }
 
+export const satelliteClockMultipliers = [1, 10, 60] as const
+export const satelliteClock = reactive({
+  available: false,
+  playing: false,
+  multiplier: 1,
+  currentTimeMs: null as number | null,
+  startTimeMs: null as number | null,
+  stopTimeMs: null as number | null,
+})
+let satelliteClockViewer: Viewer | null = null
+let satelliteClockTickRemove: (() => void) | null = null
+let satelliteClockRangeKey = ''
+
+function clearSatelliteClockState(viewer?: Viewer) {
+  if (satelliteClockTickRemove) satelliteClockTickRemove()
+  satelliteClockTickRemove = null
+  satelliteClockViewer = null
+  satelliteClockRangeKey = ''
+  satelliteClock.available = false
+  satelliteClock.playing = false
+  satelliteClock.multiplier = 1
+  satelliteClock.currentTimeMs = null
+  satelliteClock.startTimeMs = null
+  satelliteClock.stopTimeMs = null
+  const target = viewer && !viewer.isDestroyed() ? viewer : null
+  if (target) {
+    target.clock.shouldAnimate = false
+    target.clock.multiplier = 1
+    target.clock.clockRange = Cesium.ClockRange.UNBOUNDED
+  }
+}
+
+function bindSatelliteClockTick(viewer: Viewer) {
+  if (satelliteClockViewer === viewer && satelliteClockTickRemove) return
+  if (satelliteClockTickRemove) satelliteClockTickRemove()
+  const onTick = () => {
+    if (!satelliteClock.available || viewer.isDestroyed()) return
+    satelliteClock.currentTimeMs = Cesium.JulianDate.toDate(viewer.clock.currentTime).getTime()
+    satelliteClock.playing = viewer.clock.shouldAnimate
+    updateSatelliteViewVisibility(viewer)
+    viewer.scene.requestRender()
+  }
+  viewer.clock.onTick.addEventListener(onTick)
+  satelliteClockViewer = viewer
+  satelliteClockTickRemove = () => viewer.clock.onTick.removeEventListener(onTick)
+}
+
+function satelliteClockExtent(viewer: Viewer): { min: number; max: number } | null {
+  const sensors = viewer.dataSources.getByName('sensors')[0]
+  if (!sensors) return null
+  const times: number[] = []
+  const time = viewer.clock.currentTime
+  for (const entity of sensors.entities.values) {
+    try {
+      const properties = entity.properties?.getValue(time) as Record<string, unknown> | undefined
+      if (properties?.clockTrack !== true) continue
+      const start = Number(properties.trajectoryStartMs)
+      const stop = Number(properties.trajectoryStopMs)
+      if (Number.isFinite(start) && Number.isFinite(stop) && stop > start) {
+        times.push(start, stop)
+      }
+    } catch {
+      /* 忽略没有可读属性的实体 */
+    }
+  }
+  if (!times.length) return null
+  return { min: Math.min(...times), max: Math.max(...times) }
+}
+
+function syncSatelliteClockState(viewer: Viewer) {
+  const extent = satelliteClockExtent(viewer)
+  if (!extent) {
+    if (satelliteClock.available || satelliteClockViewer) clearSatelliteClockState(viewer)
+    return
+  }
+  bindSatelliteClockTick(viewer)
+  const rangeKey = `${extent.min}:${extent.max}`
+  if (satelliteClockRangeKey !== rangeKey) {
+    const now = Math.max(extent.min, Math.min(extent.max, Date.now()))
+    viewer.clock.startTime = Cesium.JulianDate.fromDate(new Date(extent.min))
+    viewer.clock.stopTime = Cesium.JulianDate.fromDate(new Date(extent.max))
+    viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP
+    viewer.clock.multiplier = satelliteClock.multiplier
+    viewer.clock.currentTime = Cesium.JulianDate.fromDate(new Date(now))
+    viewer.clock.shouldAnimate = false
+    satelliteClockRangeKey = rangeKey
+  }
+  satelliteClock.available = true
+  satelliteClock.startTimeMs = extent.min
+  satelliteClock.stopTimeMs = extent.max
+  satelliteClock.currentTimeMs = Cesium.JulianDate.toDate(viewer.clock.currentTime).getTime()
+  satelliteClock.playing = viewer.clock.shouldAnimate
+  satelliteClock.multiplier = viewer.clock.multiplier
+}
+
+export function setSatelliteClockPlaying(playing: boolean) {
+  const viewer = shellViewer.value
+  if (!viewer || viewer.isDestroyed() || !satelliteClock.available) return
+  viewer.clock.shouldAnimate = playing
+  satelliteClock.playing = playing
+  viewer.scene.requestRender()
+}
+
+export function setSatelliteClockMultiplier(multiplier: number) {
+  const viewer = shellViewer.value
+  if (!viewer || viewer.isDestroyed() || !satelliteClock.available) return
+  const next = satelliteClockMultipliers.find((value) => value === multiplier) || 1
+  viewer.clock.multiplier = next
+  satelliteClock.multiplier = next
+  viewer.scene.requestRender()
+}
+
+export function resetSatelliteClock() {
+  const viewer = shellViewer.value
+  if (!viewer || viewer.isDestroyed() || !satelliteClock.available) return
+  const start = satelliteClock.startTimeMs ?? Date.now()
+  const stop = satelliteClock.stopTimeMs ?? start
+  const now = Math.max(start, Math.min(stop, Date.now()))
+  viewer.clock.currentTime = Cesium.JulianDate.fromDate(new Date(now))
+  viewer.clock.shouldAnimate = false
+  satelliteClock.currentTimeMs = now
+  satelliteClock.playing = false
+  viewer.scene.requestRender()
+}
+
 export const shellSelected = ref<ShellSelected | null>(null)
 export const shellPickScreen = ref<{ x: number; y: number } | null>(null)
 export const shellBubbleOpen = ref(false)
@@ -117,6 +242,8 @@ let highlightedEntity: Cesium.Entity | null = null
 let highlightRestore: (() => void) | null = null
 let cameraVisibilityRemove: (() => void) | null = null
 let cameraVisibilityFrame: number | null = null
+let planningResourceFocus: Set<string> | null = null
+let planningPlanFocusId = ''
 
 function asList(payload: unknown): Array<Record<string, unknown>> {
   if (Array.isArray(payload)) return payload as Array<Record<string, unknown>>
@@ -191,6 +318,7 @@ export function destroyShellViewer() {
   pickHandler?.destroy()
   pickHandler = null
   const viewer = shellViewer.value
+  clearSatelliteClockState(viewer && !viewer.isDestroyed() ? viewer : undefined)
   if (viewer && !viewer.isDestroyed()) viewer.destroy()
   shellViewer.value = null
   dataSources.length = 0
@@ -198,6 +326,8 @@ export function destroyShellViewer() {
   cacheData = []
   cacheTasks = []
   cacheIndicators = []
+  planningResourceFocus = null
+  planningPlanFocusId = ''
   clearHighlight()
   hasFittedView = false
 }
@@ -878,6 +1008,7 @@ function buildCacheSummary(kind: ShellFeatureKind, id: string): ShellSelected {
 
 
 async function clearSources(viewer: Viewer) {
+  clearSatelliteClockState(viewer)
   for (const ds of dataSources.splice(0)) {
     try {
       viewer.dataSources.remove(ds, true)
@@ -924,6 +1055,10 @@ function filteredSensors() {
   const t = shellFilters.sensorType.trim().toLowerCase()
   const st = shellFilters.sensorStatus.trim().toLowerCase()
   return cacheSensors.filter((item) => {
+    if (activeShellCenter === 'planning' && planningResourceFocus) {
+      const id = String(item.platformId ?? item.id ?? '')
+      if (!planningResourceFocus.has(id)) return false
+    }
     if (t) {
       const code = String(item.typeCode || item.typeName || '').toLowerCase()
       if (!code.includes(t)) return false
@@ -1054,6 +1189,11 @@ export async function reloadShellLayers(
   if (!viewer || viewer.isDestroyed()) return
   const center = centerFromPath(path)
   const preserveExisting = options?.preserveExisting === true
+  const routePlanId = String(query.planId ?? '')
+  if (center !== 'planning' || (planningPlanFocusId && planningPlanFocusId !== routePlanId)) {
+    planningResourceFocus = null
+    planningPlanFocusId = ''
+  }
   activeShellCenter = center
   const gen = ++reloadGeneration
   shellLoading.value = true
@@ -1220,6 +1360,7 @@ export async function reloadShellLayers(
     if (gen !== reloadGeneration) return
     recomputeAlerts()
     applyVisibility()
+    syncSatelliteClockState(viewer)
     updateSatelliteViewVisibility(viewer)
     if (!hasFittedView) {
       await flyToDataSources(viewer)
@@ -1286,6 +1427,7 @@ export async function rerenderShellLayers(fitView = true) {
     shellCounts.indicators = cacheIndicators.length
   }
   applyVisibility()
+  syncSatelliteClockState(viewer)
   updateSatelliteViewVisibility(viewer)
   if (fitView) await flyToDataSources(viewer)
 }
@@ -1606,10 +1748,32 @@ async function removeDataSourceByName(name: string) {
 
 /** 规划工作区：同时显示任务和传感资源。 */
 export async function showPlanningWorkspace(path = '/planning') {
+  planningResourceFocus = null
+  planningPlanFocusId = ''
+  shellFilters.taskId = ''
   await reloadShellLayers(path, {})
   setShellVisibility({ showSensors: true, showData: false, showTasks: true })
   await fitShellView()
   shellStatus.value = `规划工作台：任务 ${shellCounts.tasks} · 传感资源 ${shellCounts.sensors}`
+}
+
+/** 仅显示当前方案资源，避免同任务其他方案混入地图。 */
+export async function showPlanningPlanWorkspace(input: {
+  planId: string | number
+  taskId: string | number
+  resourceIds: Array<string | number>
+}) {
+  planningPlanFocusId = String(input.planId)
+  planningResourceFocus = new Set(input.resourceIds.map(String))
+  shellFilters.taskId = String(input.taskId)
+  await reloadShellLayers('/planning', {
+    taskId: String(input.taskId),
+    planId: String(input.planId),
+  })
+  setShellVisibility({ showSensors: true, showData: false, showTasks: true, showIndicators: true })
+  await fitShellView()
+  const resourceLabel = planningResourceFocus.size ? `资源 ${planningResourceFocus.size} 个` : '尚未配置资源'
+  shellStatus.value = `方案 #${input.planId}：${resourceLabel}`
 }
 
 /** 指标工作区：仅显示指标实例范围。 */

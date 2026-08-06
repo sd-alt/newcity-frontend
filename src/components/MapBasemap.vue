@@ -30,6 +30,11 @@ import {
   shellStatus,
   shellViewer,
   shellRightOpen,
+  satelliteClock,
+  satelliteClockMultipliers,
+  resetSatelliteClock,
+  setSatelliteClockMultiplier,
+  setSatelliteClockPlaying,
   toggleShellRight,
   type ShellFeatureKind,
 } from '../gis/mapShell'
@@ -47,8 +52,20 @@ defineProps<{ showHomeCards?: boolean }>()
 const route = useRoute()
 const router = useRouter()
 let host: HTMLDivElement | null = null
-const panel = ref<'none' | 'basemap' | 'legend' | 'layers'>('none')
+type MapFloatPanel = 'none' | 'basemap' | 'legend' | 'layers' | 'planning'
+type PlanningMapAction =
+  | 'tasks'
+  | 'candidates'
+  | 'basic'
+  | 'optimized'
+  | 'supplement'
+  | 'coverage'
+  | 'clear-links'
+  | 'clear-coverage'
+
+const panel = ref<MapFloatPanel>('none')
 const toolsExpanded = ref(false)
+const planningToolsVisible = computed(() => route.path === '/business' || route.path === '/planning')
 
 const basemapOptions: Array<{ key: BasemapKey; label: string }> = [
   { key: 'vector', label: '标准地图' },
@@ -83,10 +100,10 @@ const legendSections: Array<{ title: string; items: LegendItem[] }> = [
       { kind: 'task', label: '观测任务范围', color: '#0F3D66', shape: 'area' },
       { kind: 'indicator', label: '指标实例范围', color: '#BE123C', shape: 'area' },
       { kind: 'coverage', label: '资源覆盖范围', color: '#16A34A', shape: 'area' },
-      { kind: 'satellite', label: '卫星当前扫描足迹', color: '#38BDF8', shape: 'area' },
+      { kind: 'satellite', label: '预测幅宽覆盖（近似）', color: '#38BDF8', shape: 'area' },
       { kind: 'algorithm', label: '算法结果范围', color: '#C2410C', shape: 'area' },
       { kind: 'association', label: '资源关联', color: '#64748B', shape: 'line' },
-      { kind: 'satellite', label: '卫星实时轨道', color: '#38BDF8', shape: 'line' },
+      { kind: 'satellite', label: '卫星 TLE/SGP4 准实时轨道预测', color: '#38BDF8', shape: 'line' },
       { kind: 'uav', label: '无人机飞行轨迹', color: '#14B8A6', shape: 'line' },
     ],
   },
@@ -184,8 +201,12 @@ function goFullscreen() {
   if (document.fullscreenElement) void document.exitFullscreen()
   else void (el as HTMLElement).requestFullscreen?.()
 }
-function togglePanel(name: 'basemap' | 'legend' | 'layers') {
+function togglePanel(name: Exclude<MapFloatPanel, 'none'>) {
   panel.value = panel.value === name ? 'none' : name
+}
+
+function runPlanningMapAction(action: PlanningMapAction) {
+  window.dispatchEvent(new CustomEvent<PlanningMapAction>('newcity:planning-map-action', { detail: action }))
 }
 function activateTool(mode: MapToolMode) {
   panel.value = 'none'
@@ -206,6 +227,22 @@ function closeBubble() {
 }
 function toggleLayer(key: 'showSensors' | 'showData' | 'showTasks' | 'showIndicators', on: boolean) {
   setShellVisibility({ [key]: on })
+}
+
+function formatSatelliteClockTime(value: number | null) {
+  if (!Number.isFinite(value)) return '--'
+  return new Date(value as number).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+}
+
+function toggleSatelliteClock() {
+  setSatelliteClockPlaying(!satelliteClock.playing)
 }
 
 
@@ -459,6 +496,9 @@ function setHost(el: unknown) {
           <button type="button" class="map-tool" :class="{ active: panel === 'layers' }" title="业务图层" aria-label="业务图层" @click="togglePanel('layers')">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></svg>
           </button>
+          <button v-if="planningToolsVisible" type="button" class="map-tool" :class="{ active: panel === 'planning' }" title="规划上图工具" aria-label="规划上图工具" @click="togglePanel('planning')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="12" cy="18" r="2"/><path d="M8 8.5 10.5 16M16 8.5 13.5 16M8 7h8"/></svg>
+          </button>
         </div>
         <div class="map-tool-group" aria-label="辅助工具">
           <button type="button" class="map-tool" :class="{ active: panel === 'legend' }" title="查看图例" aria-label="查看图例" @click="togglePanel('legend')">
@@ -513,6 +553,32 @@ function setHost(el: unknown) {
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM14 4v16"/><path d="M17 9h.01M17 12h.01M17 15h.01"/></svg>
     </button>
 
+    <div v-if="satelliteClock.available" class="map-clock-controls" aria-label="卫星轨道模拟控制">
+      <div class="map-clock-heading">
+        <span>轨道模拟</span>
+        <time>{{ formatSatelliteClockTime(satelliteClock.currentTimeMs) }}</time>
+      </div>
+      <div class="map-clock-actions">
+        <button type="button" class="map-clock-button" :title="satelliteClock.playing ? '暂停' : '播放'" :aria-label="satelliteClock.playing ? '暂停' : '播放'" @click="toggleSatelliteClock">
+          <svg v-if="satelliteClock.playing" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>
+          <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg>
+        </button>
+        <button type="button" class="map-clock-button" title="回到当前" aria-label="回到当前" @click="resetSatelliteClock">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.34-5.66"/><path d="M4 5v6h6"/></svg>
+        </button>
+        <div class="map-clock-speeds" role="group" aria-label="播放速度">
+          <button
+            v-for="speed in satelliteClockMultipliers"
+            :key="speed"
+            type="button"
+            :class="{ active: satelliteClock.multiplier === speed }"
+            :aria-pressed="satelliteClock.multiplier === speed"
+            @click="setSatelliteClockMultiplier(speed)"
+          >{{ speed }}x</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="panel === 'basemap'" class="map-float-panel">
       <div class="map-float-title">底图切换</div>
       <button
@@ -544,6 +610,18 @@ function setHost(el: unknown) {
           <input type="checkbox" :checked="shellFilters.showIndicators" @change="toggleLayer('showIndicators', ($event.target as HTMLInputElement).checked)" />
           指标实例 <span class="muted">{{ shellCounts.indicators }}</span>
         </label>
+    </div>
+    <div v-if="panel === 'planning' && planningToolsVisible" class="map-float-panel map-planning-panel" aria-label="规划上图工具">
+      <div class="map-float-title">规划上图</div>
+      <button type="button" class="map-float-item" @click="runPlanningMapAction('tasks')">任务与资源</button>
+      <button type="button" class="map-float-item" @click="runPlanningMapAction('candidates')">候选资源</button>
+      <button type="button" class="map-float-item" @click="runPlanningMapAction('basic')">基础关联</button>
+      <button type="button" class="map-float-item" @click="runPlanningMapAction('optimized')">优化关联</button>
+      <button type="button" class="map-float-item" @click="runPlanningMapAction('supplement')">增补关联</button>
+      <button type="button" class="map-float-item" @click="runPlanningMapAction('coverage')">覆盖与缺口</button>
+      <div class="map-planning-separator" />
+      <button type="button" class="map-float-item" @click="runPlanningMapAction('clear-links')">清除关联线</button>
+      <button type="button" class="map-float-item" @click="runPlanningMapAction('clear-coverage')">清除覆盖</button>
     </div>
     <div v-if="panel === 'legend'" class="map-float-panel map-legend-panel">
       <div class="map-float-title">图例</div>

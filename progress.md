@@ -2067,3 +2067,30 @@
 ### Notes
 - `progress.md`：追加远端联调结果和验证边界。
 - 回滚方式：执行本轮日志提交的 `git revert <本轮日志提交>`；不涉及业务代码、后端接口或数据库数据。
+## 2026-08-06 - Task: 按流程收口提示词优化规划工作台与动态卫星地图
+
+### What was done
+- 完成业务中心六阶段与页面局部步骤收口，统一任务/方案上下文、全局搜索深链和方案地图聚焦；地图只显示当前方案资源，避免同任务其他方案混入。
+- 对历史兼容或未计算评估结果显示明确空态，不把兼容字段的 0 当作真实覆盖率或评价结果，也不生成误导性覆盖图层。
+- 接入后端轨迹数据的 Cesium 时间采样、历史实线/未来虚线、TLE/SGP4 来源标识、预测幅宽近似覆盖和可播放卫星时钟控件。
+- 更新前端说明，记录方案资源降级边界、未计算状态边界及轨迹时钟使用约束。
+
+### Testing
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过，Vite 转换 112 个模块并生成生产产物。
+- `npm.cmd run test:e2e -- --workers=1`：13/13 通过。
+- `git diff --check`：通过；仅有 Git 关于 LF/CRLF 的提示，无空白错误。
+- 已在 1440×900、1024×768 视口检查地图与右侧工作区无页面级横向滚动或相互遮挡；轨迹模拟数据下时钟控件出现且 60x 播放时间推进。
+
+### Notes
+- `src/components/AppLayout.vue`：扩展方案名、方案 ID、任务名和任务 ID搜索，并安全恢复深链。
+- `src/components/BusinessStageProgress.vue`：统一六阶段进度展示。
+- `src/components/MapBasemap.vue`：增加地图联动工具与卫星时钟播放控制。
+- `src/components/PlanEvaluationSummary.vue`：展示真实计算状态与未计算空态。
+- `src/components/StageStepProgress.vue`：收口当前阶段局部步骤。
+- `src/gis/mapLayers.ts`：接入时间采样轨迹、历史/未来线型、TLE/SGP4标签和预测幅宽近似覆盖。
+- `src/gis/mapShell.ts`：按当前方案资源聚焦地图，并管理 Cesium Clock 状态。
+- `src/pages/PlanningCenter.vue`：统一 `selectedPlanId`、方案深链、资源选择降级和评估状态边界。
+- `src/styles.css`：补充地图工具和时钟控件的紧凑样式。
+- `docs/四中心与智能任务规划前端说明.md`：同步方案资源、计算状态和轨迹模拟规则。
+- 回滚方式：执行本轮提交的 `git revert <commit>`；若尚未提交，可按上述文件逐项丢弃本轮改动，不涉及后端接口、数据库结构或业务数据。

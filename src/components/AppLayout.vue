@@ -119,9 +119,17 @@ const detailOptions = ref({
 })
 const lastTabByCenter = ref<Record<string, string>>({})
 
-const searchGroups = ref<
-  Array<{ type: string; items: Array<{ id: string; title: string; subtitle: string; route: string; tab?: string }> }>
->([])
+type SearchItem = {
+  id: string
+  title: string
+  subtitle: string
+  route: string
+  tab?: string
+  taskId?: string
+  planId?: string
+}
+
+const searchGroups = ref<Array<{ type: string; items: SearchItem[] }>>([])
 
 type SubItem = { key: string; label: string; to: string; tab?: string }
 type CenterItem = {
@@ -729,11 +737,12 @@ async function runSearch() {
   try {
     const groups: typeof searchGroups.value = []
     const qstr = `?keyword=${encodeURIComponent(q)}`
-    const [sensors, data, tasks, instances] = await Promise.allSettled([
+    const [sensors, data, tasks, instances, plans] = await Promise.allSettled([
       api.listPlatforms(qstr),
       api.listObservationData(qstr),
       api.listTasks(),
       api.listInstances(qstr),
+      api.listPlans(),
     ])
 
     function rows(r: PromiseSettledResult<any>): any[] {
@@ -783,6 +792,32 @@ async function runSearch() {
       }))
     if (taskItems.length) groups.push({ type: '观测任务', items: taskItems })
 
+    const taskNameById = new Map(
+      rows(tasks).map((item: any) => [String(item.id), String(item.name || item.taskName || item.code || '')]),
+    )
+    const planItems = rows(plans)
+      .filter((x: any) => {
+        const taskId = String(x.taskId ?? x.task_id ?? '')
+        const taskName = taskNameById.get(taskId) || ''
+        const hay = `${x.name || ''} ${x.id || ''} ${taskName} ${taskId}`.toLowerCase()
+        return hay.includes(q.toLowerCase())
+      })
+      .slice(0, 8)
+      .map((x: any) => {
+        const taskId = String(x.taskId ?? x.task_id ?? '')
+        const taskName = taskNameById.get(taskId)
+        return {
+          id: `plan-${String(x.id)}`,
+          title: String(x.name || `方案 #${x.id}`),
+          subtitle: `方案 #${x.id}${taskId ? ` · 任务 #${taskId}${taskName ? ` ${taskName}` : ''}` : ''}`,
+          route: '/business',
+          tab: 'plans',
+          taskId: taskId || undefined,
+          planId: String(x.id),
+        }
+      })
+    if (planItems.length) groups.push({ type: '方案', items: planItems })
+
     const indItems = rows(instances)
       .slice(0, 8)
       .map((x: any) => ({
@@ -801,20 +836,18 @@ async function runSearch() {
   }
 }
 
-async function openSearchItem(item: {
-  id: string
-  title: string
-  subtitle: string
-  route: string
-  tab?: string
-}) {
+async function openSearchItem(item: SearchItem) {
   searchOpen.value = false
-  await router.push({ path: item.route, query: item.tab ? { tab: item.tab } : {} })
+  const query: Record<string, string> = {}
+  if (item.tab) query.tab = item.tab
+  if (item.taskId) query.taskId = item.taskId
+  if (item.planId) query.planId = item.planId
+  await router.push({ path: item.route, query })
   await new Promise((r) => setTimeout(r, 150))
   let ok = false
   if (item.route === '/resources/sensors') ok = await selectShellFeature('sensor', item.id, { openBubble: true, fly: true })
   else if (item.route === '/resources/data') ok = await selectShellFeature('data', item.id, { openBubble: true, fly: true })
-  else if (item.route === '/business') ok = await selectShellFeature('task', item.id, { openBubble: true, fly: true })
+  else if (item.route === '/business' && item.taskId) ok = await selectShellFeature('task', item.taskId, { openBubble: true, fly: true })
   else if (item.route === '/tasks') ok = await selectShellFeature('indicator', item.id, { openBubble: true, fly: true })
   openShellRight()
   if (!ok && item.id) {
@@ -823,14 +856,14 @@ async function openSearchItem(item: {
         ? 'sensor'
         : item.route === '/resources/data'
           ? 'data'
-          : item.route === '/business'
-            ? 'task'
+            : item.route === '/business'
+            ? (item.taskId ? 'task' : 'unknown')
             : item.route === '/tasks'
               ? 'indicator'
               : 'unknown'
     shellSelected.value = {
       kind: kind as any,
-      id: item.id,
+      id: item.taskId || item.planId || item.id,
       name: item.title,
       description: item.subtitle || ('ID: ' + item.id),
       status: item.subtitle || '',

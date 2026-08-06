@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import * as api from '../api/endpoints'
 import {
@@ -11,7 +11,7 @@ import {
   setShellVisibility,
   shellCounts,
   shellSelected,
-  shellStatus,
+  showPlanningPlanWorkspace,
   showPlanningWorkspace,
 } from '../gis/mapShell'
 import { canByStatus, errMessage, isoNow, pickId } from '../utils/errors'
@@ -23,6 +23,7 @@ import CardPager from '../components/CardPager.vue'
 import ContextGuide from '../components/ContextGuide.vue'
 import BusinessStageProgress from '../components/BusinessStageProgress.vue'
 import StageStepProgress from '../components/StageStepProgress.vue'
+import PlanEvaluationSummary from '../components/PlanEvaluationSummary.vue'
 import {
   BUSINESS_STAGES,
   preserveWorkflowQuery,
@@ -33,6 +34,7 @@ import {
   type WorkflowStepKey,
 } from '../features/businessWorkflow'
 import { tablePager as vTablePager } from '../utils/tablePager'
+import { toast } from '../utils/toast'
 
 type StepKey = import('../features/businessWorkflow').LegacyStepKey
 
@@ -87,16 +89,6 @@ const tabs = [
   { key: 'plans', label: '方案管理' },
 ]
 type BusinessRouteKey = 'tasks' | 'candidates' | 'evaluation' | 'flow' | 'plans' | 'execution'
-const currentBusinessPage = computed(() => {
-  const copy: Record<string, { eyebrow: string; title: string; summary: string }> = {
-    tasks: { eyebrow: '业务中心', title: '业务需求与任务入口', summary: '查看任务需求，并按真实进度继续处理。' },
-    candidates: { eyebrow: '业务中心', title: '资源选择', summary: '筛选候选资源，查看匹配与排除原因。' },
-    evaluation: { eyebrow: '业务中心', title: '能力评估', summary: '比较候选资源的能力、覆盖和任务满足度。' },
-    flow: { eyebrow: '业务中心', title: '资源配置', summary: '组合已选资源，完成关联、补充与配置检查。' },
-    plans: { eyebrow: '业务中心', title: '方案管理', summary: '查看方案版本、评价结果和发布状态。' },
-  }
-  return copy[tab.value] || copy.tasks!
-})
 const flowFormPage = ref(1)
 const flowFormPages = ['任务与时间', '指标与尺度', '空间与约束', '评分权重']
 const planSectionPage = ref(1)
@@ -108,12 +100,141 @@ const instances = ref<Record<string, unknown>[]>([])
 const scales = ref<Record<string, unknown>[]>([])
 const tasks = ref<Record<string, unknown>[]>([])
 const plans = ref<Record<string, unknown>[]>([])
+const selectedPlanId = ref<string>('')
 type PlanHistoryRow = { id: number | string; version: number; changeType?: string; reason?: string; resourceCount?: number; createdAt?: string }
 function planHistory(value: unknown): PlanHistoryRow[] {
   return Array.isArray(value) ? value.filter((item): item is PlanHistoryRow => Boolean(item && typeof item === 'object' && 'id' in item && 'version' in item)) : []
 }
 function planVersion(value: unknown) { return Number(value || 1) }
 const lastCopiedPlanId = ref<string | number | null>(null)
+
+type PlanMapResource = {
+  id: string
+  name: string
+  type: string
+}
+type PlanResourceSelection = {
+  resources: PlanMapResource[]
+  ids: string[]
+  source: 'configured' | 'candidate' | 'none'
+}
+
+function planResourceSelection(value: unknown): PlanResourceSelection {
+  const plan = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const configured = Array.isArray(plan.configuredResources) ? plan.configuredResources : []
+  if (configured.length) {
+    const resources = configured
+      .map((item) => item && typeof item === 'object' ? item as Record<string, unknown> : {})
+      .filter((item) => String(item.resourceType || '').toLowerCase() === 'sensor')
+      .map((item) => ({
+        id: String(item.resourceId ?? ''),
+        name: String(item.resourceName || item.resourceId || '未命名资源'),
+        type: String(item.resourceType || 'sensor'),
+      }))
+      .filter((item) => item.id !== '')
+    const unique = new Map(resources.map((item) => [item.id, item]))
+    return { resources: [...unique.values()], ids: [...unique.keys()], source: 'configured' }
+  }
+  const matches = Array.isArray(plan.resourceMatches) ? plan.resourceMatches : []
+  const resources = matches
+    .map((item) => item && typeof item === 'object' ? item as Record<string, unknown> : {})
+    .filter((item) => item.matched !== false)
+    .map((item) => ({
+      id: String(item.platformId ?? item.sensorId ?? ''),
+      name: String(item.platformName || item.platformIdentifier || item.platformId || '未命名资源'),
+      type: String(item.platformType || 'sensor'),
+    }))
+    .filter((item) => item.id !== '')
+  const unique = new Map(resources.map((item) => [item.id, item]))
+  return {
+    resources: [...unique.values()],
+    ids: [...unique.keys()],
+    source: unique.size ? 'candidate' : 'none',
+  }
+}
+
+const selectedPlan = computed(() =>
+  plans.value.find((plan) => String(plan.id ?? '') === String(selectedPlanId.value)) || null,
+)
+const selectedPlanRecord = computed(() => {
+  const result = planResult.value && typeof planResult.value === 'object'
+    ? planResult.value as Record<string, unknown>
+    : {}
+  const nested = result.plan && typeof result.plan === 'object' ? result.plan as Record<string, unknown> : {}
+  return Object.keys(nested).length
+    ? { ...(selectedPlan.value || {}), ...nested }
+    : selectedPlan.value || {}
+})
+const selectedPlanResources = computed(() => planResourceSelection(selectedPlanRecord.value))
+const selectedPlanCalculationStatus = computed(() => {
+  const result = planResult.value && typeof planResult.value === 'object'
+    ? planResult.value as Record<string, unknown>
+    : {}
+  const nested = result.plan && typeof result.plan === 'object'
+    ? result.plan as Record<string, unknown>
+    : {}
+  const plan = selectedPlan.value || {}
+  return String(
+    result.calculationStatus ??
+      result.calculation_status ??
+      nested.calculationStatus ??
+      nested.calculation_status ??
+      plan.calculationStatus ??
+      plan.calculation_status ??
+      '',
+  ).toLowerCase()
+})
+const selectedPlanUncalculated = computed(() =>
+  ['legacy_unavailable', 'not_calculated', 'uncalculated'].includes(selectedPlanCalculationStatus.value),
+)
+const evaluationUncalculated = computed(() => {
+  const result = evalResult.value && typeof evalResult.value === 'object'
+    ? evalResult.value as Record<string, unknown>
+    : {}
+  const nested = result.plan && typeof result.plan === 'object'
+    ? result.plan as Record<string, unknown>
+    : {}
+  const status = String(
+    result.calculationStatus ??
+      result.calculation_status ??
+      nested.calculationStatus ??
+      nested.calculation_status ??
+      '',
+  ).toLowerCase()
+  return ['legacy_unavailable', 'not_calculated', 'uncalculated'].includes(status)
+})
+
+function planResourceCounts(value: unknown) {
+  const selection = planResourceSelection(value)
+  const counts: Record<'satellite' | 'uav' | 'station', number> = { satellite: 0, uav: 0, station: 0 }
+  let known = false
+  for (const resource of selection.resources) {
+    const type = resource.type.toLowerCase()
+    if (type.includes('satellite') || type.includes('卫星')) { counts.satellite += 1; known = true }
+    else if (type.includes('uav') || type.includes('drone') || type.includes('无人机')) { counts.uav += 1; known = true }
+    else if (type.includes('station') || type.includes('ground') || type.includes('地面')) { counts.station += 1; known = true }
+  }
+  return {
+    satellite: known ? counts.satellite : '-',
+    uav: known ? counts.uav : '-',
+    station: known ? counts.station : '-',
+    total: selection.resources.length,
+    source: selection.source,
+  }
+}
+
+function planEvaluationLabel(value: unknown) {
+  const plan = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const status = String(plan.calculationStatus ?? plan.calculation_status ?? '').toLowerCase()
+  if (['legacy_unavailable', 'not_calculated', 'uncalculated'].includes(status)) return '尚未计算'
+  const evaluation = plan.evaluationSummary || plan.evaluation
+  if (evaluation && typeof evaluation === 'object') {
+    const overall = (evaluation as Record<string, unknown>).overallSatisfied
+    if (overall === true) return '满足任务'
+    if (overall === false) return '存在缺口'
+  }
+  return '未提供'
+}
 
 function sortPlans(list: Record<string, unknown>[]) {
   const rank = (status: unknown) => {
@@ -220,6 +341,12 @@ const pending = ref(false)
 const error = ref<string | null>(null)
 const message = ref<string | null>(null)
 
+watch(message, (value) => {
+  if (!value) return
+  toast.success(value)
+  message.value = null
+})
+
 const stepIndex = computed(() => STEP_ORDER.indexOf(currentStep.value))
 const unlockedStepIndex = computed(() => {
   let maxDoneIndex = -1
@@ -284,6 +411,7 @@ const reverseSummary = computed(() => {
   }
 })
 const evaluationSummary = computed(() => {
+  if (evaluationUncalculated.value) return null
   const raw = evalResult.value as Record<string, unknown> | null
   if (!raw || typeof raw !== 'object') return null
   const overall = (raw.overallCoverage || {}) as Record<string, unknown>
@@ -292,6 +420,7 @@ const evaluationSummary = computed(() => {
   const relationSummary = (raw.relationSummary || {}) as Record<string, unknown>
   const overallCoveragePercent = Number(overall.coveragePercent || 0)
   return {
+    kind: 'planning' as const,
     indicatorCount: Number(raw.indicatorCount || 0),
     satisfiedCount: Number(raw.satisfiedCount || 0),
     overallSatisfied: Boolean(raw.overallSatisfied),
@@ -339,7 +468,6 @@ function evaluationCoverage(value: unknown) {
 }
 
 const hasTask = computed(() => taskId.value != null)
-const planningMapAction = ref<'tasks' | 'candidates' | 'basic' | 'optimized' | 'supplement' | 'coverage'>('tasks')
 const canEditDraft = computed(
   () => taskId.value != null && (taskStatus.value === '' || taskStatus.value === 'draft' || taskStatus.value === 'created'),
 )
@@ -368,6 +496,8 @@ async function setTab(key: string) {
   q.tab = key
   // 刷新或地图跳转时，保留当前任务 ID 在 URL 中。
   if (taskId.value != null) q.taskId = String(taskId.value)
+  if (key === 'plans' && selectedPlanId.value) q.planId = selectedPlanId.value
+  else if (key !== 'plans') delete q.planId
   await router.replace({ path: route.path, query: q })
 }
 async function navigateToStep(step: StepKey) {
@@ -421,10 +551,6 @@ async function viewTaskOnMap(item: Record<string, unknown>) {
 async function viewTaskExecution(item: Record<string, unknown>) {
   await selectTask(item.id)
   await goBusinessRoute('execution')
-}
-async function openEvaluationFlow() {
-  currentStep.value = 'evaluate'
-  await setTab('plans')
 }
 function syncTab() {
   const t = route.query.tab
@@ -840,6 +966,7 @@ async function basicAssociation() {
     // 关联后同步最新方案匹配，便于地图连线与方案管理
     const planRow = plans.value.find((pl) => String(pl.taskId) === String(taskId.value))
     if (planRow?.id != null) {
+      selectedPlanId.value = String(planRow.id)
       try {
         const res = await api.getAssociationResult(String(planRow.id))
         planResult.value = res.data
@@ -873,6 +1000,7 @@ async function optimizeAssociation() {
     await loadLists()
     const planRow = plans.value.find((pl) => String(pl.taskId) === String(taskId.value))
     if (planRow?.id != null) {
+      selectedPlanId.value = String(planRow.id)
       try {
         const ar = await api.getAssociationResult(String(planRow.id))
         planResult.value = ar.data
@@ -934,6 +1062,7 @@ async function supplementAssociation() {
     await loadLists()
     const planRow = plans.value.find((pl) => String(pl.taskId) === String(taskId.value))
     if (planRow?.id != null) {
+      selectedPlanId.value = String(planRow.id)
       try {
         const ar = await api.getAssociationResult(String(planRow.id))
         planResult.value = ar.data
@@ -1080,14 +1209,16 @@ function inferStepFromPlans(taskPlans: Record<string, unknown>[], status: string
   return inferStepFromStatus(status)
 }
 
-async function selectTask(id: unknown) {
+async function selectTask(id: unknown, opts?: { planId?: string; silent?: boolean }) {
   const tid = Number(id)
   if (Number.isFinite(tid) === false) return
   taskId.value = tid
+  selectedPlanId.value = opts?.planId ? String(opts.planId) : ''
   setLastTaskId(tid)
   reverseResult.value = null
   evalResult.value = null
   outputResult.value = null
+  planResult.value = null
   candidateRows.value = []
   excludedRows.value = []
   candidateMeta.value = null
@@ -1177,17 +1308,21 @@ async function selectTask(id: unknown) {
       query[key] = Array.isArray(value) ? String(value[0] || '') : String(value)
     }
     query.taskId = String(tid)
+    if (opts?.planId) query.planId = String(opts.planId)
+    else delete query.planId
     await router.replace({ path: route.path, query })
-    const summary =
-      '已选择任务 #' +
-      tid +
-      ' · 状态 ' +
-      (taskStatus.value || '-') +
-      ' · 方案 ' +
-      taskPlans.length +
-      ' · 下一步 ' +
-      inferred
-    message.value = summary
+    if (!opts?.silent) {
+      const summary =
+        '已选择任务 #' +
+        tid +
+        ' · 状态 ' +
+        (taskStatus.value || '-') +
+        ' · 方案 ' +
+        taskPlans.length +
+        ' · 下一步 ' +
+        inferred
+      message.value = summary
+    }
   } catch (err) {
     error.value = errMessage(err, '加载任务失败')
   }
@@ -1222,6 +1357,7 @@ async function openOnMap() {
 
 async function resetForm() {
   taskId.value = null
+  selectedPlanId.value = ''
   taskStatus.value = ''
   currentStep.value = 'create'
   doneSteps.value = new Set()
@@ -1256,7 +1392,7 @@ async function resetForm() {
   // 清理 URL 中的 taskId，避免地图跳转或监听逻辑重复选中任务。
   const q: Record<string, string> = {}
   for (const [k, v] of Object.entries(route.query)) {
-    if (v == null || k === 'taskId') continue
+    if (v == null || k === 'taskId' || k === 'planId') continue
     q[k] = Array.isArray(v) ? String(v[0] ?? '') : String(v)
   }
   q.tab = 'tasks'
@@ -1264,59 +1400,90 @@ async function resetForm() {
   await router.replace({ path: route.path, query: q })
 }
 
-async function loadPlanResult(planId: unknown, opts?: { silent?: boolean }) {
+function planAssociationMode(value: unknown): 'basic' | 'optimized' | 'supplement' {
+  const plan = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const raw = [plan.planType, plan.status, plan.associationMode, plan.mode, plan.type]
+    .map((item) => String(item || '').toLowerCase())
+    .join(' ')
+  if (raw.includes('optim') || raw.includes('优化')) return 'optimized'
+  if (raw.includes('supple') || raw.includes('增补') || raw.includes('complete')) return 'supplement'
+  return 'basic'
+}
+
+async function loadPlanResult(planId: unknown, opts?: { silent?: boolean; updateRoute?: boolean }) {
+  const pid = String(planId ?? '')
+  if (!pid) return
   try {
-    const res = await api.getAssociationResult(String(planId))
+    const plan = plans.value.find((x) => String(x.id) === pid)
+    const rawTaskId = plan ? (plan.taskId ?? plan.task_id) : taskId.value
+    const tid = rawTaskId == null ? Number.NaN : Number(rawTaskId)
+    if (Number.isFinite(tid) && taskId.value !== tid) {
+      await selectTask(tid, { planId: pid, silent: true })
+    }
+    selectedPlanId.value = pid
+    const res = await api.getAssociationResult(pid)
     planResult.value = res.data
-    const plan = plans.value.find((x) => String(x.id) === String(planId))
-    const tid = Number(plan?.taskId ?? plan?.task_id ?? taskId.value)
-    if (Number.isFinite(tid)) {
-      taskId.value = tid
-      setLastTaskId(tid)
-    }
-    try {
-      await showPlanningWorkspace('/planning')
-    } catch {
-      /* 地图操作为可选步骤 */
-    }
-    const planObj = (planResult.value as Record<string, unknown> | null) || {}
-    const nested = (planObj.plan as Record<string, unknown> | undefined) || {}
-    const rawType = String(
-      planObj.planType || nested.planType || plan?.planType || plan?.status || '',
-    ).toLowerCase()
-    const mode: 'basic' | 'optimized' | 'supplement' =
-      rawType.includes('optim') || rawType.includes('优化')
-        ? 'optimized'
-        : rawType.includes('supple') || rawType.includes('增补')
-          ? 'supplement'
-          : 'basic'
-    try {
-      await showAssociationOnMap(mode, { silent: !!opts?.silent })
-      if (taskId.value != null) {
-        await selectShellFeature('task', String(taskId.value), { openBubble: false, fly: true })
+    const planRecord = selectedPlanRecord.value
+    const selection = planResourceSelection(planRecord)
+    const mode = planAssociationMode(planRecord)
+    if (Number.isFinite(tid) && taskId.value != null) {
+      try {
+        await showAssociationOnMap(mode, { silent: true })
+      } catch {
+        /* 地图操作为可选步骤 */
       }
-    } catch {
-      /* 地图操作为可选步骤 */
     }
-    const modeLabel = mode === 'basic' ? '基础' : mode === 'optimized' ? '优化' : '增补'
-    if (!opts?.silent) {
-      message.value = '已加载方案 #' + planId + ' 并同步' + modeLabel + '关联上图'
+    if (selectedPlanUncalculated.value) {
+      await clearPlanningCoverageOnMap()
+      if (!opts?.silent) {
+        message.value = `方案 #${pid} 尚未执行真实规划计算，地图仅显示${selection.source === 'candidate' ? '候选匹配' : '已配置资源'}`
+      }
+    } else if (!opts?.silent) {
+      const modeLabel = mode === 'basic' ? '基础' : mode === 'optimized' ? '优化' : '增补'
+      message.value = `已加载方案 #${pid} 并同步${modeLabel}关联上图`
+    }
+    if (opts?.updateRoute !== false) {
+      const query: Record<string, string> = {}
+      for (const [key, value] of Object.entries(route.query)) {
+        if (value == null) continue
+        query[key] = Array.isArray(value) ? String(value[0] ?? '') : String(value)
+      }
+      query.tab = 'plans'
+      query.planId = pid
+      if (Number.isFinite(tid)) query.taskId = String(tid)
+      await router.replace({ path: route.path, query })
     }
   } catch (err) {
     error.value = errMessage(err, '方案结果加载失败')
   }
 }
 
-async function onPlanRowClick(p: Record<string, unknown>) {
-  const tid = Number(p.taskId ?? p.task_id)
-  if (Number.isFinite(tid)) {
-    taskId.value = tid
-    setLastTaskId(tid)
-    await locateTaskOnMap(String(tid))
+async function selectPlan(planId: unknown, opts?: { silent?: boolean; updateRoute?: boolean }) {
+  const pid = String(planId ?? '')
+  if (!pid) return
+  const plan = plans.value.find((item) => String(item.id ?? '') === pid)
+  if (!plan) {
+    error.value = '方案不存在或已无权访问'
+    return
   }
-  await loadPlanResult(p.id)
+  selectedPlanId.value = pid
+  const tid = Number(plan.taskId ?? plan.task_id)
+  if (Number.isFinite(tid) && taskId.value !== tid) {
+    await selectTask(tid, { planId: pid, silent: true })
+  }
+  if (opts?.updateRoute !== false) {
+    const query: Record<string, string> = {}
+    for (const [key, value] of Object.entries(route.query)) {
+      if (value == null) continue
+      query[key] = Array.isArray(value) ? String(value[0] ?? '') : String(value)
+    }
+    query.tab = 'plans'
+    query.planId = pid
+    if (Number.isFinite(tid)) query.taskId = String(tid)
+    await router.replace({ path: route.path, query })
+  }
+  await loadPlanResult(pid, { silent: opts?.silent, updateRoute: false })
 }
-
 
 function planById(planId: unknown) {
   return plans.value.find((p) => String(p.id) === String(planId)) || null
@@ -1639,12 +1806,7 @@ function planStatusLabel(status: unknown) {
 }
 
 function isPlanRowSelected(p: Record<string, unknown>) {
-  if (taskId.value != null && String(p.taskId ?? p.task_id ?? '') === String(taskId.value)) return true
-  const pr = planResult.value as Record<string, unknown> | null
-  if (!pr) return false
-  const planObj = (pr.plan || pr) as Record<string, unknown>
-  const pid = planObj.id ?? planObj.planId ?? pr.id ?? pr.planId
-  return pid != null && String(pid) === String(p.id)
+  return String(p.id ?? '') === String(selectedPlanId.value)
 }
 
 
@@ -1659,9 +1821,11 @@ async function ensureListsLoaded() {
 }
 
 onMounted(async () => {
+  window.addEventListener('newcity:planning-map-action', onPlanningMapAction)
   syncTab()
   await ensureListsLoaded()
   await applyRouteTaskQuery()
+  await applyRoutePlanQuery()
   applyRouteCoordHint()
   // 无路由指定任务时，优先载入演示故事线任务，便于直接走规划
   if (tab.value === 'flow' && taskId.value == null && user.value && tasks.value.length) {
@@ -1681,14 +1845,36 @@ async function applyRouteTaskQuery() {
   if (raw == null || raw === '') return
   const id = Number(Array.isArray(raw) ? raw[0] : raw)
   if (!Number.isFinite(id)) return
-  // setTab 写入相同 taskId 时，避免重复进入处理逻辑。
-  if (taskId.value === id && taskStatus.value) return
+  const rawPlan = route.query.planId
+  const planId = rawPlan == null || rawPlan === ''
+    ? undefined
+    : String(Array.isArray(rawPlan) ? rawPlan[0] : rawPlan)
+  // setTab 写入相同 taskId 时，避免重复进入处理逻辑；方案深链仍需继续恢复。
+  if (taskId.value === id && taskStatus.value) {
+    if (planId && selectedPlanId.value !== planId) await applyRoutePlanQuery()
+    return
+  }
   try {
-    await selectTask(id)
-    message.value = '已根据地址载入任务 #' + id
+    await selectTask(id, { planId, silent: true })
+    if (!planId) message.value = '已根据地址载入任务 #' + id
   } catch {
     /* 可选步骤 */
   }
+}
+
+async function applyRoutePlanQuery() {
+  const raw = route.query.planId
+  if (raw == null || raw === '') return
+  const planId = String(Array.isArray(raw) ? raw[0] : raw)
+  const plan = plans.value.find((item) => String(item.id ?? '') === planId)
+  if (!plan) return
+  const tid = Number(plan.taskId ?? plan.task_id)
+  if (Number.isFinite(tid) && taskId.value !== tid) {
+    await selectTask(tid, { planId, silent: true })
+  } else {
+    selectedPlanId.value = planId
+  }
+  await loadPlanResult(planId, { silent: true, updateRoute: false })
 }
 
 function applyRouteCoordHint() {
@@ -1737,7 +1923,12 @@ watch(() => route.query.tab, () => {
     void loadEvaluationResult()
   }
 })
+
+onBeforeUnmount(() => {
+  window.removeEventListener('newcity:planning-map-action', onPlanningMapAction)
+})
 watch(() => route.query.taskId, () => { void applyRouteTaskQuery() })
+watch(() => route.query.planId, () => { void applyRoutePlanQuery() })
 watch(instanceId, () => { syncFromSelectedInstance() })
 watch(taskId, () => {
   if (tab.value === 'evaluation' && taskId.value != null) void loadEvaluationResult()
@@ -1848,179 +2039,41 @@ async function showAssociationOnMap(mode: 'basic' | 'optimized' | 'supplement', 
     error.value = '请先选择任务'
     return
   }
-  const label0 =
-    mode === 'basic' ? '基础关联(蓝)' : mode === 'optimized' ? '优化关联(绿)' : '增补关联(橙)'
-  if (!opts?.silent) message.value = `正在绘制${label0}…`
+  const plan = selectedPlanRecord.value
+  const planId = String(selectedPlanId.value || '')
+  const planTaskId = plan.taskId ?? plan.task_id
+  if (!planId || planTaskId == null || String(planTaskId) !== String(taskId.value)) {
+    error.value = '请先在方案管理中选择当前任务的方案'
+    return
+  }
+  const selection = planResourceSelection(plan)
+  const linkMode = selection.source === 'candidate' ? 'candidate' as const : mode
+  const label = selection.source === 'candidate'
+    ? '候选匹配'
+    : mode === 'basic' ? '基础关联(蓝)' : mode === 'optimized' ? '优化关联(绿)' : '增补关联(橙)'
+  if (!opts?.silent) message.value = `正在绘制${label}…`
   error.value = null
-  let matches: Array<Record<string, unknown>> = []
-
-  const modeHint: Record<string, string[]> = {
-    basic: ['basic', 'base', 'foundation', '基础'],
-    optimized: ['optim', 'optimized', 'optimize', '优化'],
-    supplement: ['supple', 'supplement', 'augment', '增补'],
+  try {
+    await showPlanningPlanWorkspace({ planId, taskId: taskId.value, resourceIds: selection.ids })
+  } catch {
+    /* 地图操作为可选步骤 */
   }
-  const hints = modeHint[mode] || []
-
-  const planTypeMatches = (planLike: Record<string, unknown>) => {
-    // 后端优化/增补多写在 status，planType 常仍为 basic
-    const raw = [
-      planLike.planType,
-      planLike.status,
-      planLike.associationMode,
-      planLike.mode,
-      planLike.type,
-    ]
-      .map((x) => String(x || '').toLowerCase())
-      .join(' ')
-    if (!raw.trim()) return true
-    return hints.some((h) => raw.includes(h.toLowerCase()))
-  }
-
-  // 优先使用本会话优化/增补结果（含 selectedResourceIds）
-  if (mode === 'optimized' && lastOptLinks.value.length) {
-    matches = lastOptLinks.value.slice()
-  } else if (mode === 'supplement' && lastSupLinks.value.length) {
-    matches = lastSupLinks.value.slice()
-  }
-
-  const collectMatches = (rm: unknown, planLike: Record<string, unknown> | null = null) => {
-    if (planLike && !planTypeMatches(planLike)) return
-    if (!Array.isArray(rm)) return
-    for (const row of rm as Array<Record<string, unknown>>) {
-      // 只保留已匹配的资源。
-      if (row.matched === false) continue
-      const rowMode = String(row.mode || row.associationMode || row.planType || '').toLowerCase()
-      if (rowMode && !hints.some((h) => rowMode.includes(h.toLowerCase()))) continue
-      matches.push(row)
-    }
-  }
-
-  const pr = planResult.value as Record<string, unknown> | null
-  if (!matches.length && pr) {
-    const planObj = (pr.plan || pr) as Record<string, unknown>
-    collectMatches(planObj.resourceMatches, planObj)
-    collectMatches(pr.resourceMatches, pr)
-    const planList = Array.isArray(pr.plans) ? (pr.plans as Array<Record<string, unknown>>) : []
-    for (const pl of planList) collectMatches(pl.resourceMatches, pl)
-  }
-
-  if (!matches.length) {
-    for (const pl of plans.value) {
-      if (String(pl.taskId) !== String(taskId.value)) continue
-      collectMatches(pl.resourceMatches, pl)
-    }
-  }
-
-  // 列表无嵌套匹配时，优先拉取与当前 mode 匹配的方案结果
-  if (!matches.length) {
-    const taskPlans = plans.value.filter((pl) => String(pl.taskId) === String(taskId.value))
-    const ranked = [...taskPlans].sort((a, b) => {
-      const score = (pl: Record<string, unknown>) => {
-        const t = String(pl.planType || pl.status || pl.associationMode || pl.mode || pl.type || '').toLowerCase()
-        if (mode === 'basic' && (t.includes('basic') || t.includes('base') || t.includes('基础') || !t)) return 2
-        if (mode === 'optimized' && (t.includes('optim') || t.includes('优化'))) return 2
-        if (mode === 'supplement' && (t.includes('supple') || t.includes('增补') || t.includes('complete'))) return 2
-        return 0
-      }
-      return score(b) - score(a)
-    })
-    for (const planRow of ranked) {
-      if (planRow?.id == null) continue
-      try {
-        const res = await api.getAssociationResult(String(planRow.id))
-        planResult.value = res.data
-        const data = res.data as Record<string, unknown>
-        const planObj = (data.plan || data) as Record<string, unknown>
-        collectMatches(planObj.resourceMatches, planObj)
-        collectMatches(data.resourceMatches, data)
-        if (matches.length) break
-      } catch {
-        /* 尝试下一个方案 */
-      }
-    }
-  }
-
-  // 刷新后无会话缓存：从优化任务 resultJson 还原选中资源
-  if (!matches.length && (mode === 'optimized' || mode === 'supplement')) {
-    try {
-      const res = await api.listOptimizationTasks()
-      const rows = Array.isArray(res.data) ? (res.data as Record<string, unknown>[]) : []
-      const taskPlans = plans.value.filter((pl) => String(pl.taskId) === String(taskId.value))
-      const planIds = new Set(taskPlans.map((p) => String(p.id)))
-      const related = rows
-        .filter((r) => planIds.has(String(r.planId)))
-        .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
-      for (const row of related) {
-        let payload: Record<string, unknown> = {}
-        const rj = row.resultJson
-        if (typeof rj === 'string' && rj) {
-          try { payload = JSON.parse(rj) as Record<string, unknown> } catch { payload = {} }
-        } else if (rj && typeof rj === 'object') {
-          payload = rj as Record<string, unknown>
-        }
-        const ids = (payload.selectedResourceIds || payload.addedResourceIds || []) as unknown[]
-        if (!ids.length) continue
-        const built = ids.map((id) => ({
-          platformId: Number(id) || id,
-          id: Number(id) || id,
-          score: Number(payload.after && (payload.after as any).totalScore || row.bestFitness || 0),
-          matched: true,
-          mode,
-          platformName: '平台#' + id,
-          name: '平台#' + id,
-          reason: mode === 'optimized' ? '优化筛选入选' : '增补入选',
-        }))
-        matches = built as Array<Record<string, unknown>>
-        if (mode === 'optimized') lastOptLinks.value = matches
-        else lastSupLinks.value = matches
-        break
-      }
-    } catch {
-      /* 可选步骤 */
-    }
-  }
-
-  if (!matches.length && candidateRows.value.length && mode === 'basic') {
-    matches = candidateRows.value.filter((c) => c.matched !== false)
-  }
-
-  // 若会话里有优化/增补选中 ID，则收窄匹配集合
-  if (mode === 'optimized' || mode === 'supplement') {
-    const meta = mode === 'optimized' ? lastOptMeta.value : lastSupMeta.value
-    const idSet = new Set<string>()
-    const results = Array.isArray(asRec(meta).results) ? (asRec(meta).results as Record<string, unknown>[]) : []
-    for (const item of results) {
-      for (const id of (item.selectedResourceIds || item.addedResourceIds || asRec(item.after).resourceIds || []) as unknown[]) {
-        idSet.add(String(id))
-      }
-    }
-    if (idSet.size && matches.length) {
-      const filtered = matches.filter((m) => idSet.has(String(m.platformId ?? m.id)))
-      if (filtered.length) matches = filtered
-    }
-  }
-
-  const links = matches.map((c) => ({
-    platformId: (c.platformId ?? c.id) as string | number,
-    score: Number(c.score ?? scoreOf(c) ?? 0),
-    mode,
-    name: String(c.platformName || c.name || c.platformId || ''),
-    reason: explainOf(c) !== '-' ? explainOf(c) : undefined,
+  const links = selection.resources.map((resource) => ({
+    platformId: resource.id,
+    score: undefined,
+    mode: linkMode,
+    name: resource.name,
+    reason: selection.source === 'candidate' ? '当前方案候选匹配，尚未配置为正式资源' : undefined,
   }))
-  const label =
-    mode === 'basic' ? '基础关联(蓝)' : mode === 'optimized' ? '优化关联(绿)' : '增补关联(橙)'
   try {
     const n = await drawAssociationLinks(taskId.value, links, { fit: true, ensureLayers: true })
     if (!opts?.silent) {
       if (n) {
         message.value = `已绘制${label} 连线 ${n} 条`
-      } else if (!matches.length) {
-        message.value =
-          mode === 'basic'
-            ? `无${label}可展示：请先执行「基础关联」生成方案，或确认候选资源有坐标`
-            : `无${label}可展示：请先在流程中执行对应关联步骤生成方案（当前任务可能只有基础方案）`
+      } else if (!selection.resources.length) {
+        message.value = `当前方案没有可上图的${selection.source === 'configured' ? '已配置资源' : '候选匹配'}`
       } else {
-        message.value = `无${label}可展示（匹配 ${matches.length}，可上图坐标 ${links.length}；请确认传感器有位置）`
+        message.value = `无${label}可展示（资源 ${selection.resources.length} 个，请确认传感器有位置）`
       }
     }
   } catch (err) {
@@ -2032,6 +2085,11 @@ async function showAssociationOnMap(mode: 'basic' | 'optimized' | 'supplement', 
 async function drawPlanningCoverageFromEval() {
   if (taskId.value == null) {
     error.value = '请先选择任务'
+    return
+  }
+  if (selectedPlanId.value && selectedPlanUncalculated.value) {
+    await clearPlanningCoverageOnMap()
+    message.value = '当前方案尚未执行真实规划计算，暂不生成覆盖或缺口图'
     return
   }
   // 页面刷新后 evalResult 为空：按当前任务即时拉取评估结果再上图
@@ -2072,58 +2130,68 @@ async function clearMapLinks() {
   message.value = '已清除关联线'
 }
 
-async function applyPlanningMapAction() {
-  if (planningMapAction.value === 'tasks') await showTasksOnMap()
-  else if (planningMapAction.value === 'candidates') await showCandidatesOnMap()
-  else if (planningMapAction.value === 'basic') await showAssociationOnMap('basic')
-  else if (planningMapAction.value === 'optimized') await showAssociationOnMap('optimized')
-  else if (planningMapAction.value === 'supplement') await showAssociationOnMap('supplement')
-  else await drawPlanningCoverageFromEval()
+const planningMapActions = [
+  'tasks',
+  'candidates',
+  'basic',
+  'optimized',
+  'supplement',
+  'coverage',
+  'clear-links',
+  'clear-coverage',
+] as const
+type PlanningMapAction = typeof planningMapActions[number]
+
+async function runPlanningMapAction(action: PlanningMapAction) {
+  if (action === 'tasks') await showTasksOnMap()
+  else if (action === 'candidates') await showCandidatesOnMap()
+  else if (action === 'basic') await showAssociationOnMap('basic')
+  else if (action === 'optimized') await showAssociationOnMap('optimized')
+  else if (action === 'supplement') await showAssociationOnMap('supplement')
+  else if (action === 'coverage') await drawPlanningCoverageFromEval()
+  else if (action === 'clear-links') await clearMapLinks()
+  else await clearPlanningCoverageOnMap()
+}
+
+function onPlanningMapAction(event: Event) {
+  const action = (event as CustomEvent<PlanningMapAction>).detail
+  if (!planningMapActions.includes(action)) return
+  void runPlanningMapAction(action)
 }
 </script>
 
 <template>
   <section class="page">
-    <header class="page-head plan-head">
-      <div class="plan-head-main">
-        <div>
-          <p class="eyebrow">{{ currentBusinessPage.eyebrow }}</p>
-          <h1>{{ currentBusinessPage.title }}</h1>
-          <p class="muted">{{ currentBusinessPage.summary }}</p>
-        </div>
-        <div class="plan-head-actions">
-          <button class="btn ghost" type="button" @click="resetForm">新建任务</button>
-          <button class="btn ghost" type="button" :disabled="taskId == null || pending" @click="openOnMap">定位当前任务</button>
-        </div>
-      </div>
-      <div class="planning-map-toolbar" aria-label="地图联动">
-        <header><strong>地图联动</strong><span>{{ shellStatus }}</span></header>
-        <div class="planning-map-controls">
-          <label>显示内容
-            <select v-model="planningMapAction">
-              <option value="tasks">任务与资源</option>
-              <option value="candidates" :disabled="taskId == null">候选资源</option>
-              <option value="basic" :disabled="taskId == null">基础关联</option>
-              <option value="optimized" :disabled="taskId == null">优化关联</option>
-              <option value="supplement" :disabled="taskId == null">增补关联</option>
-              <option value="coverage" :disabled="taskId == null">覆盖与缺口</option>
-            </select>
-          </label>
-          <button class="btn" type="button" :disabled="pending || (planningMapAction !== 'tasks' && taskId == null)" @click="applyPlanningMapAction">上图</button>
-        </div>
-        <div class="planning-map-secondary">
-          <button type="button" @click="clearMapLinks">清除关联线</button>
-          <button type="button" @click="clearPlanningCoverageOnMap">清除覆盖</button>
-        </div>
-      </div>
-    </header>
+    <div class="planning-page-actions">
+      <button class="btn ghost" type="button" @click="resetForm">新建任务</button>
+    </div>
 
     <template v-if="user == null">
       <p class="error">需要登录。请先 <RouterLink to="/login?redirect=/planning">登录</RouterLink>。</p>
     </template>
     <template v-else>
-      <div class="tabs">
-        <button v-for="t in tabs" :key="t.key" type="button" class="tab" :class="{ active: tab === t.key }" @click="setTab(t.key)">{{ t.label }}</button>
+      <div class="planning-task-context" data-testid="planning-task-picker">
+        <div class="planning-task-identity">
+          <strong v-if="taskId">{{ taskName || `任务 #${taskId}` }}</strong>
+          <strong v-else>尚未选择任务</strong>
+          <span v-if="taskId">#{{ taskId }} · {{ taskStatus || '状态未登记' }}</span>
+          <span v-else>选择任务后继续当前阶段</span>
+        </div>
+        <select
+          class="task-pick-select"
+          :value="taskId == null ? '' : String(taskId)"
+          aria-label="切换当前任务"
+          @change="pickTaskFromSelect"
+        >
+          <option value="">请选择已有观测任务…</option>
+          <option v-for="t in tasks" :key="String(t.id)" :value="String(t.id)">
+            #{{ t.id }} · {{ t.name || t.code || '未命名' }} · {{ t.status || '-' }}
+          </option>
+        </select>
+        <div class="planning-task-actions" aria-label="当前任务操作">
+          <button class="btn ghost" type="button" :disabled="taskId == null" @click="locateTaskOnMap(taskId)">定位</button>
+          <button class="btn ghost" type="button" :disabled="taskId == null" @click="goBusinessRoute('execution')">全过程</button>
+        </div>
       </div>
       <BusinessStageProgress
         :current-stage="currentBusinessStage"
@@ -2137,35 +2205,6 @@ async function applyPlanningMapAction() {
         :completed-steps="completedWorkflowSteps"
       />
       <p v-if="error" class="error">{{ error }}</p>
-      <p v-if="message" class="ok-text">{{ message }}</p>
-
-      <div v-if="user && tab !== 'tasks'" class="planning-task-picker" data-testid="planning-task-picker">
-        <header>
-          <div>
-            <small>当前任务</small>
-            <strong v-if="taskId">{{ taskName || `任务 #${taskId}` }}</strong>
-            <strong v-else>尚未选择任务</strong>
-          </div>
-          <span v-if="taskId">#{{ taskId }} · {{ taskStatus || '状态未登记' }} · {{ currentBusinessPage.title }}</span>
-          <span v-else>选择任务后继续当前阶段</span>
-        </header>
-        <select
-          class="task-pick-select"
-          :value="taskId == null ? '' : String(taskId)"
-          @change="pickTaskFromSelect"
-        >
-          <option value="">请选择已有观测任务…</option>
-          <option v-for="t in tasks" :key="String(t.id)" :value="String(t.id)">
-            #{{ t.id }} · {{ t.name || t.code || '未命名' }} · {{ t.status || '-' }}
-          </option>
-        </select>
-        <div class="planning-task-actions">
-          <button class="btn ghost" type="button" @click="setTab('tasks')">返回任务入口</button>
-          <button class="btn ghost" type="button" :disabled="taskId == null" @click="locateTaskOnMap(taskId)">地图定位</button>
-          <button class="btn ghost" type="button" :disabled="taskId == null" @click="goBusinessRoute('execution')">查看全过程</button>
-        </div>
-        <p v-if="!taskId">选择已有任务后，才可执行候选、关联和覆盖分析。</p>
-      </div>
 
       <section v-if="tab === 'tasks'" class="panel">
         <div class="task-entry-head">
@@ -2204,7 +2243,7 @@ async function applyPlanningMapAction() {
           <header class="planning-workflow-head">
             <div>
               <p class="eyebrow">阶段操作</p>
-              <h2>{{ currentBusinessPage.title }}</h2>
+              <h2>下一步：{{ workflowStepForLegacy(currentStep).label }}</h2>
             </div>
             <span class="planning-progress-count">{{ workflowStepForLegacy(currentStep).label }} · {{ doneSteps.has(currentStep) ? '已完成' : '待执行' }}</span>
           </header>
@@ -2550,103 +2589,131 @@ async function applyPlanningMapAction() {
 
       <section v-if="tab === 'evaluation'" class="panel capability-evaluation-panel">
         <div class="section-heading-actions">
-          <h2>能力评估</h2>
+          <span class="section-label">评估结果</span>
           <div class="section-heading-actions-group">
-            <button class="btn ghost tiny" type="button" @click="setTab('candidates')">查看资源选择</button>
             <button class="btn ghost tiny" type="button" :disabled="taskId == null || pending" @click="loadEvaluationResult">刷新评估</button>
           </div>
         </div>
-        <p class="muted">根据候选资源与任务约束，查看指标满足、空间覆盖、资源组合和当前方案是否达到要求。</p>
-        <div v-if="evaluationSummary" class="capability-evaluation-summary">
-          <div class="collaboration-metrics">
-            <article>
-              <span>指标满足</span>
-              <strong>{{ evaluationSummary.satisfiedCount }} / {{ evaluationSummary.indicatorCount }}</strong>
-              <small>{{ evaluationSummary.overallSatisfied ? '整体满足' : '仍需优化' }}</small>
-            </article>
-            <article>
-              <span>总体并集覆盖</span>
-              <strong>{{ evaluationSummary.overallCoveragePercent }}%</strong>
-              <small>至少一个指标可观测</small>
-            </article>
-            <article class="primary-metric">
-              <span>{{ evaluationSummary.indicatorCount > 1 ? '多指标共同覆盖' : '指标有效覆盖' }}</span>
-              <strong>{{ evaluationSummary.commonCoveragePercent }}%</strong>
-              <small>{{ evaluationSummary.commonCoverageSatisfied ? '达到覆盖要求' : '未达到覆盖要求' }}</small>
-            </article>
-            <article :class="{ warning: evaluationSummary.misalignmentPercent > 0 }">
-              <span>覆盖错位</span>
-              <strong>{{ evaluationSummary.misalignmentPercent }}%</strong>
-              <small>有覆盖但无法联合观测</small>
-            </article>
+        <div v-if="evaluationUncalculated" class="empty-panel capability-evaluation-empty">
+          <strong>尚未执行真实规划计算</strong>
+          <p class="muted">当前响应属于历史兼容或未计算状态，兼容字段中的 0 不作为真实覆盖率、精度或评价结果。</p>
+          <div class="ops">
+            <button class="btn" type="button" :disabled="canRun('evaluate') === false" @click="runStepAction('evaluate')">执行能力评估</button>
+            <button class="btn ghost" type="button" @click="setTab('candidates')">查看资源选择</button>
           </div>
-          <div class="coverage-alignment" :aria-label="evaluationSummary.indicatorCount > 1 ? '共同覆盖、覆盖错位和未覆盖区域比例' : '指标有效覆盖和未覆盖区域比例'">
-            <div class="coverage-band">
-              <i class="common" :style="{ width: evaluationSummary.commonCoveragePercent + '%' }"></i>
-              <i class="misaligned" :style="{ width: evaluationSummary.misalignmentPercent + '%' }"></i>
-              <i class="uncovered" :style="{ width: evaluationSummary.uncoveredPercent + '%' }"></i>
-            </div>
-            <p><span><i class="common"></i>有效覆盖 {{ evaluationSummary.commonCoveragePercent }}%</span><span><i class="misaligned"></i>覆盖错位 {{ evaluationSummary.misalignmentPercent }}%</span><span><i class="uncovered"></i>未覆盖 {{ evaluationSummary.uncoveredPercent }}%</span></p>
-          </div>
-          <ul v-if="evaluationSummary.reasons.length" class="hint-list collaboration-reasons">
-            <li v-for="(reason, index) in evaluationSummary.reasons" :key="'evaluation-reason' + index">{{ reason }}</li>
-          </ul>
+        </div>
+        <div v-else-if="evaluationSummary" class="capability-evaluation-summary">
+          <PlanEvaluationSummary :summary="evaluationSummary" />
           <div class="evaluation-actions">
-            <button class="btn" type="button" @click="drawPlanningCoverageFromEval">在地图查看覆盖与缺口</button>
-            <button class="btn ghost" type="button" @click="openEvaluationFlow">进入任务流程</button>
+            <button v-if="evaluationSummary.overallSatisfied" class="btn" type="button" @click="setTab('flow')">进入资源配置</button>
+            <button v-else class="btn" type="button" @click="drawPlanningCoverageFromEval">查看覆盖缺口</button>
+            <button class="btn ghost" type="button" @click="setTab('candidates')">查看资源选择</button>
           </div>
           <details>
-            <summary>查看完整评估依据</summary>
+            <summary>查看详细依据</summary>
             <pre class="result-pre">{{ businessResultText(evalResult, 5000) }}</pre>
           </details>
         </div>
         <div v-else class="empty-panel capability-evaluation-empty">
           <strong>还没有可展示的能力评估结果</strong>
-          <p class="muted">先在资源选择中确认候选资源，再完成资源关联；评估结果会在任务流程第 8 步生成。</p>
+          <p class="muted">执行评估后在此查看任务满足、共同覆盖和阻断原因。</p>
           <div class="ops">
-            <button class="btn" type="button" @click="setTab('candidates')">先看候选资源</button>
-            <button class="btn ghost" type="button" :disabled="canRun('evaluate') === false" @click="runStepAction('evaluate')">执行能力评估</button>
+            <button class="btn" type="button" :disabled="canRun('evaluate') === false" @click="runStepAction('evaluate')">执行能力评估</button>
+            <button class="btn ghost" type="button" @click="setTab('candidates')">查看资源选择</button>
           </div>
         </div>
       </section>
 
       <section v-if="tab === 'plans'" class="panel">
-        <h2>规划方案管理</h2>
-        <p class="muted">方案由任务关联流程生成；支持查看关联结果、复制草稿、审核、发布、取消发布、归档与方案对比（文档：方案管理）。</p>
+        <h2>方案管理</h2>
+        <p class="muted">先选择一份方案，再查看详情或预览地图；状态操作只对当前方案生效。</p>
         <div v-if="planSectionPage === 1" class="plan-section-content">
-        <table v-table-pager="{ label: '规划方案分页' }" class="table">
-          <thead><tr><th>ID</th><th>名称</th><th>任务</th><th>类型</th><th>版本</th><th>状态</th><th>操作</th></tr></thead>
-          <tbody>
-            <tr v-if="!plans.length"><td colspan="7" class="muted">暂无方案。请先完成观测规划关联流程生成方案。</td></tr>
-            <tr v-for="p in plans" :key="String(p.id)" class="row-click" :class="{ selected: isPlanRowSelected(p) || String(lastCopiedPlanId) === String(p.id) }" @click="onPlanRowClick(p)">
-              <td>{{ p.id }}</td>
-              <td>{{ p.name }}</td>
-              <td>{{ p.taskId }}</td>
-              <td>{{ p.planType || '-' }}</td>
-              <td>v{{ planVersion(p.version) }}</td>
-              <td>{{ planStatusLabel(p.status) }}</td>
-              <td class="ops">
-                <select class="table-action-select" :disabled="pending" aria-label="方案操作" @click.stop @change.stop="runPlanRowAction(p, $event)">
-                  <option value="">操作</option>
-                  <option value="result">查看结果</option>
+          <div v-if="plans.length" class="plan-master-list" role="list" aria-label="规划方案列表">
+            <article
+              v-for="p in plans"
+              :key="String(p.id)"
+              class="plan-master-item"
+              :class="{ selected: isPlanRowSelected(p), copied: String(lastCopiedPlanId) === String(p.id) }"
+              role="listitem"
+            >
+              <header class="plan-master-head">
+                <button
+                  type="button"
+                  class="plan-master-select"
+                  :aria-pressed="isPlanRowSelected(p)"
+                  @click="selectPlan(p.id)"
+                >
+                  <strong>{{ p.name || `方案 #${p.id}` }}</strong>
+                  <span>#{{ p.id }} · v{{ planVersion(p.version) }} · {{ p.planType || '基础方案' }}</span>
+                </button>
+                <span class="plan-status-text">{{ planStatusLabel(p.status) }}</span>
+              </header>
+              <dl class="plan-master-metrics">
+                <div><dt>任务</dt><dd>#{{ p.taskId ?? '-' }}</dd></div>
+                <div><dt>卫星</dt><dd>{{ planResourceCounts(p).satellite }}</dd></div>
+                <div><dt>无人机</dt><dd>{{ planResourceCounts(p).uav }}</dd></div>
+                <div><dt>地面站</dt><dd>{{ planResourceCounts(p).station }}</dd></div>
+                <div><dt>资源</dt><dd>{{ planResourceCounts(p).total }}</dd></div>
+                <div><dt>评价</dt><dd>{{ planEvaluationLabel(p) }}</dd></div>
+                <div><dt>更新时间</dt><dd>{{ p.updatedAt ? new Date(String(p.updatedAt)).toLocaleString() : '-' }}</dd></div>
+              </dl>
+              <footer class="plan-master-actions">
+                <button class="btn ghost tiny" type="button" @click="selectPlan(p.id)">查看方案</button>
+                <button class="btn ghost tiny" type="button" @click="selectPlan(p.id)">地图预览</button>
+                <button v-if="canApprovePlanStatus(planLiveStatus(p.id, p.status))" class="btn ghost tiny" type="button" :disabled="pending" @click="doApprovePlan(p.id, p.status)">审核</button>
+                <button v-else-if="canPublishPlanStatus(planLiveStatus(p.id, p.status))" class="btn tiny" type="button" :disabled="pending" @click="doPublishPlan(p.id, p.status)">发布</button>
+                <select class="table-action-select" :disabled="pending" aria-label="更多方案操作" @click.stop @change.stop="runPlanRowAction(p, $event)">
+                  <option value="">更多</option>
                   <option value="copy">复制为草稿</option>
-                  <option value="approve" :disabled="!canApprovePlanStatus(planLiveStatus(p.id, p.status))">审核</option>
-                  <option value="publish" :disabled="!canPublishPlanStatus(planLiveStatus(p.id, p.status))">发布</option>
                   <option value="unpublish" :disabled="!canUnpublishPlanStatus(planLiveStatus(p.id, p.status))">取消发布</option>
                   <option value="archive" :disabled="canByStatus(planLiveStatus(p.id, p.status), ['archived'])">归档</option>
                 </select>
-                <details v-if="planHistory(p.versionHistory).length" class="plan-history" @click.stop>
-                  <summary>历史</summary>
-                  <div v-for="history in planHistory(p.versionHistory)" :key="String(history.id)">
-                    <span>v{{ history.version }} · {{ history.changeType }} · {{ history.reason || '无原因' }} · {{ history.resourceCount ?? 0 }}项资源 · {{ history.createdAt || '-' }}</span>
-                    <button v-if="Number(history.version) !== planVersion(p.version)" class="btn tiny ghost" type="button" @click.stop="doRollbackPlan(p, Number(history.version))">回滚</button>
-                  </div>
-                </details>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
+              </footer>
+            </article>
+          </div>
+          <div v-else class="empty-panel">
+            <p class="muted">暂无方案。请先完成观测规划关联流程生成方案。</p>
+          </div>
+          <section v-if="selectedPlan" class="plan-detail-panel" aria-label="当前方案详情">
+            <header>
+              <div>
+                <span class="section-label">当前方案</span>
+                <strong>{{ selectedPlan.name || `方案 #${selectedPlan.id}` }}</strong>
+              </div>
+              <span>#{{ selectedPlan.id }} · v{{ planVersion(selectedPlan.version) }} · {{ planStatusLabel(selectedPlan.status) }}</span>
+            </header>
+            <p v-if="selectedPlanUncalculated" class="plan-calculation-warning">尚未执行真实规划计算；兼容字段中的 0 不作为真实覆盖率、精度或评价结果。</p>
+            <div class="plan-detail-summary">
+              <span>{{ selectedPlanResources.source === 'configured' ? '已配置资源' : selectedPlanResources.source === 'candidate' ? '候选匹配' : '暂无资源' }} {{ selectedPlanResources.resources.length }} 项</span>
+              <span v-if="selectedPlanResources.resources.length">{{ selectedPlanResources.resources.slice(0, 3).map((item) => item.name).join('、') }}<template v-if="selectedPlanResources.resources.length > 3"> 等</template></span>
+              <span>评价：{{ planEvaluationLabel(planResult || selectedPlan) }}</span>
+            </div>
+            <details v-if="planResult">
+              <summary>查看方案结果依据</summary>
+              <pre class="result-pre">{{ businessResultText(planResult, 5000) }}</pre>
+            </details>
+          </section>
+          <details v-if="plans.length" class="plan-table-secondary">
+            <summary>版本与历史</summary>
+            <table v-table-pager="{ label: '规划方案分页' }" class="table">
+              <thead><tr><th>ID</th><th>名称</th><th>版本</th><th>状态</th><th>历史</th></tr></thead>
+              <tbody>
+                <tr v-for="p in plans" :key="'history-' + String(p.id)">
+                  <td>{{ p.id }}</td><td>{{ p.name || '-' }}</td><td>v{{ planVersion(p.version) }}</td><td>{{ planStatusLabel(p.status) }}</td>
+                  <td>
+                    <details v-if="planHistory(p.versionHistory).length" class="plan-history">
+                      <summary>查看</summary>
+                      <div v-for="history in planHistory(p.versionHistory)" :key="String(history.id)">
+                        <span>v{{ history.version }} · {{ history.changeType }} · {{ history.reason || '无原因' }} · {{ history.resourceCount ?? 0 }}项资源 · {{ history.createdAt || '-' }}</span>
+                        <button v-if="Number(history.version) !== planVersion(p.version)" class="btn tiny ghost" type="button" @click="doRollbackPlan(p, Number(history.version))">回滚</button>
+                      </div>
+                    </details>
+                    <span v-else class="muted">-</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </details>
         </div>
         <div v-else-if="planSectionPage === 2" class="plan-section-content">
         <h3>方案对比</h3>
@@ -2750,55 +2817,29 @@ async function applyPlanningMapAction() {
 </template>
 
 <style scoped>
-.plan-head h1 { font-size: 16px; margin: 0.15rem 0; }
-.plan-map-actions.panel { padding: 0.45rem 0.55rem; }
-.planning-map-toolbar,
-.planning-task-picker {
+.planning-page-actions { display: flex; justify-content: flex-end; margin: 0 0 .35rem; }
+.planning-page-actions .btn { min-height: 30px; padding: .3rem .55rem; font-size: 11px; }
+.planning-task-context {
+  position: sticky;
+  top: -.75rem;
+  z-index: 4;
   display: grid;
-  gap: .55rem;
-  margin: .45rem 0 .65rem;
-  padding: .65rem;
-  border: 1px solid #e3e3e8;
-  border-radius: 12px;
-  background: #fff;
+  grid-template-columns: minmax(74px, 1fr) minmax(122px, 1.15fr) auto;
+  align-items: center;
+  gap: .4rem;
+  min-height: 52px;
+  margin: .1rem 0 .45rem;
+  padding: .35rem .45rem;
+  border: 1px solid #dfe3e8;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .97);
 }
-.planning-map-toolbar header,
-.planning-task-picker header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: .6rem;
-}
-.planning-map-toolbar header strong,
-.planning-task-picker header strong { color: #1d1d1f; font-size: 12px; }
-.planning-map-toolbar header span,
-.planning-task-picker header span { color: #6e6e73; font-size: 9px; line-height: 1.4; text-align: right; }
-.planning-task-picker header > div { display: grid; gap: .1rem; }
-.planning-task-picker header small { color: #86868b; font-size: 9px; }
-.planning-map-controls {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: .45rem;
-}
-.planning-map-controls label { font-size: 10px; }
-.planning-map-controls select,
-.planning-task-picker select { min-width: 0; height: 32px; padding-top: 0; padding-bottom: 0; font-size: 10px; }
-.planning-map-controls .btn { min-height: 32px; padding: .35rem .75rem; font-size: 10px; }
-.planning-map-secondary,
-.planning-task-actions { display: flex; flex-wrap: wrap; gap: .35rem; }
-.planning-map-secondary { gap: .65rem; padding-top: .45rem; border-top: 1px solid #ededf0; }
-.planning-map-secondary button {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #515154;
-  font: 500 10px/1.3 inherit;
-  cursor: pointer;
-}
-.planning-map-secondary button:hover { color: #0066cc; }
-.planning-task-actions .btn { min-height: 30px; padding: .3rem .55rem; font-size: 10px; }
-.planning-task-picker p { margin: 0; color: #6e6e73; font-size: 10px; line-height: 1.45; }
+.planning-task-identity { display: grid; min-width: 0; gap: .08rem; }
+.planning-task-identity strong { overflow: hidden; color: #1d1d1f; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.planning-task-identity span { overflow: hidden; color: #6e6e73; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.planning-task-context select { width: 100%; min-width: 0; height: 30px; padding-top: 0; padding-bottom: 0; font-size: 11px; }
+.planning-task-actions { display: flex; gap: .25rem; }
+.planning-task-actions .btn { min-height: 30px; padding: .28rem .42rem; font-size: 11px; white-space: nowrap; }
 .task-entry-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; margin-bottom: .7rem; }
 .task-entry-head h2 { margin-bottom: .15rem; }
 .task-entry-head p { margin: 0; }
@@ -2826,8 +2867,32 @@ async function applyPlanningMapAction() {
 .capability-evaluation-empty > strong { color: #3a3a3c; font-size: 12px; }
 .capability-evaluation-empty p { margin: 0; }
 .section-heading-actions { display: flex; align-items: center; justify-content: space-between; gap: .55rem; }
-.section-heading-actions h2 { margin-bottom: 0; }
+.section-label { color: #3a3a3c; font-size: 12px; font-weight: 650; }
 .section-heading-actions-group { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .35rem; }
+.plan-master-list { display: grid; gap: .45rem; }
+.plan-master-item { display: grid; gap: .5rem; padding: .65rem; border: 1px solid #e1e3e6; border-radius: 8px; background: #fff; }
+.plan-master-item.selected { border-color: #79aee2; box-shadow: inset 3px 0 0 #1677ff; }
+.plan-master-item.copied { background: #f5fbf7; }
+.plan-master-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem; }
+.plan-master-select { display: grid; min-width: 0; gap: .15rem; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.plan-master-select strong { overflow: hidden; color: #1d1d1f; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.plan-master-select span, .plan-status-text { color: #68686d; font-size: 11px; }
+.plan-status-text { flex: 0 0 auto; padding: .15rem .35rem; border: 1px solid #d8e4ee; border-radius: 6px; background: #f8fbfd; color: #315d7e; }
+.plan-master-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .3rem; margin: 0; }
+.plan-master-metrics div { display: grid; min-width: 0; gap: .08rem; padding: .3rem .35rem; border-top: 1px solid #eef0f2; }
+.plan-master-metrics dt { color: #86868b; font-size: 11px; }
+.plan-master-metrics dd { margin: 0; overflow: hidden; color: #3a3a3c; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.plan-master-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; padding-top: .35rem; border-top: 1px solid #eef0f2; }
+.plan-master-actions .table-action-select { margin-left: auto; }
+.plan-detail-panel { display: grid; gap: .45rem; margin-top: .55rem; padding: .65rem; border: 1px solid #d8e4ee; border-radius: 8px; background: #f8fbfd; }
+.plan-detail-panel > header { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
+.plan-detail-panel > header > div { display: grid; min-width: 0; gap: .1rem; }
+.plan-detail-panel > header strong { color: #1d1d1f; font-size: 14px; overflow-wrap: anywhere; }
+.plan-detail-panel > header > span { color: #68686d; font-size: 11px; }
+.plan-calculation-warning { margin: 0; padding: .45rem .55rem; border-left: 3px solid #d49a3a; background: #fff8eb; color: #76521d; font-size: 11px; line-height: 1.45; }
+.plan-detail-summary { display: flex; flex-wrap: wrap; gap: .35rem .7rem; color: #515154; font-size: 11px; }
+.plan-table-secondary { margin-top: .55rem; }
+.plan-table-secondary > summary { color: #515154; cursor: pointer; font-size: 11px; }
 .table-action-select { width: 84px; height: 30px; padding: 0 22px 0 8px; border-radius: 8px; font-size: 10px; }
 .task-code {
   width: fit-content;
@@ -3153,10 +3218,19 @@ async function applyPlanningMapAction() {
 }
 .excluded-reasons ul { display: grid; gap: 0.18rem; margin: 0; padding-left: 0.9rem; color: #68686d; font-size: 10px; line-height: 1.45; }
 @media (max-width: 760px) {
+  .planning-task-context {
+    top: -.45rem;
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: 0;
+  }
+  .planning-task-context select { grid-column: 1 / -1; }
   .area-control { align-items: stretch; flex-direction: column; }
   .step-page-card { grid-template-columns: 30px minmax(0, 1fr) 30px; gap: 0.4rem; padding: 0.55rem; }
   .step-page-button { width: 30px; height: 30px; }
   .candidate-card-list { grid-template-columns: minmax(0, 1fr); }
   .task-entry-card dl { grid-template-columns: minmax(0, 1fr); }
+  .plan-master-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .plan-detail-panel > header { align-items: flex-start; flex-direction: column; }
+  .plan-master-actions .table-action-select { margin-left: 0; }
 }
 </style>

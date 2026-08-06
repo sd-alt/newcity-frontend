@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
-  stageDefinition,
   stepsForStage,
   type BusinessStageKey,
   type WorkflowStepKey,
@@ -19,7 +18,6 @@ const props = withDefaults(defineProps<{
 })
 
 const steps = computed(() => stepsForStage(props.stage))
-const stageLabel = computed(() => stageDefinition(props.stage).label)
 const completed = computed(() => new Set(props.completedSteps))
 const blocked = computed(() => new Set(props.blockedSteps))
 const activeStep = computed(() => {
@@ -31,11 +29,7 @@ const activeStep = computed(() => {
 </script>
 
 <template>
-  <section v-if="steps.length" class="stage-step-progress" aria-label="当前阶段操作步骤">
-    <header>
-      <strong>当前阶段</strong>
-      <span>{{ stageLabel }}</span>
-    </header>
+  <section v-if="steps.length > 1" class="stage-step-progress" aria-label="当前阶段操作步骤">
     <ol>
       <li
         v-for="(step, index) in steps"
@@ -57,25 +51,14 @@ const activeStep = computed(() => {
 
 <style scoped>
 .stage-step-progress {
-  margin: 0 0 .65rem;
-  padding: .45rem .6rem;
-  border-left: 2px solid #d7e7f8;
-  background: #f8fafc;
+  margin: 0 0 .45rem;
+  min-height: 22px;
 }
-.stage-step-progress header {
-  display: flex;
-  align-items: baseline;
-  gap: .35rem;
-  margin-bottom: .28rem;
-  color: #6e6e73;
-  font-size: 10px;
-}
-.stage-step-progress header strong { color: #3a3a3c; font-size: 11px; }
 .stage-step-progress ol {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: .1rem;
+  gap: .08rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -83,9 +66,9 @@ const activeStep = computed(() => {
 .stage-step-progress li {
   display: inline-flex;
   align-items: center;
-  min-height: 22px;
+  min-height: 20px;
   color: #85868b;
-  font-size: 10px;
+  font-size: 11px;
 }
 .stage-step-marker { margin-right: .18rem; color: #a4a6aa; font-size: 10px; }
 .stage-step-label { white-space: nowrap; }

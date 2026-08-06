@@ -55,7 +55,7 @@ function navigate(stage: BusinessStageKey) {
           @click="navigate(stage.key)"
         >
           <span class="business-stage-marker" aria-hidden="true">{{ completed.has(stage.key) ? '✓' : currentStage === stage.key ? '●' : '○' }}</span>
-          <span class="business-stage-label">{{ stage.label }}</span>
+          <span class="business-stage-label" :data-short-label="stage.shortLabel">{{ stage.label }}</span>
         </button>
       </li>
     </ol>
@@ -64,16 +64,13 @@ function navigate(stage: BusinessStageKey) {
 
 <style scoped>
 .business-stage-progress {
-  margin: .55rem 0 .65rem;
-  padding: .45rem .55rem;
-  border: 1px solid #e1e3e6;
-  border-radius: 10px;
-  background: #fff;
+  margin: .35rem 0 .4rem;
+  min-height: 34px;
 }
 .business-stage-progress ol {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: .15rem;
+  gap: .1rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -95,18 +92,18 @@ function navigate(stage: BusinessStageKey) {
   align-items: center;
   justify-content: center;
   gap: .22rem;
-  min-height: 28px;
-  padding: .25rem .35rem;
+  min-height: 34px;
+  padding: .2rem .25rem;
   border: 0;
   background: transparent;
   color: #76777c;
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
 }
 .business-stage-progress button:hover:not(:disabled) { color: var(--brand); }
 .business-stage-progress button:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 .business-stage-progress button:disabled { color: #b9bbc0; cursor: not-allowed; }
-.business-stage-marker { flex: 0 0 auto; color: #a0a2a7; font-size: 11px; line-height: 1; }
+.business-stage-marker { flex: 0 0 auto; color: #a0a2a7; font-size: 10px; line-height: 1; }
 .business-stage-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .business-stage-progress li.complete .business-stage-marker,
 .business-stage-progress li.complete .business-stage-label { color: #2f8f5b; }
@@ -115,7 +112,14 @@ function navigate(stage: BusinessStageKey) {
 .business-stage-progress li.blocked .business-stage-marker,
 .business-stage-progress li.blocked .business-stage-label { color: #b9bbc0; }
 @media (max-width: 760px) {
-  .business-stage-progress { overflow-x: auto; }
-  .business-stage-progress ol { min-width: 560px; }
+  .business-stage-progress ol { gap: 0; }
+  .business-stage-progress button { gap: .12rem; font-size: 10px; }
+  .business-stage-label {
+    font-size: 0;
+  }
+  .business-stage-label::after {
+    content: attr(data-short-label);
+    font-size: 10px;
+  }
 }
 </style>
