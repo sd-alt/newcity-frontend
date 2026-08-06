@@ -337,6 +337,11 @@ test('四中心二级导航统一无编号并保留既有路由和 Tab', async (
     '方案管理',
     '过程管理与成果追溯',
   ])
+  await expect(businessNavigation).toHaveCSS('border-left-width', '1px')
+  await expect(businessNavigation).toHaveCSS('border-left-style', 'solid')
+  await expect(businessNavigation.locator('.rail-subitem').first()).toHaveCSS('min-height', '30px')
+  await expect(businessNavigation.locator('.rail-subitem').first()).toHaveCSS('font-size', '11px')
+  await expect(businessNavigation.locator('.rail-subitem').first()).toHaveCSS('border-radius', '10px')
 
   await businessNavigation.getByRole('button', { name: '资源选择', exact: true }).click()
   await expect(page).toHaveURL(/\/business\?tab=candidates&taskId=42/)
