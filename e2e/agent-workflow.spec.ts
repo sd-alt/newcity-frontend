@@ -360,6 +360,20 @@ test('四中心二级导航统一无编号并保留既有路由和 Tab', async (
   await expect(page.locator('.stage-step-progress .stage-step-label')).toHaveText(['基础关联', '优化关联', '增补关联'])
   await page.goto('/business?tab=plans&taskId=42')
   await expect(page.locator('.stage-step-progress .stage-step-label')).toHaveText(['满足度评估', '规划输出', '方案审核', '方案发布'])
+  const planPager = page.getByRole('navigation', { name: '规划方案内容分页' })
+  await expect(planPager).toBeVisible()
+  const readPlanPagerLayout = () => planPager.evaluate((element) => {
+    const panel = element.closest('.section-workspace-panel')
+    const panelBox = panel?.getBoundingClientRect()
+    const pagerBox = element.getBoundingClientRect()
+    return { panelBottom: panelBox?.bottom || 0, pagerBottom: pagerBox.bottom }
+  })
+  const firstPlanPageLayout = await readPlanPagerLayout()
+  await planPager.getByRole('button', { name: /下一项/ }).click()
+  await expect(planPager.locator('select')).toHaveValue('2')
+  const secondPlanPageLayout = await readPlanPagerLayout()
+  expect(Math.abs(secondPlanPageLayout.panelBottom - firstPlanPageLayout.panelBottom), JSON.stringify({ firstPlanPageLayout, secondPlanPageLayout })).toBeLessThanOrEqual(2)
+  expect(Math.abs(secondPlanPageLayout.pagerBottom - firstPlanPageLayout.pagerBottom), JSON.stringify({ firstPlanPageLayout, secondPlanPageLayout })).toBeLessThanOrEqual(2)
   await businessNavigation.getByRole('button', { name: '过程管理与成果追溯', exact: true }).click()
   await expect(page).toHaveURL(/\/business\/execution\?taskId=42/)
   await expect(page.locator('.business-stage-progress .business-stage-label')).toHaveText([
@@ -371,6 +385,105 @@ test('四中心二级导航统一无编号并保留既有路由和 Tab', async (
     '过程管理与成果追溯',
   ])
   await expect(page.locator('.stage-step-progress .stage-step-label')).toHaveText(['执行启动', '执行监控', '异常处理', '成果查看'])
+
+  await page.getByRole('button', { name: /资源中心/ }).click()
+  const resourceNavigation = page.locator('.rail-subnav').filter({ hasText: '数据资源建模与接入' })
+  await expect(resourceNavigation.locator('.rail-subitem-label')).toHaveText([
+    '传感器资源管理',
+    '观测能力管理',
+    '数据资源建模与接入',
+    '监测数据建模',
+    '观测数据管理',
+    '算法模型管理',
+    '算法服务管理',
+    '知识建模与管理',
+    '知识检索与应用',
+  ])
+  await resourceNavigation.getByRole('button', { name: '监测数据建模', exact: true }).click()
+  await expect(page).toHaveURL(/\/resources\/data\?tab=crud/)
+  await expect(page.getByRole('heading', { name: '监测数据建模与增删改查' })).toBeVisible()
+  const pagerLayout = await page.locator('.left-body .page').evaluate((pageElement) => {
+    const panel = pageElement.querySelector('.panel:has(> .card-pager.is-sections)')
+    const pager = pageElement.querySelector('.card-pager.is-sections')
+    if (!panel || !pager) return null
+    const panelBox = panel.getBoundingClientRect()
+    const pagerBox = pager.getBoundingClientRect()
+    const pageBox = pageElement.getBoundingClientRect()
+    return { panelBottom: panelBox.bottom, pagerBottom: pagerBox.bottom, pageBottom: pageBox.bottom }
+  })
+  expect(pagerLayout).not.toBeNull()
+  expect(pagerLayout!.pagerBottom).toBeGreaterThanOrEqual(pagerLayout!.panelBottom - 6)
+  expect(pagerLayout!.panelBottom).toBeGreaterThanOrEqual(pagerLayout!.pageBottom - 2)
+  const sectionPagerRows = await page.locator('.card-pager.is-sections').evaluate((pager) => {
+    const previous = pager.querySelector('.section-pager-prev')?.getBoundingClientRect()
+    const next = pager.querySelector('.section-pager-next')?.getBoundingClientRect()
+    const current = pager.querySelector('.section-pager-current')?.getBoundingClientRect()
+    if (!previous || !next || !current) return null
+    return { previousRight: previous.right, currentLeft: current.left, currentRight: current.right, nextLeft: next.left }
+  })
+  expect(sectionPagerRows).not.toBeNull()
+  expect(sectionPagerRows!.currentLeft).toBeGreaterThanOrEqual(sectionPagerRows!.previousRight - 1)
+  expect(sectionPagerRows!.nextLeft).toBeGreaterThanOrEqual(sectionPagerRows!.currentRight - 1)
+  const dataPager = page.getByRole('navigation', { name: '监测数据维护内容分页' })
+  const readDataPagerLayout = () => dataPager.evaluate((element) => {
+    const panel = element.closest('.section-workspace-panel')
+    const panelBox = panel?.getBoundingClientRect()
+    const pagerBox = element.getBoundingClientRect()
+    return { panelBottom: panelBox?.bottom || 0, pagerBottom: pagerBox.bottom }
+  })
+  const firstDataPageLayout = await readDataPagerLayout()
+  await dataPager.getByRole('button', { name: /下一项/ }).click()
+  await expect(dataPager.locator('select')).toHaveValue('2')
+  const secondDataPageLayout = await readDataPagerLayout()
+  expect(Math.abs(secondDataPageLayout.panelBottom - firstDataPageLayout.panelBottom), JSON.stringify({ firstDataPageLayout, secondDataPageLayout })).toBeLessThanOrEqual(2)
+  expect(Math.abs(secondDataPageLayout.pagerBottom - firstDataPageLayout.pagerBottom), JSON.stringify({ firstDataPageLayout, secondDataPageLayout })).toBeLessThanOrEqual(2)
+  await resourceNavigation.getByRole('button', { name: '传感器资源管理', exact: true }).click()
+  await expect(page).toHaveURL(/\/resources\/sensors\?tab=crud/)
+  await expect(page.getByRole('heading', { name: '传感器资源管理' })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: '传感器资源管理步骤' })).toBeVisible()
+  await expect(page.locator('.left-body section.panel').filter({ hasText: '传感器资源管理' })).toHaveCount(1)
+  const sensorPagerLayout = await page.locator('.left-body .page').evaluate((pageElement) => {
+    const panel = pageElement.querySelector('section.panel:has(> .card-pager.is-sections)')
+    const pager = panel?.querySelector('.card-pager.is-sections')
+    if (!panel || !pager) return null
+    const panelBox = panel.getBoundingClientRect()
+    const pagerBox = pager.getBoundingClientRect()
+    const pageBox = pageElement.getBoundingClientRect()
+    return { panelBottom: panelBox.bottom, pagerBottom: pagerBox.bottom, pageBottom: pageBox.bottom }
+  })
+  expect(sensorPagerLayout).not.toBeNull()
+  expect(sensorPagerLayout!.pagerBottom).toBeGreaterThanOrEqual(sensorPagerLayout!.panelBottom - 6)
+  expect(sensorPagerLayout!.panelBottom).toBeGreaterThanOrEqual(sensorPagerLayout!.pageBottom - 2)
+  const sensorPager = page.getByRole('navigation', { name: '传感器资源管理步骤' })
+  const readSensorPagerBottom = () => sensorPager.evaluate((element) => {
+    const panel = element.closest('.resource-workspace-panel')
+    const panelBox = panel?.getBoundingClientRect()
+    const pagerBox = element.getBoundingClientRect()
+    return { panelBottom: panelBox?.bottom || 0, pagerBottom: pagerBox.bottom }
+  })
+  const firstResourcePageLayout = await readSensorPagerBottom()
+  await sensorPager.getByRole('button', { name: /下一项/ }).click()
+  await sensorPager.getByRole('button', { name: /下一项/ }).click()
+  await expect(sensorPager.locator('select')).toHaveValue('3')
+  const thirdResourcePageLayout = await readSensorPagerBottom()
+  expect(Math.abs(thirdResourcePageLayout.pagerBottom - firstResourcePageLayout.pagerBottom), JSON.stringify({ firstResourcePageLayout, thirdResourcePageLayout })).toBeLessThanOrEqual(2)
+  expect(Math.abs(thirdResourcePageLayout.panelBottom - firstResourcePageLayout.panelBottom), JSON.stringify({ firstResourcePageLayout, thirdResourcePageLayout })).toBeLessThanOrEqual(2)
+  await resourceNavigation.getByRole('button', { name: '算法模型管理', exact: true }).click()
+  await expect(page).toHaveURL(/\/resources\/algorithms\?tab=models/)
+  await expect(page.getByRole('heading', { name: '算法模型管理与版本' })).toBeVisible()
+  const algorithmPager = page.getByRole('navigation', { name: '算法模型与版本分页' })
+  const readAlgorithmPagerLayout = () => algorithmPager.evaluate((element) => {
+    const panel = element.closest('.section-workspace-panel')
+    const panelBox = panel?.getBoundingClientRect()
+    const pagerBox = element.getBoundingClientRect()
+    return { panelBottom: panelBox?.bottom || 0, pagerBottom: pagerBox.bottom }
+  })
+  const firstAlgorithmPageLayout = await readAlgorithmPagerLayout()
+  await algorithmPager.getByRole('button', { name: /下一项/ }).click()
+  await expect(algorithmPager.locator('select')).toHaveValue('2')
+  const secondAlgorithmPageLayout = await readAlgorithmPagerLayout()
+  expect(Math.abs(secondAlgorithmPageLayout.panelBottom - firstAlgorithmPageLayout.panelBottom), JSON.stringify({ firstAlgorithmPageLayout, secondAlgorithmPageLayout })).toBeLessThanOrEqual(2)
+  expect(Math.abs(secondAlgorithmPageLayout.pagerBottom - firstAlgorithmPageLayout.pagerBottom), JSON.stringify({ firstAlgorithmPageLayout, secondAlgorithmPageLayout })).toBeLessThanOrEqual(2)
 
   await page.getByRole('button', { name: /任务中心/ }).click()
   await expect(page.locator('.rail-subnav').filter({ hasText: '任务创建' }).locator('.rail-subitem--staged')).toHaveCount(0)
@@ -386,6 +499,36 @@ test('四中心二级导航统一无编号并保留既有路由和 Tab', async (
     '场景统计分析',
   ])
   await expect(applicationNavigation.locator('.rail-stage')).toHaveCount(0)
+  await page.goto('/application?tab=stats')
+  await expect(page.getByRole('heading', { name: '业务统计' })).toBeVisible()
+  const statsPager = page.getByRole('navigation', { name: '场景统计内容分页' })
+  const readStatsPagerLayout = () => statsPager.evaluate((element) => {
+    const panel = element.closest('.section-workspace-panel')
+    const panelBox = panel?.getBoundingClientRect()
+    const pagerBox = element.getBoundingClientRect()
+    return { panelBottom: panelBox?.bottom || 0, pagerBottom: pagerBox.bottom }
+  })
+  const firstStatsPageLayout = await readStatsPagerLayout()
+  await statsPager.getByRole('button', { name: /下一项/ }).click()
+  await expect(statsPager.locator('select')).toHaveValue('2')
+  const secondStatsPageLayout = await readStatsPagerLayout()
+  expect(Math.abs(secondStatsPageLayout.panelBottom - firstStatsPageLayout.panelBottom), JSON.stringify({ firstStatsPageLayout, secondStatsPageLayout })).toBeLessThanOrEqual(2)
+  expect(Math.abs(secondStatsPageLayout.pagerBottom - firstStatsPageLayout.pagerBottom), JSON.stringify({ firstStatsPageLayout, secondStatsPageLayout })).toBeLessThanOrEqual(2)
+  await page.goto('/tasks?tab=task-create')
+  await expect(page.getByRole('heading', { name: '创建观测任务' })).toBeVisible()
+  const taskCenterPager = page.getByRole('navigation', { name: '任务中心内容分页' })
+  const readTaskCenterPagerLayout = () => taskCenterPager.evaluate((element) => {
+    const content = element.closest('.section-workspace-page')?.querySelector('.section-workspace-page-content')
+    const contentBox = content?.getBoundingClientRect()
+    const pagerBox = element.getBoundingClientRect()
+    return { contentBottom: contentBox?.bottom || 0, pagerBottom: pagerBox.bottom }
+  })
+  const firstTaskCenterPageLayout = await readTaskCenterPagerLayout()
+  await taskCenterPager.getByRole('button', { name: /下一项/ }).click()
+  await expect(taskCenterPager.locator('select')).toHaveValue('2')
+  const secondTaskCenterPageLayout = await readTaskCenterPagerLayout()
+  expect(Math.abs(secondTaskCenterPageLayout.contentBottom - firstTaskCenterPageLayout.contentBottom), JSON.stringify({ firstTaskCenterPageLayout, secondTaskCenterPageLayout })).toBeLessThanOrEqual(2)
+  expect(Math.abs(secondTaskCenterPageLayout.pagerBottom - firstTaskCenterPageLayout.pagerBottom), JSON.stringify({ firstTaskCenterPageLayout, secondTaskCenterPageLayout })).toBeLessThanOrEqual(2)
 })
 
 test('任务入口将查看、继续、地图和全过程分成独立动作', async ({ page }) => {
@@ -466,4 +609,24 @@ test('维护完整档案从后端完整度定位第一个未完成分区', async
   await page.goto('/resources/sensors?tab=crud&sensorId=1&section=general&mode=edit&focus=incomplete')
   await expect(page).toHaveURL(/section=attributes.*focus=incomplete/)
   await expect(page.getByRole('heading', { name: '传感器观测能力' })).toBeVisible()
+})
+
+test('平台没有传感器关联时直接打开新增传感器表单', async ({ page }) => {
+  await page.route('**/api/v1/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/auth/csrf')) return route.fulfill({ json: { data: { csrfToken: 'test' } } })
+    if (url.pathname.endsWith('/auth/me')) return route.fulfill({ json: { data: { id: 1, username: 'e2e', displayName: 'E2E 用户', isStaff: true } } })
+    if (url.pathname.endsWith('/observations/platform-types')) return route.fulfill({ json: { data: [{ id: 1, code: 'station', name: '地面站' }] } })
+    if (url.pathname.endsWith('/observations/sensor-types')) return route.fulfill({ json: { data: [{ id: 1, code: 'rain-gauge', name: '雨量计' }] } })
+    if (url.pathname.endsWith('/observations/platforms')) return route.fulfill({ json: { data: [{ id: 51, name: '缺档案卫星', identifier: 'MISSING-SENSOR-51', platformTypeId: 1, status: 'active' }] } })
+    if (url.pathname.endsWith('/observations/sensors')) return route.fulfill({ json: { data: [] } })
+    return route.fulfill({ json: { data: [] } })
+  })
+
+  await page.goto('/resources/sensors?tab=crud&resourcePage=5&createSensor=1&platformId=51&sensorName=%E7%BC%BA%E6%A1%A3%E5%8D%AB%E6%98%9F%C2%B7%E4%BC%A0%E6%84%9F%E5%99%A8%E6%A1%A3%E6%A1%88')
+  await expect(page.getByRole('heading', { name: '新增传感器' })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: '传感器资源管理步骤' }).locator('select')).toHaveValue('5')
+  await expect(page.getByLabel('平台')).toHaveValue('51')
+  await expect(page.getByLabel('传感器名称')).toHaveValue('缺档卫星·传感器档案')
+  await expect(page.getByText('已为“缺档案卫星”预填新增传感器表单')).toBeVisible()
 })

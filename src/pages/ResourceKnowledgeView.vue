@@ -71,10 +71,11 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="page knowledge-page">
+  <section class="page knowledge-page section-workspace-page">
     <header class="page-head"><div><p class="eyebrow">标准 · 规则 · 案例</p><h1>知识检索与应用</h1></div></header>
     <p class="hint">知识与场景、指标、传感器和算法关联，为指标推荐、评分解释和方案优化提供依据。</p>
     <p v-if="error" class="error">{{ error }}</p><p v-if="message" class="ok-text">{{ message }}</p>
+    <div class="section-workspace-page-content">
     <div v-if="workspacePage === 1" class="panel form-grid">
       <h3>{{ form.id ? '编辑知识条目' : '新建知识条目' }}</h3>
       <div class="split"><input v-model="form.code" placeholder="知识编码" /><select v-model="form.itemType"><option value="standard">标准规范</option><option value="indicator_rule">指标规则</option><option value="sensor">传感器知识</option><option value="algorithm">算法说明</option><option value="business_rule">业务规则</option><option value="experience">专家经验</option><option value="historical_case">历史任务案例</option></select></div>
@@ -91,6 +92,7 @@ onMounted(load)
       <CardPager v-model:page="page" kind="records" :pages="listPageLabels" :summary="`共 ${filtered.length} 条`" label="知识资源分页" />
       <div class="resource-evidence"><div><span>算法服务</span><strong>{{ services.length }}</strong><small>由业务中心和 Agent 通过统一工具调用</small></div><div><span>O&amp;M 观测记录</span><strong>{{ observations.length }}</strong><small>区分实际观测结果与资源能力</small></div></div>
     </section>
+    </div>
     <CardPager :page="workspacePage" :pages="workspacePages" label="知识库内容分页" @update:page="setWorkspacePage" />
   </section>
 </template>

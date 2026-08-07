@@ -50,14 +50,20 @@ const queryPage = ref(1)
 const queryPageSize = ref(4)
 const queryTotal = ref(0)
 const resourceQueryActive = ref(false)
-const typePage = ref(1)
-const crudPage = ref(1)
+const resourcePage = ref(1)
 const editingPlatformId = ref('')
 const editingSensorId = ref('')
 const queryViewPage = ref(1)
 const vizPage = ref(1)
-const typePages = ['平台类型', '传感器类型']
-const crudPages = computed(() => [editingPlatformId.value ? '编辑平台' : '新增平台', '平台列表', editingSensorId.value ? '编辑传感器' : '新增传感器', '传感器列表', '高级接入'])
+const resourcePages = computed(() => [
+  '平台类型',
+  '传感器类型',
+  editingPlatformId.value ? '编辑平台' : '新增平台',
+  '平台列表',
+  editingSensorId.value ? '编辑传感器' : '新增传感器',
+  '传感器列表',
+  '高级接入',
+])
 const queryViewPages = ['查询条件', '查询结果']
 const vizPages = ['筛选与上图', '资源摘要']
 
@@ -320,6 +326,7 @@ async function load() {
       positionSourceForm.value.platformId = pickId(platforms.value[0])
       applyExistingPositionSource()
     }
+    applyRouteSensorCreate()
   } catch (err) {
     error.value = errMessage(err, '加载失败')
   }
@@ -376,7 +383,7 @@ function editPlatform(item: Record<string, unknown>) {
     owner: String(item.owner || ''),
     status: String(item.status || 'active'),
   }
-  crudPage.value = 1
+  resourcePage.value = 3
   message.value = `正在编辑平台“${item.name}”`
 }
 
@@ -632,7 +639,21 @@ function applyRouteLocationHint() {
   platformForm.value.locationGeoJson = { type: 'Point', coordinates: [lon, lat] }
   message.value = `已根据地图位置预填平台点位（${lon.toFixed(5)}, ${lat.toFixed(5)}）`
 }
+function applyRouteSensorCreate() {
+  if (String(route.query.createSensor || '') !== '1') return
+  const platformId = String(route.query.platformId || '')
+  if (!platformId || !platforms.value.some((platform) => String(platform.id) === platformId)) return
+  const platform = platforms.value.find((item) => String(item.id) === platformId) || {}
+  resourcePage.value = 5
+  editingSensorId.value = ''
+  sensorForm.value.platformId = platformId
+  if (!sensorForm.value.sensorName) {
+    sensorForm.value.sensorName = String(route.query.sensorName || `${platform.name || `平台 #${platformId}`}·传感器档案`)
+  }
+  message.value = `已为“${platform.name || `平台 #${platformId}`}”预填新增传感器表单`
+}
 watch(tab, async (v) => { if (v === 'viz') await loadViz() })
+watch(() => [route.query.createSensor, route.query.platformId, route.query.sensorName], applyRouteSensorCreate)
 
 
 async function locateOnMap(kind: 'sensor', id: string | number | unknown) {
@@ -730,11 +751,11 @@ async function showOnMap() {
       </table>
     </section>
 
-    <section v-if="tab === 'crud'" class="panel">
+    <section v-if="tab === 'crud'" class="panel resource-workspace-panel">
       <h2>传感器资源管理</h2>
       <p class="muted">登记平台与传感器资源，维护类型、单位、位置、状态和覆盖范围。</p>
-      <div>
-        <div v-if="typePage === 1">
+      <div class="resource-workspace-content">
+      <div v-if="resourcePage === 1">
           <h3>平台类型（{{ platformTypes.length }}）</h3>
           <table v-table-pager="{ label: '平台类型分页' }" class="table">
             <thead><tr><th>ID</th><th>编码</th><th>名称</th></tr></thead>
@@ -743,8 +764,8 @@ async function showOnMap() {
               <tr v-for="t in platformTypes" :key="'pt'+t.id"><td>{{ t.id }}</td><td><code>{{ t.code }}</code></td><td>{{ t.name }}</td></tr>
             </tbody>
           </table>
-        </div>
-        <div v-else>
+      </div>
+      <div v-else-if="resourcePage === 2">
           <h3>传感器类型（{{ sensorTypes.length }}）</h3>
           <table v-table-pager="{ label: '传感器类型分页' }" class="table">
             <thead><tr><th>ID</th><th>编码</th><th>名称</th></tr></thead>
@@ -753,14 +774,8 @@ async function showOnMap() {
               <tr v-for="t in sensorTypes" :key="'st'+t.id"><td>{{ t.id }}</td><td><code>{{ t.code }}</code></td><td>{{ t.name }}</td></tr>
             </tbody>
           </table>
-        </div>
       </div>
-      <CardPager v-model:page="typePage" :pages="typePages" label="传感器类型内容分页" />
-    </section>
-
-    <section v-if="tab === 'crud'" class="panel">
-      <h2>平台与传感器增删改查</h2>
-      <template v-if="crudPage === 5">
+      <template v-if="resourcePage === 7">
       <details class="advanced-entry">
         <summary><span><strong>卫星在线接入</strong><small>TLE / SGP4 动态轨道与星载传感器</small></span><em>高级接入</em></summary>
         <div class="advanced-entry-body">
@@ -845,7 +860,7 @@ async function showOnMap() {
         </div>
       </details>
       </template>
-      <template v-if="crudPage === 1">
+      <template v-if="resourcePage === 3">
       <h3>{{ editingPlatformId ? '编辑平台资料' : '新增平台' }}</h3>
       <div class="form-row">
         <label>平台类型
@@ -864,7 +879,7 @@ async function showOnMap() {
         <div class="form-actions"><button class="btn" type="button" :disabled="pending" @click="createPlatform">{{ editingPlatformId ? '保存修改' : '新增平台' }}</button><button v-if="editingPlatformId" class="btn ghost" type="button" @click="cancelPlatformEdit">取消编辑</button></div>
       </div>
       </template>
-      <template v-if="crudPage === 2">
+      <template v-if="resourcePage === 4">
       <h3>平台列表</h3>
       <table v-table-pager="{ label: '平台资源分页' }" class="table">
         <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>标识</th><th>状态</th><th></th></tr></thead>
@@ -883,7 +898,7 @@ async function showOnMap() {
         </tbody>
       </table>
       </template>
-      <template v-if="crudPage === 3">
+      <template v-if="resourcePage === 5">
       <h3>{{ editingSensorId ? '编辑传感器资料' : '新增传感器' }}</h3>
       <div class="form-row">
         <label>平台
@@ -905,7 +920,7 @@ async function showOnMap() {
         <div class="form-actions"><button class="btn" type="button" :disabled="pending" @click="createSensor">{{ editingSensorId ? '保存修改' : '新增传感器' }}</button><button v-if="editingSensorId" class="btn ghost" type="button" @click="cancelSensorEdit">取消编辑</button></div>
       </div>
       </template>
-      <template v-if="crudPage === 4">
+      <template v-if="resourcePage === 6">
       <h3>传感器列表</h3>
       <table v-table-pager="{ label: '传感器分页' }" class="table">
         <thead><tr><th>ID</th><th>名称</th><th>平台</th><th>类型</th><th>精度</th><th></th></tr></thead>
@@ -927,12 +942,14 @@ async function showOnMap() {
         </tbody>
       </table>
       </template>
-      <CardPager v-model:page="crudPage" :pages="crudPages" label="资源维护内容分页" />
+      </div>
+      <CardPager v-model:page="resourcePage" :pages="resourcePages" label="传感器资源管理步骤" />
     </section>
 
-    <section v-if="tab === 'query'" class="panel">
+    <section v-if="tab === 'query'" class="panel section-workspace-panel">
       <h2>传感器综合查询</h2>
       <p class="muted">按类型、名称/编码、所属单位、运行状态组合筛选；优先走服务端过滤，结果可被规划中心候选筛选使用。</p>
+      <div class="section-workspace-content">
       <template v-if="queryViewPage === 1">
       <div class="form-row">
         <label>名称/编码关键字<input v-model="qName" placeholder="keyword" /></label>
@@ -978,12 +995,14 @@ async function showOnMap() {
         <CardPager :page="queryPage" kind="records" :pages="resourceQueryPageLabels" :summary="`共 ${resourceQueryCount} 条`" label="资源查询分页" @update:page="setResourcePage" />
       </div>
       </template>
+      </div>
       <CardPager v-model:page="queryViewPage" :pages="queryViewPages" label="资源查询内容分页" />
     </section>
 
-    <section v-if="tab === 'viz'" class="panel">
+    <section v-if="tab === 'viz'" class="panel section-workspace-panel">
       <h2>资源可视化</h2>
       <p class="muted">先按类型/状态摘要核对资源空间与能力信息，再进入 GIS 工作台做地图叠加。</p>
+      <div class="section-workspace-content">
       <template v-if="vizPage === 1">
       <div class="form-row">
         <label>类型编码<input v-model="vizFilter.typeCode" placeholder="station" /></label>
@@ -1021,6 +1040,7 @@ async function showOnMap() {
       </table>
       <p v-else class="muted">暂无可视化摘要，点击刷新或调整筛选。</p>
       </template>
+      </div>
       <CardPager v-model:page="vizPage" :pages="vizPages" label="资源可视化内容分页" />
     </section>
     </template>

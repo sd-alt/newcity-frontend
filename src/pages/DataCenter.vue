@@ -279,6 +279,7 @@ const importFile = ref<File | null>(null)
 
 const tabs = [
   { key: 'sources', label: '数据资源建模与接入' },
+  { key: 'crud', label: '监测数据建模' },
   { key: 'query', label: '观测数据管理' },
 ]
 
@@ -1177,8 +1178,9 @@ onUnmounted(() => {
         <p class="data-map-status" aria-live="polite"><span aria-hidden="true"></span>{{ shellStatus }}</p>
       </div>
 
-    <section v-if="tab === 'crud'" class="panel">
+    <section v-if="tab === 'crud'" class="panel section-workspace-panel">
       <h2>监测数据建模与增删改查</h2>
+      <div class="section-workspace-content">
       <template v-if="crudPage === 1">
       <h3>数据集</h3>
       <div class="form-row">
@@ -1242,11 +1244,13 @@ onUnmounted(() => {
       </table>
       <pre v-if="detail" class="result-pre">{{ JSON.stringify(detail, null, 2).slice(0, 3000) }}</pre>
       </template>
+      </div>
       <CardPager v-model:page="crudPage" :pages="crudPages" label="监测数据维护内容分页" />
     </section>
 
-    <section v-if="tab === 'sources'" class="panel">
+    <section v-if="tab === 'sources'" class="panel section-workspace-panel">
       <h2>多源协议数据接入工作台</h2>
+      <div class="section-workspace-content">
       <template v-if="sourcePage === 1">
       <p class="muted">
         <strong>多源接入 = 把别人系统的协议数据持续接入本系统</strong>（活通道），不是简单文件导入。
@@ -1263,7 +1267,7 @@ onUnmounted(() => {
       </template>
 
       <template v-if="sourcePage === 2">
-      <h3>2. {{ editingSourceId ? '编辑数据源基础信息' : '数据源基础信息' }}</h3>
+      <h3>{{ editingSourceId ? '编辑数据源基础信息' : '数据源基础信息' }}</h3>
       <div class="form-row source-basic-grid">
         <label>编码<input v-model="sourceForm.code" placeholder="LIVE-HTTP-001" /></label>
         <label>名称<input v-model="sourceForm.name" placeholder="市气象局实时接口" /></label>
@@ -1287,7 +1291,7 @@ onUnmounted(() => {
       </div>
       </template>
       <template v-if="sourcePage === 3">
-      <h3>3. 鉴权与接入参数</h3>
+      <h3>鉴权与接入参数</h3>
       <div class="form-row">
         <label>鉴权
           <select v-model="sourceForm.authMethod">
@@ -1313,7 +1317,7 @@ onUnmounted(() => {
       </template>
 
       <template v-if="sourcePage === 4">
-      <h3>4. 数据源生命周期</h3>
+      <h3>数据源生命周期</h3>
       <table v-table-pager="{ label: '数据源分页' }" class="table">
         <thead>
           <tr>
@@ -1345,7 +1349,7 @@ onUnmounted(() => {
       </template>
 
       <template v-if="sourcePage === 5">
-      <h3>5. 即时拉取</h3>
+      <h3>即时拉取</h3>
       <div class="form-row source-pull-grid">
         <label>数据源
           <select v-model="pullForm.sourceId" @change="loadSourceAudits(pullForm.sourceId); refreshLiveStatus(pullForm.sourceId)">
@@ -1374,7 +1378,7 @@ onUnmounted(() => {
       <p class="muted">单次拉取会写入观测数据，来源追溯 <code>source:数据源编码</code>。</p>
       </template>
       <template v-if="sourcePage === 6">
-      <h3>6. 定时接入</h3>
+      <h3>定时接入</h3>
       <div class="form-row">
         <label>定时间隔秒<input v-model.number="liveIntervalSeconds" type="number" min="5" step="5" /></label>
         <button class="btn" type="button" :disabled="pending" @click="startLivePull">启动定时接入</button>
@@ -1386,7 +1390,7 @@ onUnmounted(() => {
       </p>
       </template>
       <template v-if="sourcePage === 7">
-      <h3>7. 实时接入状态</h3>
+      <h3>实时接入状态</h3>
       <div v-if="liveStatus" class="live-status-card" :class="{ running: String(liveStatus.status || '').toLowerCase() === 'running' || String(liveStatus.status || '').toLowerCase() === 'active' || String(liveStatus.status || '').toLowerCase() === 'pulling' }">
         <div class="live-status-head">
           <span :class="liveStatusClass(liveStatus.status)"></span>
@@ -1410,7 +1414,7 @@ onUnmounted(() => {
       </template>
 
       <template v-if="sourcePage === 8">
-      <h3>8. 接入审计 / 失败提示</h3>
+      <h3>接入审计 / 失败提示</h3>
       <div class="form-row">
         <label>查看数据源
           <select v-model="selectedAuditSourceId" @change="loadSourceAudits()">
@@ -1439,7 +1443,7 @@ onUnmounted(() => {
       </template>
 
       <template v-if="sourcePage === 9">
-      <h3>9. 文件与关联信息</h3>
+      <h3>文件与关联信息</h3>
       <p class="muted">仅用于本地样例文件或离线补录，不替代协议实时接入。</p>
       <div class="form-row source-file-grid">
         <label class="wide">数据文件<input type="file" accept=".csv,.json,.geojson,.txt" @change="onPickFile" /></label>
@@ -1466,7 +1470,7 @@ onUnmounted(() => {
       </div>
       </template>
       <template v-if="sourcePage === 10">
-      <h3>10. 导入设置</h3>
+      <h3>导入设置</h3>
       <div class="form-row">
         <div class="spatial-pick" :class="{ ready: importForm.spatialGeoJson || platformGeometry(importForm.platformId) }">
           <span>{{ importForm.spatialGeoJson ? (isSatellitePlatform(importForm.platformId) ? '影像覆盖范围已设置' : '导入空间位置已设置') : (isSatellitePlatform(importForm.platformId) ? '需从产品元数据或地图提供覆盖面' : '导入后默认采用平台位置') }}</span>
@@ -1485,7 +1489,7 @@ onUnmounted(() => {
       </div>
       </template>
       <template v-if="sourcePage === 11">
-      <h3>11. 文件导入任务</h3>
+      <h3>文件导入任务</h3>
       <p class="muted" v-if="imports.length === 0">暂无导入任务。</p>
       <table v-else v-table-pager="{ label: '文件导入任务分页' }" class="table">
         <thead><tr><th>ID</th><th>文件</th><th>状态</th><th>进度</th><th>成功/失败</th><th>操作</th></tr></thead>
@@ -1507,12 +1511,14 @@ onUnmounted(() => {
         </tbody>
       </table>
       </template>
+      </div>
       <CardPager v-model:page="sourcePage" :pages="sourcePages" previous-label="上一步" next-label="下一步" label="数据接入步骤分页" />
     </section>
 
-    <section v-if="tab === 'query'" class="panel">
+    <section v-if="tab === 'query'" class="panel section-workspace-panel">
       <h2>监测数据综合查询与导出</h2>
       <p class="muted">支持按关键字、类型、质量、数据集、平台组合查询；导出使用同一套筛选条件。</p>
+      <div class="section-workspace-content">
       <template v-if="queryViewPage === 1">
       <div class="form-row data-query-grid">
         <label class="wide">关键字<input v-model="q" placeholder="名称/来源/平台" /></label>
@@ -1574,12 +1580,14 @@ onUnmounted(() => {
       </div>
       <pre v-if="exportPreview" class="result-pre">{{ exportPreview.slice(0, 3000) }}</pre>
       </template>
+      </div>
       <CardPager v-model:page="queryViewPage" :pages="queryViewPages" label="监测数据查询内容分页" />
     </section>
 
-    <section v-if="tab === 'viz'" class="panel">
+    <section v-if="tab === 'viz'" class="panel section-workspace-panel">
       <h2>监测数据可视化</h2>
       <p class="muted">空间分布请打开 GIS 工作台的数据图层；中心内提供类型/质量分布快览，详细统计在综合应用中心。</p>
+      <div class="section-workspace-content">
       <template v-if="vizPage === 1">
       <div class="form-row" style="margin:0.5rem 0">
         <button class="btn" type="button" :disabled="pending" @click="showDataOnMap">数据上图</button>
@@ -1653,6 +1661,7 @@ onUnmounted(() => {
         <RouterLink class="btn ghost" to="/applications?tab=stats">数据统计</RouterLink>
       </div>
       </template>
+      </div>
       <CardPager v-model:page="vizPage" :pages="vizPages" label="监测数据可视化内容分页" />
     </section>
   </section>

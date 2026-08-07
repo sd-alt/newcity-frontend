@@ -100,6 +100,27 @@ const instances = ref<Record<string, unknown>[]>([])
 const scales = ref<Record<string, unknown>[]>([])
 const tasks = ref<Record<string, unknown>[]>([])
 const plans = ref<Record<string, unknown>[]>([])
+const taskListPage = ref(1)
+const planListPage = ref(1)
+const cardRecordPageSize = 4
+const taskListPageCount = computed(() => Math.max(1, Math.ceil(tasks.value.length / cardRecordPageSize)))
+const pagedTaskCards = computed(() => tasks.value.slice(
+  (taskListPage.value - 1) * cardRecordPageSize,
+  taskListPage.value * cardRecordPageSize,
+))
+const taskListPageLabels = computed(() => Array.from(
+  { length: taskListPageCount.value },
+  (_, index) => `任务卡片第 ${index + 1} 页`,
+))
+const planListPageCount = computed(() => Math.max(1, Math.ceil(plans.value.length / cardRecordPageSize)))
+const pagedPlanCards = computed(() => plans.value.slice(
+  (planListPage.value - 1) * cardRecordPageSize,
+  planListPage.value * cardRecordPageSize,
+))
+const planListPageLabels = computed(() => Array.from(
+  { length: planListPageCount.value },
+  (_, index) => `方案卡片第 ${index + 1} 页`,
+))
 const selectedPlanId = ref<string>('')
 type PlanHistoryRow = { id: number | string; version: number; changeType?: string; reason?: string; resourceCount?: number; createdAt?: string }
 function planHistory(value: unknown): PlanHistoryRow[] {
@@ -434,6 +455,30 @@ const evaluationSummary = computed(() => {
     relations: Array.isArray(raw.resourceRelations) ? raw.resourceRelations as ResourceRelationRow[] : [],
   }
 })
+const reverseRecommendationRows = computed(() => reverseSummary.value?.recs || [])
+const reverseRecommendationPage = ref(1)
+const reverseRecommendationPageSize = 4
+const reverseRecommendationPageCount = computed(() => Math.max(1, Math.ceil(reverseRecommendationRows.value.length / reverseRecommendationPageSize)))
+const pagedReverseRecommendations = computed(() => reverseRecommendationRows.value.slice(
+  (reverseRecommendationPage.value - 1) * reverseRecommendationPageSize,
+  reverseRecommendationPage.value * reverseRecommendationPageSize,
+))
+const reverseRecommendationPageLabels = computed(() => Array.from(
+  { length: reverseRecommendationPageCount.value },
+  (_, index) => `反算建议第 ${index + 1} 页`,
+))
+const evaluationReasonRows = computed(() => evaluationSummary.value?.reasons || [])
+const evaluationReasonPage = ref(1)
+const evaluationReasonPageSize = 4
+const evaluationReasonPageCount = computed(() => Math.max(1, Math.ceil(evaluationReasonRows.value.length / evaluationReasonPageSize)))
+const pagedEvaluationReasons = computed(() => evaluationReasonRows.value.slice(
+  (evaluationReasonPage.value - 1) * evaluationReasonPageSize,
+  evaluationReasonPage.value * evaluationReasonPageSize,
+))
+const evaluationReasonPageLabels = computed(() => Array.from(
+  { length: evaluationReasonPageCount.value },
+  (_, index) => `评估说明第 ${index + 1} 页`,
+))
 const relationPage = ref(1)
 const relationPageSize = 3
 const relationRows = computed(() => evaluationSummary.value?.relations || [])
@@ -1932,10 +1977,26 @@ watch(() => route.query.planId, () => { void applyRoutePlanQuery() })
 watch(instanceId, () => { syncFromSelectedInstance() })
 watch(taskId, () => {
   if (tab.value === 'evaluation' && taskId.value != null) void loadEvaluationResult()
+  const index = tasks.value.findIndex((item) => String(item.id ?? '') === String(taskId.value ?? ''))
+  if (index >= 0) taskListPage.value = Math.floor(index / cardRecordPageSize) + 1
+})
+watch(selectedPlanId, () => {
+  const index = plans.value.findIndex((item) => String(item.id ?? '') === String(selectedPlanId.value))
+  if (index >= 0) planListPage.value = Math.floor(index / cardRecordPageSize) + 1
+})
+watch(tasks, () => {
+  taskListPage.value = Math.min(taskListPage.value, taskListPageCount.value)
+})
+watch(plans, () => {
+  planListPage.value = Math.min(planListPage.value, planListPageCount.value)
 })
 watch([candidateRows, excludedRows], () => {
   candidatePage.value = 1
   excludedPage.value = 1
+})
+watch([reverseRecommendationRows, evaluationReasonRows], () => {
+  reverseRecommendationPage.value = Math.min(reverseRecommendationPage.value, reverseRecommendationPageCount.value)
+  evaluationReasonPage.value = Math.min(evaluationReasonPage.value, evaluationReasonPageCount.value)
 })
 
 
@@ -2161,7 +2222,7 @@ function onPlanningMapAction(event: Event) {
 </script>
 
 <template>
-  <section class="page">
+  <section class="page planning-center-page">
     <div class="planning-page-actions">
       <button class="btn ghost" type="button" @click="resetForm">新建任务</button>
     </div>
@@ -2211,7 +2272,7 @@ function onPlanningMapAction(event: Event) {
           <div><h2>任务列表</h2><p class="muted">查看需求不改变当前阶段；只有“继续处理”会按任务状态进入下一步。</p></div>
         </div>
         <div v-if="tasks.length" class="task-entry-list">
-          <article v-for="t in tasks" :key="String(t.id)" class="task-entry-card" :class="{ selected: taskId != null && String(taskId) === String(t.id) }">
+          <article v-for="t in pagedTaskCards" :key="String(t.id)" class="task-entry-card" :class="{ selected: taskId != null && String(taskId) === String(t.id) }">
             <header>
               <div><strong>{{ t.name || '未命名任务' }}</strong><code>{{ t.code || `#${t.id}` }}</code></div>
               <span class="status-badge" :class="taskStatusLabel(t.status).tone">{{ taskStatusLabel(t.status).text }}</span>
@@ -2236,6 +2297,7 @@ function onPlanningMapAction(event: Event) {
           </article>
         </div>
         <div v-else class="empty-inline">暂无观测任务。可先新建任务。</div>
+        <CardPager v-model:page="taskListPage" kind="records" :pages="taskListPageLabels" :summary="`共 ${tasks.length} 项`" label="任务卡片分页" />
       </section>
 
       <section v-if="stepCardVisible">
@@ -2297,9 +2359,9 @@ function onPlanningMapAction(event: Event) {
         </section>
 
         <div v-if="tab === 'flow' || tab === 'candidates' || (tab === 'tasks' && ['create', 'submit'].includes(currentStep))" class="flow-step-content">
-          <section v-if="currentStep === 'create' || currentStep === 'submit'" class="panel">
+          <section v-if="currentStep === 'create' || currentStep === 'submit'" class="panel section-workspace-panel">
             <h2>观测任务草稿与空间配置</h2>
-            <div class="form">
+            <div class="form section-workspace-content">
               <template v-if="flowFormPage === 1">
               <p v-if="taskCode" class="task-code">任务编号 {{ taskCode }}</p>
               <label>任务名称<input v-model="taskName" :disabled="hasTask && !canEditDraft" /></label>
@@ -2404,9 +2466,10 @@ function onPlanningMapAction(event: Event) {
             <div v-if="currentStep === 'reverse' && reverseSummary" class="panel soft" style="margin-top:0.8rem">
               <h3>需求反算结果（关联前）</h3>
               <p class="muted">可行性 {{ reverseSummary.feasibility }} · 可匹配 {{ reverseSummary.matched }} / 评估 {{ reverseSummary.evaluated }} · 建议平台数 {{ reverseSummary.recommendedTotal }}</p>
-              <ul v-if="reverseSummary.recs.length" class="hint-list">
-                <li v-for="(r, i) in reverseSummary.recs" :key="'rr'+i">{{ r }}</li>
+              <ul v-if="reverseRecommendationRows.length" class="hint-list">
+                <li v-for="(r, i) in pagedReverseRecommendations" :key="'rr'+i">{{ r }}</li>
               </ul>
+              <CardPager v-model:page="reverseRecommendationPage" kind="records" :pages="reverseRecommendationPageLabels" :summary="`共 ${reverseRecommendationRows.length} 条`" label="需求反算建议分页" />
               <table v-if="reverseSummary.estimates.length" v-table-pager="{ label: '需求反算结果分页' }" class="table">
                 <thead><tr><th>类型</th><th>可匹配</th><th>建议数</th><th>均分</th><th>Top平台</th></tr></thead>
                 <tbody>
@@ -2465,9 +2528,10 @@ function onPlanningMapAction(event: Event) {
                   </div>
                   <p><span><i class="common"></i>{{ evaluationSummary.indicatorCount > 1 ? '共同覆盖' : '有效覆盖' }} {{ evaluationSummary.commonCoveragePercent }}%</span><span><i class="misaligned"></i>覆盖错位 {{ evaluationSummary.misalignmentPercent }}%</span><span><i class="uncovered"></i>未覆盖 {{ evaluationSummary.uncoveredPercent }}%</span></p>
                 </div>
-                <ul v-if="evaluationSummary.reasons.length" class="hint-list collaboration-reasons">
-                  <li v-for="(reason, index) in evaluationSummary.reasons" :key="'cr' + index">{{ reason }}</li>
+                <ul v-if="evaluationReasonRows.length" class="hint-list collaboration-reasons">
+                  <li v-for="(reason, index) in pagedEvaluationReasons" :key="'cr' + index">{{ reason }}</li>
                 </ul>
+                <CardPager v-model:page="evaluationReasonPage" kind="records" :pages="evaluationReasonPageLabels" :summary="`共 ${evaluationReasonRows.length} 条`" label="评估说明分页" />
                 <div class="relation-summary" v-if="Number(evaluationSummary.relationSummary.resourceCount || 0) > 0">
                   <span>资源 {{ evaluationSummary.relationSummary.resourceCount }}</span>
                   <span>竞争 {{ evaluationSummary.relationSummary.competition || 0 }}</span>
@@ -2624,13 +2688,14 @@ function onPlanningMapAction(event: Event) {
         </div>
       </section>
 
-      <section v-if="tab === 'plans'" class="panel">
+      <section v-if="tab === 'plans'" class="panel section-workspace-panel">
         <h2>方案管理</h2>
         <p class="muted">先选择一份方案，再查看详情或预览地图；状态操作只对当前方案生效。</p>
+        <div class="section-workspace-content">
         <div v-if="planSectionPage === 1" class="plan-section-content">
           <div v-if="plans.length" class="plan-master-list" role="list" aria-label="规划方案列表">
             <article
-              v-for="p in plans"
+              v-for="p in pagedPlanCards"
               :key="String(p.id)"
               class="plan-master-item"
               :class="{ selected: isPlanRowSelected(p), copied: String(lastCopiedPlanId) === String(p.id) }"
@@ -2674,6 +2739,7 @@ function onPlanningMapAction(event: Event) {
           <div v-else class="empty-panel">
             <p class="muted">暂无方案。请先完成观测规划关联流程生成方案。</p>
           </div>
+          <CardPager v-model:page="planListPage" kind="records" :pages="planListPageLabels" :summary="`共 ${plans.length} 项`" label="方案卡片分页" />
           <section v-if="selectedPlan" class="plan-detail-panel" aria-label="当前方案详情">
             <header>
               <div>
@@ -2809,6 +2875,7 @@ function onPlanningMapAction(event: Event) {
           </details>
         </div>
         <div v-else class="empty-state">请先在“方案列表”中选择“查看结果”，结果摘要会在此显示。</div>
+        </div>
         </div>
         <CardPager v-model:page="planSectionPage" :pages="planSectionPages" label="规划方案内容分页" />
       </section>

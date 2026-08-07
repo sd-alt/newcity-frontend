@@ -3197,3 +3197,118 @@ button.card.stat.clickable:hover {
   border-radius: var(--card-radius-inner);
   box-shadow: var(--card-shadow-inner);
 }
+
+/* 多步业务卡片：内容按需展开，步骤导航固定在工作区底部，切换时不再上下跳动。 */
+.app-shell .left-body > .page:has(> .card-pager.is-sections) {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.app-shell .left-body > .page:has(> .card-pager.is-sections) > .card-pager.is-sections {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  flex: 0 0 auto;
+  min-height: 58px;
+  margin-top: auto;
+  padding: 0.7rem 0 0.15rem;
+  border-top: 1px solid #e1e3e6;
+  background: linear-gradient(180deg, rgba(247, 247, 249, 0), #f7f7f9 34%);
+}
+.app-shell .left-body > .page:has(> .card-pager.is-sections) > .card-pager.is-sections::before {
+  content: '当前内容';
+  position: absolute;
+  top: 0.2rem;
+  left: 0;
+  color: #86868b;
+  font-size: 9px;
+  line-height: 1;
+}
+
+/* 数据、资源、算法、需求查询和方案管理的步骤导航位于内层面板。 */
+.app-shell .left-body:has(> .page > :is(.section-workspace-panel, .resource-workspace-panel)),
+.app-shell .left-body:has(> .page .section-workspace-panel),
+.app-shell .left-body:has(> .page > .card-pager.is-sections),
+.app-shell .left-body:has(> .page.section-workspace-page) {
+  display: flex;
+  flex-direction: column;
+}
+.app-shell .left-body:has(> .page > :is(.section-workspace-panel, .resource-workspace-panel)) > .page,
+.app-shell .left-body:has(> .page .section-workspace-panel) > .page,
+.app-shell .left-body:has(> .page > .card-pager.is-sections) > .page,
+.app-shell .left-body > .page.section-workspace-page {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  height: auto;
+  min-height: 0;
+}
+.app-shell .left-body .page :is(.section-workspace-panel, .resource-workspace-panel) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  margin-bottom: 0;
+  overflow: hidden;
+  padding-bottom: 0.3rem;
+}
+.app-shell .left-body .page :is(.section-workspace-panel, .resource-workspace-panel) > :is(.section-workspace-content, .resource-workspace-content) {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 0.35rem;
+}
+.app-shell .left-body .page :is(.section-workspace-panel, .resource-workspace-panel) > .card-pager.is-sections {
+  position: static;
+  z-index: 3;
+  flex: 0 0 auto;
+  min-height: 58px;
+  margin-top: 0.25rem;
+  padding: 0.7rem 0 0.15rem;
+  border-top: 1px solid #e1e3e6;
+  background: linear-gradient(180deg, rgba(247, 247, 249, 0), #f7f7f9 34%);
+}
+.app-shell .left-body .page :is(.section-workspace-panel, .resource-workspace-panel) > .card-pager.is-sections::before {
+  content: '当前内容';
+  position: absolute;
+  top: 0.2rem;
+  left: 0;
+  color: #86868b;
+  font-size: 9px;
+  line-height: 1;
+}
+.app-shell .left-body .flow-step-content {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+}
+.app-shell .left-body .flow-step-content > .section-workspace-panel {
+  flex: 1 1 0;
+  min-height: 0;
+  margin-bottom: 0;
+}
+.app-shell .left-body > .page.section-workspace-page > .section-workspace-page-content {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 0.35rem;
+}
+.app-shell .left-body > .page.section-workspace-page > .card-pager.is-sections {
+  position: static;
+  flex: 0 0 auto;
+  min-height: 58px;
+  margin-top: 0.25rem;
+  padding: 0.7rem 0 0.15rem;
+  border-top: 1px solid #e1e3e6;
+  background: linear-gradient(180deg, rgba(247, 247, 249, 0), #f7f7f9 34%);
+}
+.app-shell .left-body > .page.section-workspace-page > .card-pager.is-sections::before {
+  content: '当前内容';
+  position: absolute;
+  top: 0.2rem;
+  left: 0;
+  color: #86868b;
+  font-size: 9px;
+  line-height: 1;
+}

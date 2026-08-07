@@ -169,6 +169,7 @@ const centers: CenterItem[] = [
       { key: 'sensors', label: '传感器资源管理', to: '/resources/sensors', tab: 'crud' },
       { key: 'capabilities', label: '观测能力管理', to: '/resources/sensors', tab: 'capabilities' },
       { key: 'data-modeling', label: '数据资源建模与接入', to: '/resources/data', tab: 'sources' },
+      { key: 'data-crud', label: '监测数据建模', to: '/resources/data', tab: 'crud' },
       { key: 'observations', label: '观测数据管理', to: '/resources/data', tab: 'query' },
       { key: 'algorithms', label: '算法模型管理', to: '/resources/algorithms', tab: 'models' },
       { key: 'algorithm-services', label: '算法服务管理', to: '/resources/algorithms', tab: 'services' },
@@ -693,7 +694,18 @@ async function openSelectedSensorArchive(section: 'general' | 'attributes', targ
     const data = response.data as unknown
     const items = Array.isArray(data) ? data : []
     if (items.length === 0) {
-      toast.error('该地图平台下没有可维护的传感器档案')
+      const platformName = String((sensor as any).name || (sensor as any).platformName || `平台 #${sensor.id}`)
+      await router.push({
+        path: '/resources/sensors',
+        query: {
+          tab: 'crud',
+          resourcePage: '5',
+          createSensor: '1',
+          platformId: String(sensor.id),
+          sensorName: `${platformName}·传感器档案`,
+        },
+      })
+      toast.info('该平台尚未登记传感器，已打开新增传感器表单')
       return
     }
     if (items.length > 1) {

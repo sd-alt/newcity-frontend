@@ -41,6 +41,12 @@ const planSelectionPanel = ref<HTMLElement | null>(null)
 const ordinaryApprovalPanel = ref<HTMLElement | null>(null)
 const auditPage = ref(1)
 const artifactPage = ref(1)
+const modelAuditPage = ref(1)
+const executionInterventionPage = ref(1)
+const planSelectionPage = ref(1)
+const ordinaryApprovalPage = ref(1)
+const manualExecutionPage = ref(1)
+const executionItemPages = ref<Record<string, number>>({})
 const cardPageSize = 4
 const pendingIdempotencyKey = ref('')
 const pendingRequestSignature = ref('')
@@ -149,9 +155,42 @@ const reversedToolCalls = computed(() => toolCalls.value.slice().reverse())
 const auditPageCount = computed(() => Math.max(1, Math.ceil(reversedToolCalls.value.length / cardPageSize)))
 const pagedToolCalls = computed(() => reversedToolCalls.value.slice((auditPage.value - 1) * cardPageSize, auditPage.value * cardPageSize))
 const auditPageLabels = computed(() => Array.from({ length: auditPageCount.value }, (_, index) => `工具调用第 ${index + 1} 页`))
+const modelAuditPageCount = computed(() => Math.max(1, Math.ceil(modelCalls.value.length / cardPageSize)))
+const pagedModelCalls = computed(() => modelCalls.value.slice((modelAuditPage.value - 1) * cardPageSize, modelAuditPage.value * cardPageSize))
+const modelAuditPageLabels = computed(() => Array.from({ length: modelAuditPageCount.value }, (_, index) => `模型调用第 ${index + 1} 页`))
 const artifactPageCount = computed(() => Math.max(1, Math.ceil(artifacts.value.length / cardPageSize)))
 const pagedArtifacts = computed(() => artifacts.value.slice((artifactPage.value - 1) * cardPageSize, artifactPage.value * cardPageSize))
 const artifactPageLabels = computed(() => Array.from({ length: artifactPageCount.value }, (_, index) => `阶段成果第 ${index + 1} 页`))
+const executionInterventionPageCount = computed(() => Math.max(1, Math.ceil(executionInterventions.value.length / cardPageSize)))
+const pagedExecutionInterventions = computed(() => executionInterventions.value.slice((executionInterventionPage.value - 1) * cardPageSize, executionInterventionPage.value * cardPageSize))
+const executionInterventionPageLabels = computed(() => Array.from({ length: executionInterventionPageCount.value }, (_, index) => `执行异常第 ${index + 1} 页`))
+const planSelectionPageCount = computed(() => Math.max(1, Math.ceil(planSelectionApprovals.value.length / cardPageSize)))
+const pagedPlanSelectionApprovals = computed(() => planSelectionApprovals.value.slice((planSelectionPage.value - 1) * cardPageSize, planSelectionPage.value * cardPageSize))
+const planSelectionPageLabels = computed(() => Array.from({ length: planSelectionPageCount.value }, (_, index) => `方案调整第 ${index + 1} 页`))
+const ordinaryApprovalPageCount = computed(() => Math.max(1, Math.ceil(ordinaryApprovals.value.length / cardPageSize)))
+const pagedOrdinaryApprovals = computed(() => ordinaryApprovals.value.slice((ordinaryApprovalPage.value - 1) * cardPageSize, ordinaryApprovalPage.value * cardPageSize))
+const ordinaryApprovalPageLabels = computed(() => Array.from({ length: ordinaryApprovalPageCount.value }, (_, index) => `人工确认第 ${index + 1} 页`))
+const manualExecutionPageCount = computed(() => Math.max(1, Math.ceil(manualExecutionItems.value.length / cardPageSize)))
+const pagedManualExecutionItems = computed(() => manualExecutionItems.value.slice((manualExecutionPage.value - 1) * cardPageSize, manualExecutionPage.value * cardPageSize))
+const manualExecutionPageLabels = computed(() => Array.from({ length: manualExecutionPageCount.value }, (_, index) => `人工执行项第 ${index + 1} 页`))
+
+function executionItemPageKey(approval: Row) { return String(approval.id || 'execution-intervention') }
+function executionItemRows(approval: Row) { return rows(approval.payload?.executionItems) }
+function executionItemPage(approval: Row) {
+  const key = executionItemPageKey(approval)
+  const count = Math.max(1, Math.ceil(executionItemRows(approval).length / cardPageSize))
+  return Math.min(count, Math.max(1, executionItemPages.value[key] || 1))
+}
+function executionItemPageLabels(approval: Row) {
+  return Array.from({ length: Math.max(1, Math.ceil(executionItemRows(approval).length / cardPageSize)) }, (_, index) => `执行项第 ${index + 1} 页`)
+}
+function pagedExecutionItemRows(approval: Row) {
+  const page = executionItemPage(approval)
+  return executionItemRows(approval).slice((page - 1) * cardPageSize, page * cardPageSize)
+}
+function setExecutionItemPage(approval: Row, page: number) {
+  executionItemPages.value[executionItemPageKey(approval)] = page
+}
 const structured = computed(() => ((run.value as Row | null)?.demand?.structuredRequirement || {}) as Row)
 const terminal = computed(() => ['completed', 'failed', 'cancelled', 'manual_required', 'paused'].includes(run.value?.status || ''))
 const runId = computed(() => run.value?.id || '')
@@ -571,6 +610,15 @@ async function submitPlanSelection(approval: Row) {
   finally { activeActionKey.value = null }
 }
 watch(() => route.query.runId, () => void loadRunFromRoute())
+watch([toolCalls, modelCalls, artifacts, executionInterventions, planSelectionApprovals, ordinaryApprovals, manualExecutionItems], () => {
+  auditPage.value = Math.min(auditPage.value, auditPageCount.value)
+  modelAuditPage.value = Math.min(modelAuditPage.value, modelAuditPageCount.value)
+  artifactPage.value = Math.min(artifactPage.value, artifactPageCount.value)
+  executionInterventionPage.value = Math.min(executionInterventionPage.value, executionInterventionPageCount.value)
+  planSelectionPage.value = Math.min(planSelectionPage.value, planSelectionPageCount.value)
+  ordinaryApprovalPage.value = Math.min(ordinaryApprovalPage.value, ordinaryApprovalPageCount.value)
+  manualExecutionPage.value = Math.min(manualExecutionPage.value, manualExecutionPageCount.value)
+})
 watch(mapDrawGeometry, (geometry) => {
   if (!geometry || geometry.type !== 'polygon') return
   const rings = geometry.geojson.coordinates as number[][][]
@@ -627,11 +675,12 @@ onUnmounted(() => {
       <section v-if="runTab === 'overview' && run.status === 'manual_required' && executionControl.action === 'manual' && manualExecutionItems.length" ref="manualExecutionPanel" class="execution-intervention-stack">
         <article class="execution-intervention-card">
           <span>人工执行中</span><strong>自动监控已暂停</strong><p>任务已转人工处理，完成后请提交人工执行结果。</p>
-          <div v-for="item in manualExecutionItems" :key="String(executionItemId(item) || item.executionItemId || item.id || item.name)" class="execution-item-row">
+          <div v-for="item in pagedManualExecutionItems" :key="String(executionItemId(item) || item.executionItemId || item.id || item.name)" class="execution-item-row">
             <div><strong>{{ item.name || executionItemLabel(item) }}</strong><small>{{ executionItemLabel(item) }} · {{ statusLabel(item.status) }} · 进度 {{ item.progress || 0 }}%</small><p v-if="executionItemError(item)" class="node-error">{{ executionItemError(item) }}</p></div>
             <textarea v-model="interventionNotes['manual:' + (executionItemId(item) || item.id)]" rows="2" placeholder="可填写人工执行说明"></textarea>
             <div class="execution-actions"><button class="btn primary tiny" :disabled="!executionItemId(item) || manualCompleteSubmitting[executionItemId(item) || 0] || actionBusy(`manual-complete:${executionItemId(item) || 0}`) || run.status !== 'manual_required' || item.status !== 'manual_intervention'" @click="completeManualExecution(item)">{{ actionBusy(`manual-complete:${executionItemId(item) || 0}`) ? '正在提交' : '提交人工结果' }}</button></div>
           </div>
+          <CardPager v-model:page="manualExecutionPage" kind="records" :pages="manualExecutionPageLabels" :summary="`共 ${manualExecutionItems.length} 项`" label="人工执行项分页" />
         </article>
       </section>
       <div v-if="runTab === 'overview'" class="run-overview-content"><div class="run-summary"><div><span>当前步骤</span><strong>{{ currentStageName }}</strong></div><div><span>运行状态</span><strong>{{ statusLabel(run.status) }}</strong></div><div><span>完成进度</span><strong>{{ Number(run.progress || 0) }}%</strong></div></div>
@@ -666,18 +715,20 @@ onUnmounted(() => {
 
       <section v-if="runTab === 'overview' && executionInterventions.length" ref="executionInterventionPanel" class="execution-intervention-stack">
         <small v-if="waitingForCheckpoint">正在保存工作流检查点</small>
-        <article v-for="approval in executionInterventions" :key="approval.id" class="execution-intervention-card">
+        <article v-for="approval in pagedExecutionInterventions" :key="approval.id" class="execution-intervention-card">
           <span>执行异常需要人工处置</span><strong>{{ approval.title }}</strong><p>{{ approval.description }}</p>
-          <div v-for="item in rows(approval.payload?.executionItems)" :key="String(executionItemId(item) || item.executionItemId || item.id || item.name)" class="execution-item-row">
+          <div v-for="item in pagedExecutionItemRows(approval)" :key="String(executionItemId(item) || item.executionItemId || item.id || item.name)" class="execution-item-row">
             <div><strong>{{ item.name || executionItemLabel(item) }}</strong><small>{{ executionItemLabel(item) }} · {{ statusLabel(item.status) }} · 进度 {{ item.progress || 0 }}% · 重试 {{ item.retryCount || 0 }} 次</small><p v-if="item.errorMessage" class="node-error">{{ item.errorMessage }}</p><p v-if="executionItemError(item)" class="node-error">{{ executionItemError(item) }}</p></div>
             <textarea v-model="interventionNotes[`${approval.id}:${executionItemId(item) || item.id}`]" rows="2" placeholder="可填写处置说明"></textarea>
             <div class="execution-actions"><button v-for="action in strings(executionItemId(item) ? item.availableActions : [])" :key="action" :disabled="!executionItemId(item) || !approvalCheckpointReady(approval) || Boolean(activeActionKey)" class="btn tiny" :class="action === 'cancel' ? 'danger' : 'primary'" @click="decideExecution(approval, item, action)">{{ actionBusy(`execution:${approval.id}:${executionItemId(item) || 0}:${action}`) ? '正在提交…' : action === 'retry' ? '重试' : action === 'manual' ? '转人工' : action === 'manual_complete' ? '人工已完成' : '取消执行项' }}</button></div>
           </div>
+          <CardPager :page="executionItemPage(approval)" kind="records" :pages="executionItemPageLabels(approval)" :summary="`共 ${executionItemRows(approval).length} 项`" label="执行项分页" @update:page="setExecutionItemPage(approval, $event)" />
         </article>
+        <CardPager v-model:page="executionInterventionPage" kind="records" :pages="executionInterventionPageLabels" :summary="`共 ${executionInterventions.length} 条`" label="执行异常分页" />
       </section>
       <section v-if="runTab === 'overview' && planSelectionApprovals.length" ref="planSelectionPanel" class="plan-selection-stack">
         <small v-if="waitingForCheckpoint">正在保存工作流检查点</small>
-        <article v-for="approval in planSelectionApprovals" :key="approval.id" class="plan-selection-card">
+        <article v-for="approval in pagedPlanSelectionApprovals" :key="approval.id" class="plan-selection-card">
           <span>方案资源需要明确选择</span><strong>{{ approval.title }}</strong><p>{{ approval.description }}</p>
           <div class="plan-selection-grid">
             <label>旧方案资源
@@ -700,8 +751,9 @@ onUnmounted(() => {
           </div>
           <div class="execution-actions"><button class="btn primary tiny" :disabled="!approvalCheckpointReady(approval) || Boolean(activeActionKey)" @click="submitPlanSelection(approval)">{{ actionBusy(`plan-resource-selection:${approval.id}`) ? '正在提交…' : '提交资源替换' }}</button></div>
         </article>
+        <CardPager v-model:page="planSelectionPage" kind="records" :pages="planSelectionPageLabels" :summary="`共 ${planSelectionApprovals.length} 条`" label="方案调整分页" />
       </section>
-      <div v-if="runTab === 'overview' && ordinaryApprovals.length" ref="ordinaryApprovalPanel" class="approval-stack"><article v-for="item in ordinaryApprovals" :key="item.id"><span>待人工确认</span><strong>{{ item.title }}</strong><p>{{ item.description }}</p><PlanEvaluationSummary v-if="item.type === 'plan_confirmation'" :summary="approvalEvaluationSummary(item)" compact /><small v-if="!approvalCheckpointReady(item)">正在保存工作流检查点</small><small v-if="item.type === 'plan_confirmation' && approvalConfirmDisabled(item) && approvalEvaluationSummary(item)?.blockingReasons?.length" class="approval-blocked-reason">确认已禁用：{{ approvalEvaluationSummary(item)?.blockingReasons?.join('；') }}</small><div><button class="btn ghost tiny" :disabled="Boolean(activeActionKey)" @click="openAdjustment(item)">先人工调整</button><button class="btn danger tiny" :disabled="!approvalCheckpointReady(item) || Boolean(activeActionKey)" @click="decide(item, 'rejected')">{{ actionBusy(`approval:${item.id}:rejected`) ? '正在提交…' : '拒绝' }}</button><button class="btn primary tiny" :disabled="approvalConfirmDisabled(item) || Boolean(activeActionKey)" @click="decide(item, 'approved')">{{ actionBusy(`approval:${item.id}:approved`) ? '正在提交…' : '确认并继续' }}</button></div></article></div>
+      <div v-if="runTab === 'overview' && ordinaryApprovals.length" ref="ordinaryApprovalPanel" class="approval-stack"><article v-for="item in pagedOrdinaryApprovals" :key="item.id"><span>待人工确认</span><strong>{{ item.title }}</strong><p>{{ item.description }}</p><PlanEvaluationSummary v-if="item.type === 'plan_confirmation'" :summary="approvalEvaluationSummary(item)" compact /><small v-if="!approvalCheckpointReady(item)">正在保存工作流检查点</small><small v-if="item.type === 'plan_confirmation' && approvalConfirmDisabled(item) && approvalEvaluationSummary(item)?.blockingReasons?.length" class="approval-blocked-reason">确认已禁用：{{ approvalEvaluationSummary(item)?.blockingReasons?.join('；') }}</small><div><button class="btn ghost tiny" :disabled="Boolean(activeActionKey)" @click="openAdjustment(item)">先人工调整</button><button class="btn danger tiny" :disabled="!approvalCheckpointReady(item) || Boolean(activeActionKey)" @click="decide(item, 'rejected')">{{ actionBusy(`approval:${item.id}:rejected`) ? '正在提交…' : '拒绝' }}</button><button class="btn primary tiny" :disabled="approvalConfirmDisabled(item) || Boolean(activeActionKey)" @click="decide(item, 'approved')">{{ actionBusy(`approval:${item.id}:approved`) ? '正在提交…' : '确认并继续' }}</button></div></article><CardPager v-model:page="ordinaryApprovalPage" kind="records" :pages="ordinaryApprovalPageLabels" :summary="`共 ${ordinaryApprovals.length} 条`" label="人工确认分页" /></div>
       <div v-if="runTab === 'overview' && executionControl.message && ['manual_required', 'cancelled'].includes(run.status)" class="panel followup"><strong>执行状态</strong><p>{{ executionControl.message }}</p></div>
       <div v-if="runTab === 'overview' && run.status === 'waiting_input' && !executionInterventions.length && !planSelectionApprovals.length" ref="followupPanel" class="panel followup"><strong>补充需求信息</strong><small v-if="waitingForCheckpoint">正在保存工作流检查点</small><textarea ref="followupInput" v-model="followup" :disabled="waitingForCheckpoint || Boolean(activeActionKey)" rows="3" placeholder="补充缺失的区域、时间、目标或约束"></textarea><button class="btn primary" :disabled="waitingForCheckpoint || Boolean(activeActionKey)" @click="sendFollowup">{{ actionBusy('requirement_clarification') ? '正在提交…' : '提交并重新分析' }}</button></div>
 
@@ -734,7 +786,7 @@ onUnmounted(() => {
         <h3 class="block-title">工具调用与数据来源</h3>
         <div v-if="toolCalls.length" class="audit-list"><article v-for="item in pagedToolCalls" :key="item.id"><span>{{ item.status }}</span><strong>{{ item.toolName }}</strong><small>{{ item.source || '业务 Service' }} · {{ item.durationMs }}ms · 对象 {{ JSON.stringify(item.objectIds || {}) }}</small></article></div><div v-else class="empty-state">尚无工具调用记录。后台 Worker 开始处理后会实时显示。</div>
         <CardPager v-model:page="auditPage" kind="records" :pages="auditPageLabels" :summary="`共 ${toolCalls.length} 条`" label="工具调用分页" />
-        <details class="model-audit"><summary>模型调用审计（{{ modelCalls.length }} 次）</summary><div class="audit-list"><article v-for="item in modelCalls" :key="item.id"><span>{{ item.phase }} · {{ item.validatorStatus || item.status }}</span><strong>{{ item.agentCode }} · {{ item.model || '-' }}</strong><small>{{ item.promptVersion }} · schema {{ item.schemaVersion || '-' }} · {{ item.totalTokens || 0 }} tokens · {{ item.latencyMs || 0 }}ms<span v-if="item.fallbackUsed"> · 已回退</span></small></article></div></details>
+        <details class="model-audit"><summary>模型调用审计（{{ modelCalls.length }} 次）</summary><div class="audit-list"><article v-for="item in pagedModelCalls" :key="item.id"><span>{{ item.phase }} · {{ item.validatorStatus || item.status }}</span><strong>{{ item.agentCode }} · {{ item.model || '-' }}</strong><small>{{ item.promptVersion }} · schema {{ item.schemaVersion || '-' }} · {{ item.totalTokens || 0 }} tokens · {{ item.latencyMs || 0 }}ms<span v-if="item.fallbackUsed"> · 已回退</span></small></article></div><CardPager v-model:page="modelAuditPage" kind="records" :pages="modelAuditPageLabels" :summary="`共 ${modelCalls.length} 条`" label="模型调用审计分页" /></details>
       </template>
       <p v-else-if="runTab !== 'results'" class="technical-details-hidden">技术记录已收纳在“技术记录”页。</p>
 

@@ -34,6 +34,8 @@ const pollTimer = ref<number | null>(null)
 const autoRefresh = ref(true)
 const modelPage = ref(1)
 const resultPage = ref(1)
+const logPage = ref(1)
+const logPageSize = 4
 const modelPages = ['创建模型', '模型列表', '注册版本', '版本列表']
 const resultPages = ['结果列表', '业务关联']
 
@@ -103,7 +105,20 @@ function canArchiveResult(task: Record<string, unknown>) {
 }
 
 const selectedLogs = computed(() => parseLogs(selectedTask.value))
+const logPageCount = computed(() => Math.max(1, Math.ceil(selectedLogs.value.length / logPageSize)))
+const pagedSelectedLogs = computed(() => selectedLogs.value.slice(
+  (logPage.value - 1) * logPageSize,
+  logPage.value * logPageSize,
+))
+const logPageLabels = computed(() => Array.from(
+  { length: logPageCount.value },
+  (_, index) => `处理日志第 ${index + 1} 页`,
+))
 const selectedProgress = computed(() => Number(selectedTask.value?.progress ?? 0))
+
+watch(selectedLogs, () => {
+  logPage.value = Math.min(logPage.value, logPageCount.value)
+})
 
 
 
@@ -199,7 +214,7 @@ const serviceForm = ref({
 })
 
 const tabs = [
-  { key: 'models', label: '算法增删改查' },
+  { key: 'models', label: '算法模型管理' },
   { key: 'services', label: '算法服务管理' },
   { key: 'tasks', label: '处理任务创建' },
   { key: 'run', label: '调度与执行' },
@@ -1055,8 +1070,9 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
       >{{ t.label }}</button>
     </div>
 
-    <section v-if="tab === 'models'" class="panel">
-      <h2>算法增删改查 + 版本管理</h2>
+    <section v-if="tab === 'models'" class="panel section-workspace-panel">
+      <h2>算法模型管理与版本</h2>
+      <div class="section-workspace-content">
       <template v-if="modelPage === 1">
       <h3>创建算法模型</h3>
       <div class="form-row">
@@ -1144,6 +1160,7 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
         </tbody>
       </table>
       </template>
+      </div>
       <CardPager v-model:page="modelPage" :pages="modelPages" label="算法模型与版本分页" />
     </section>
 
@@ -1274,9 +1291,10 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
         <p class="muted">进度 {{ selectedProgress }}%</p>
         <h4>处理日志</h4>
         <ul v-if="selectedLogs.length" class="log-list">
-          <li v-for="(line, i) in selectedLogs" :key="'lg'+i"><code>{{ line }}</code></li>
+          <li v-for="(line, i) in pagedSelectedLogs" :key="'lg'+i"><code>{{ line }}</code></li>
         </ul>
         <p v-else class="muted">暂无结构化日志；可查看原始输出。</p>
+        <CardPager v-model:page="logPage" kind="records" :pages="logPageLabels" :summary="`共 ${selectedLogs.length} 条`" label="处理日志分页" />
         <details>
           <summary>原始输出 / 资源占用字段</summary>
           <pre class="result-pre">{{ JSON.stringify(withoutWktFields({ logs: selectedTask.logs, output: selectedTask.outputData || selectedTask.output, resourceUsage: selectedTask.resourceUsage || selectedTask.metrics }), null, 2) }}</pre>
@@ -1284,9 +1302,10 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
       </div>
     </section>
 
-    <section v-if="tab === 'results'" class="panel">
+    <section v-if="tab === 'results'" class="panel section-workspace-panel">
       <h2>处理结果管理</h2>
       <p class="muted">文档要求：查看、校验、下载、发布、归档，并与监测数据/观测任务/指标实例建立关联。执行路径：成功 → 校验 → 发布 →（可选）归档。</p>
+      <div class="section-workspace-content">
       <template v-if="resultPage === 1">
       <table v-table-pager="{ label: '处理结果分页' }" class="table">
         <thead><tr><th>ID</th><th>编码</th><th>状态</th><th>结果管理</th><th>输出摘要</th><th>操作</th></tr></thead>
@@ -1325,6 +1344,7 @@ async function locateLinkedOnMap(task: Record<string, unknown> | null | undefine
         <pre class="result-pre">{{ JSON.stringify(withoutWktFields(selectedTask), null, 2) }}</pre>
       </details>
       </template>
+      </div>
       <CardPager v-model:page="resultPage" :pages="resultPages" label="处理结果内容分页" />
     </section>
   </section>

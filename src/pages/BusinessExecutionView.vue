@@ -117,7 +117,7 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="page execution-page">
+  <section class="page execution-page section-workspace-page">
     <header class="page-head"><div><p class="eyebrow">业务中心</p><h1>执行监控、过程追踪与成果查看</h1></div></header>
     <BusinessStageProgress
       current-stage="execution_trace"
@@ -130,6 +130,7 @@ onMounted(load)
       :completed-steps="completedExecutionSteps"
     />
     <p v-if="error" class="error">{{ error }}</p><p v-if="message" class="ok-text">{{ message }}</p>
+    <div class="section-workspace-page-content">
     <section v-if="selectedTask" class="task-context-card" aria-label="当前业务任务上下文">
       <div><small>任务名称</small><strong>{{ selectedTask.name }}</strong></div>
       <div><small>任务状态</small><strong>{{ selectedTask.status || '-' }}</strong></div>
@@ -158,6 +159,7 @@ onMounted(load)
       <div v-else class="empty-state">任务尚未形成成果。完成执行或由成果分析 Agent 汇集后会显示在这里。</div>
       <CardPager v-model:page="resultPage" kind="records" :pages="resultPageLabels" :summary="`共 ${results.length} 项`" label="任务成果分页" />
     </section>
+    </div>
     <CardPager v-model:page="viewPage" :pages="viewPages" label="执行与成果内容分页" />
   </section>
 </template>

@@ -56,7 +56,7 @@ function selectPage(event: Event) {
       </div>
     </template>
     <template v-else>
-      <button type="button" class="section-pager-nav" :disabled="currentPage <= 1" @click="go(currentPage - 1)">
+      <button type="button" class="section-pager-nav section-pager-prev" :disabled="currentPage <= 1" @click="go(currentPage - 1)">
         <span aria-hidden="true">‹</span><span>{{ previousLabel }}</span>
       </button>
       <label class="section-pager-current">
@@ -65,7 +65,7 @@ function selectPage(event: Event) {
           <option v-for="(title, index) in pages" :key="`${index}-${title}`" :value="index + 1">{{ title }}</option>
         </select>
       </label>
-      <button type="button" class="section-pager-nav" :disabled="currentPage >= pageCount" @click="go(currentPage + 1)">
+      <button type="button" class="section-pager-nav section-pager-next" :disabled="currentPage >= pageCount" @click="go(currentPage + 1)">
         <span>{{ nextLabel }}</span><span aria-hidden="true">›</span>
       </button>
     </template>
@@ -80,9 +80,9 @@ function selectPage(event: Event) {
 .record-pager-nav { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid #d2d2d7; border-radius: 8px; background: #fff; color: #3a3a3c; font: 600 16px/1 inherit; cursor: pointer; }
 .record-pager-position { display: inline-flex; align-items: center; gap: 4px; color: #68686d; font-size: 10px; white-space: nowrap; }
 .record-pager-position select { width: 46px; height: 30px; padding: 0 18px 0 8px; border: 1px solid #d2d2d7; border-radius: 8px; background: #fff; color: #3a3a3c; font-size: 10px; }
-.card-pager.is-sections { display: grid; grid-template-columns: 64px minmax(0, 1fr) 64px; align-items: end; gap: 6px; }
-.section-pager-nav { display: inline-flex; align-items: center; justify-content: center; gap: 3px; min-height: 34px; padding: .3rem .4rem; border: 1px solid #d2d2d7; border-radius: 8px; background: #fff; color: #3a3a3c; font: 500 10px/1.2 inherit; cursor: pointer; white-space: nowrap; }
-.section-pager-current { display: grid; gap: 2px; min-width: 0; }
+.card-pager.is-sections { position: sticky; bottom: 0; z-index: 2; display: grid; grid-template-columns: 72px minmax(0, 1fr) 72px; align-items: end; gap: 6px; min-width: 0; padding-bottom: .2rem; background: linear-gradient(180deg, rgba(255, 255, 255, 0), #fff 34%); }
+.section-pager-nav { display: inline-flex; width: 100%; min-width: 0; align-items: center; justify-content: center; gap: 3px; min-height: 34px; padding: .3rem .4rem; border: 1px solid #d2d2d7; border-radius: 8px; background: #fff; color: #3a3a3c; font: 500 10px/1.2 inherit; cursor: pointer; white-space: nowrap; }
+.section-pager-current { display: grid; gap: 2px; min-width: 0; width: 100%; }
 .section-pager-current small { color: #86868b; font-size: 9px; line-height: 1; text-align: center; }
 .section-pager-current select { width: 100%; min-width: 0; height: 34px; padding: 0 24px 0 9px; border: 1px solid #d2d2d7; border-radius: 8px; background: #fff; color: #3a3a3c; font-size: 10px; font-weight: 600; text-overflow: ellipsis; }
 .card-pager :is(.record-pager-nav, .section-pager-nav):hover:not(:disabled) { border-color: #b7d7f7; background: #f0f7ff; color: #0071e3; }
@@ -90,4 +90,8 @@ function selectPage(event: Event) {
 .card-pager :is(button):focus-visible { outline: 3px solid rgba(0, 113, 227, .18); outline-offset: 1px; }
 .card-pager select:focus-visible { outline: 3px solid rgba(0, 113, 227, .18); outline-offset: 1px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 420px) {
+  .card-pager.is-sections { grid-template-columns: 72px minmax(0, 1fr) 72px; gap: 4px; }
+  .section-pager-nav { padding-inline: .25rem; font-size: 9px; }
+}
 </style>

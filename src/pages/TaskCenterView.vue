@@ -465,7 +465,7 @@ onMounted(() => { syncTab(); loadAll() })
 </script>
 
 <template>
-  <section class="page task-center">
+  <section class="page task-center section-workspace-page">
     <header class="page-head compact-head">
       <div><p class="eyebrow">需要监测什么</p><h1>任务中心</h1></div>
       <span class="source-chip">统一感知要素编码</span>
@@ -477,6 +477,7 @@ onMounted(() => { syncTab(); loadAll() })
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="message" class="ok-text">{{ message }}</p>
 
+    <div class="section-workspace-page-content">
     <template v-if="tab === 'task-create'">
       <div v-if="sectionPage === 1" class="panel form-stack">
         <h3>{{ editingObservationTaskId ? '编辑观测任务' : '创建观测任务' }}</h3>
@@ -598,6 +599,7 @@ onMounted(() => { syncTab(); loadAll() })
         <div v-else class="empty-state">保存版本后，这里会显示本次可核验快照。</div>
       </section>
     </template>
+    </div>
     <CardPager v-model:page="sectionPage" :pages="sectionPages" label="任务中心内容分页" />
   </section>
 </template>

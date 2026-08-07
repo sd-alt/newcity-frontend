@@ -601,8 +601,9 @@ async function filterTasksByStatus(status: unknown) {
       <p v-if="error" class="error">{{ error }}</p>
     <p v-if="message" class="ok-text">{{ message }}</p>
 
-    <section v-if="tab === 'stats'" class="panel">
+    <section v-if="tab === 'stats'" class="panel section-workspace-panel">
 
+      <div class="section-workspace-content">
         <div class="map-link-bar compact-map-filter">
           <label>地图显示
             <select :value="activeMapFilter" :disabled="shellLoading" @change="changeMapFilter">
@@ -812,6 +813,7 @@ async function filterTasksByStatus(status: unknown) {
         </tbody>
       </table>
       </template>
+      </div>
       <CardPager v-model:page="statsPage" :pages="statsPages" label="场景统计内容分页" />
     </section>
 
